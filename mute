@@ -1,0 +1,609 @@
+# This script creates a starter project skeleton for ISweep M1 and zips it for the user to download.
+# It includes:
+# - listener/ (Python real-time word detector using Vosk + WebSocket server)
+# - extension/ (Chrome MV3 content-script that connects to localhost WS and mutes/unmutes YouTube video)
+# - shared/ (policy schema placeholder)
+# - README with step-by-step instructions
+#
+# NOTE: This environment has no internet; the Python listener is written to auto-download the Vosk model
+# on the user's machine when they run it, or guide them to do so manually if download fails.
+
+import os, json, textwrap, zipfile, pathlib
+
+root = "/mnt/data/isweep_m1_starter"
+listener_dir = os.path.join(root, "listener")
+extension_dir = os.path.join(root, "extension")
+shared_dir = os.path.join(root, "shared")
+
+os.makedirs(listener_dir, exist_ok=True)
+os.makedirs(extension_dir, exist_ok=True)
+os.makedirs(shared_dir, exist_ok=True)
+
+# -------------------- shared/policy schema --------------------
+policy_schema = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "ISweep Policy",
+    "type": "object",
+    "properties": {
+        "words": {
+            "type": "array",
+            "description": "List of target words/phrases to mute.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string"},
+                    "padding_pre_ms": {"type": "integer", "minimum": 0},
+                    "padding_post_ms": {"type": "integer", "minimum": 0},
+                    "enabled": {"type": "boolean"}
+                },
+                "required": ["pattern"]
+            }
+        },
+        "mute_duration_fallback_ms": {
+            "type": "integer",
+            "description": "If we detect a word but don't have reliable timestamps yet, use this duration to stay muted.",
+            "default": 1200,
+            "minimum": 200,
+            "maximum": 5000
+        },
+        "cooldown_ms": {
+            "type": "integer",
+            "description": "Minimum time between successive mute triggers to avoid flapping.",
+            "default": 1000
+        }
+    },
+    "required": ["words"]
+}
+with open(os.path.join(shared_dir, "policy.schema.json"), "w", encoding="utf-8") as f:
+    json.dump(policy_schema, f, indent=2)
+
+# -------------------- listener/config.json --------------------
+listener_config = {
+    "ws_port": 8750,
+    "sample_rate": 16000,
+    "block_ms": 30,
+    "mute_duration_fallback_ms": 1200,
+    "cooldown_ms": 1000,
+    "auto_download_vosk_model": True,
+    "vosk_model_url": "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip",
+    "vosk_model_dir": "models/vosk-model-small-en-us-0.15",
+    "policy": {
+        "words": [
+            # Use family-friendly defaults; users can add stronger words later.
+            {"pattern": "darn", "padding_pre_ms": 120, "padding_post_ms": 220, "enabled": True},
+            {"pattern": "heck", "padding_pre_ms": 120, "padding_post_ms": 220, "enabled": True},
+            # Examples (placeholders) users may enable/rename later:
+            {"pattern": "f word", "padding_pre_ms": 150, "padding_post_ms": 300, "enabled": False},
+            {"pattern": "s word", "padding_pre_ms": 150, "padding_post_ms": 300, "enabled": False},
+        ]
+    }
+}
+with open(os.path.join(listener_dir, "config.json"), "w", encoding="utf-8") as f:
+    json.dump(listener_config, f, indent=2)
+
+# -------------------- listener/requirements.txt --------------------
+requirements = """
+# Core audio + ASR + WebSocket
+sounddevice==0.4.6
+numpy>=1.24
+vosk==0.3.45
+websockets==12.0
+
+# For auto-download of model zip
+tqdm>=4.66
+"""
+with open(os.path.join(listener_dir, "requirements.txt"), "w", encoding="utf-8") as f:
+    f.write(requirements.strip() + "\n")
+
+# -------------------- listener/main.py --------------------
+main_py = r"""
+import asyncio
+import json
+import os
+import queue
+import re
+import sys
+import threading
+import time
+import zipfile
+from dataclasses import dataclass
+from pathlib import Path
+from typing import List, Dict, Any
+
+import numpy as np
+
+# Audio
+import sounddevice as sd
+
+# ASR
+from vosk import Model, KaldiRecognizer, SetLogLevel
+
+# Utils
+from urllib.request import urlopen
+from urllib.error import URLError, HTTPError
+from tqdm import tqdm
+
+# WebSocket
+import websockets
+
+# ---------------- Configuration ----------------
+
+CONFIG_PATH = Path(__file__).parent / "config.json"
+with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+    CONFIG = json.load(f)
+
+WS_PORT = int(CONFIG.get("ws_port", 8750))
+SAMPLE_RATE = int(CONFIG.get("sample_rate", 16000))
+BLOCK_MS = int(CONFIG.get("block_ms", 30))
+BLOCK_SIZE = int(SAMPLE_RATE * BLOCK_MS / 1000)
+MUTE_FALLBACK_MS = int(CONFIG.get("mute_duration_fallback_ms", 1200))
+COOLDOWN_MS = int(CONFIG.get("cooldown_ms", 1000))
+
+MODEL_URL = CONFIG.get("vosk_model_url")
+MODEL_DIR = Path(__file__).parent / CONFIG.get("vosk_model_dir", "models/vosk-model-small-en-us-0.15")
+AUTO_DL = bool(CONFIG.get("auto_download_vosk_model", True))
+
+POLICY = CONFIG.get("policy", {})
+TARGETS = [
+    t for t in POLICY.get("words", [])
+    if t.get("enabled", True) and isinstance(t.get("pattern"), str) and t["pattern"].strip()
+]
+
+# Precompile target regexes (whole word, case-insensitive)
+def compile_targets(targets: List[Dict[str, Any]]):
+    compiled = []
+    for t in targets:
+        pat = t["pattern"].strip()
+        # convert common placeholders "f word" -> "f[ -]?word"
+        pat = pat.replace(" ", r"[ -]?")
+        rx = re.compile(rf"\b{pat}\b", re.IGNORECASE)
+        compiled.append((rx, t))
+    return compiled
+
+COMPILED = compile_targets(TARGETS)
+
+# ---------------- Model Setup ----------------
+
+def human_size(n):
+    for unit in ["B","KB","MB","GB"]:
+        if n < 1024:
+            return f"{n:.1f}{unit}"
+        n /= 1024
+    return f"{n:.1f}TB"
+
+def download_vosk_model(url: str, dest_dir: Path):
+    zip_path = dest_dir.with_suffix(".zip")
+    dest_dir.parent.mkdir(parents=True, exist_ok=True)
+    print(f"[ISweep] Downloading Vosk model to {zip_path} ...")
+    try:
+        with urlopen(url) as r:
+            total = int(r.headers.get("Content-Length", "0"))
+            with open(zip_path, "wb") as f:
+                with tqdm(total=total, unit="B", unit_scale=True) as pbar:
+                    while True:
+                        chunk = r.read(8192)
+                        if not chunk: break
+                        f.write(chunk)
+                        pbar.update(len(chunk))
+    except (URLError, HTTPError) as e:
+        print(f"[ISweep] Could not download model automatically: {e}")
+        return False
+
+    print("[ISweep] Extracting model (this may take a minute)...")
+    with zipfile.ZipFile(zip_path, 'r') as z:
+        z.extractall(dest_dir.parent)
+    # Zip often contains a folder with same name; ensure expected path exists
+    if not dest_dir.exists():
+        # try to find the first extracted folder
+        for p in dest_dir.parent.iterdir():
+            if p.is_dir() and "vosk-model-small-en-us" in p.name:
+                p.rename(dest_dir)
+                break
+    print(f"[ISweep] Model ready at: {dest_dir}")
+    try:
+        os.remove(zip_path)
+    except Exception:
+        pass
+    return dest_dir.exists()
+
+def ensure_model():
+    if MODEL_DIR.exists():
+        return True
+    if not AUTO_DL:
+        print(f"[ISweep] Missing model at {MODEL_DIR}. Enable auto download in config.json or download manually from:\n{MODEL_URL}")
+        return False
+    return download_vosk_model(MODEL_URL, MODEL_DIR)
+
+# ---------------- Audio Capture ----------------
+
+def pick_wasapi_loopback_device():
+    """Pick a WASAPI loopback input for the default speaker on Windows."""
+    try:
+        hostapis = sd.query_hostapis()
+        wasapi_index = next((i for i, h in enumerate(hostapis) if "Wasapi" in h["name"] or "WASAPI" in h["name"]), None)
+        if wasapi_index is None:
+            print("[ISweep] WASAPI host API not found. On Windows 10/11 this should be available.")
+            return None
+
+        devices = sd.query_devices()
+        candidates = []
+        for i, d in enumerate(devices):
+            # We want input-capable loopback devices on WASAPI
+            if d["hostapi"] == wasapi_index and d["max_input_channels"] > 0:
+                # Heuristic: loopback devices often contain 'loopback' in their name
+                if "loopback" in d["name"].lower() or d["name"].lower().startswith("speakers"):
+                    candidates.append((i, d))
+        if candidates:
+            # Prefer those containing 'loopback'
+            exact = [c for c in candidates if "loopback" in c[1]["name"].lower()]
+            choice = exact[0] if exact else candidates[0]
+            print(f"[ISweep] Using device: {choice[1]['name']} (index {choice[0]})")
+            return choice[0]
+    except Exception as e:
+        print(f"[ISweep] Device scan failed: {e}")
+    return None
+
+# ---------------- WebSocket Server ----------------
+
+class BroadcastHub:
+    def __init__(self):
+        self.clients = set()
+        self.queue = asyncio.Queue()
+
+    async def register(self, ws):
+        self.clients.add(ws)
+        print(f"[ISweep] Client connected. Total clients: {len(self.clients)}")
+
+    async def unregister(self, ws):
+        self.clients.discard(ws)
+        print(f"[ISweep] Client disconnected. Total clients: {len(self.clients)}")
+
+    async def run_server(self):
+        async def handler(ws):
+            await self.register(ws)
+            try:
+                async for _ in ws:
+                    # We don't expect messages from the client; ignore.
+                    pass
+            finally:
+                await self.unregister(ws)
+
+        async with websockets.serve(handler, "127.0.0.1", WS_PORT):
+            print(f"[ISweep] WebSocket server listening on ws://127.0.0.1:{WS_PORT}")
+            while True:
+                msg = await self.queue.get()
+                if self.clients:
+                    to_remove = set()
+                    for c in list(self.clients):
+                        try:
+                            await c.send(msg)
+                        except Exception:
+                            to_remove.add(c)
+                    for c in to_remove:
+                        await self.unregister(c)
+
+    def broadcast(self, payload: Dict[str, Any]):
+        # Enqueue JSON string
+        try:
+            s = json.dumps(payload)
+        except Exception as e:
+            print(f"[ISweep] Could not serialize payload: {e}")
+            return
+        # Thread-safe: put_nowait from any thread
+        asyncio.get_event_loop().call_soon_threadsafe(self.queue.put_nowait, s)
+
+# ---------------- Detection Thread ----------------
+
+@dataclass
+class DetectionState:
+    last_mute_ts_ms: float = 0.0
+
+def normalize_text(s: str) -> str:
+    s = s.lower().strip()
+    s = re.sub(r"[^a-z0-9 '-]", " ", s)
+    s = re.sub(r"\s+", " ", s)
+    return s
+
+def find_target_in_text(text: str):
+    # Return first matching target's config
+    for rx, cfg in COMPILED:
+        if rx.search(text):
+            return cfg
+    return None
+
+def detection_worker(hub: BroadcastHub, state: DetectionState, stop_event: threading.Event):
+    if not ensure_model():
+        print("[ISweep] Cannot continue without Vosk model. Exiting.")
+        return
+
+    SetLogLevel(-1)  # Quiet Vosk logs
+    model = Model(str(MODEL_DIR))
+    rec = KaldiRecognizer(model, SAMPLE_RATE)
+    rec.SetWords(True)
+
+    # Audio stream (WASAPI loopback) for system audio
+    device_index = pick_wasapi_loopback_device()
+    extra = None
+    if hasattr(sd, "WasapiSettings"):
+        try:
+            extra = sd.WasapiSettings(loopback=True)
+        except Exception:
+            extra = None
+
+    print("[ISweep] Starting audio capture. Play a YouTube video now.")
+    last_trigger = 0.0
+
+    def audio_callback(indata, frames, time_info, status):
+        nonlocal last_trigger
+        if status:
+            # Dropouts or overflows might appear here
+            pass
+
+        # Convert to mono 16-bit little endian expected by Vosk
+        if indata.ndim > 1:
+            mono = np.mean(indata, axis=1)
+        else:
+            mono = indata
+
+        # Vosk wants 16k signed 16-bit
+        pcm = (mono * 32767).astype(np.int16).tobytes()
+
+        if rec.AcceptWaveform(pcm):
+            res = json.loads(rec.Result())
+            text = res.get("text", "")
+            if text:
+                ntext = normalize_text(text)
+                target = find_target_in_text(ntext)
+                if target:
+                    now_ms = time.time() * 1000.0
+                    if now_ms - last_trigger > COOLDOWN_MS:
+                        last_trigger = now_ms
+                        duration = max(MUTE_FALLBACK_MS, target.get("padding_post_ms", 0) + target.get("padding_pre_ms", 0) + 400)
+                        payload = {
+                            "type": "mute",
+                            "label": "profanity",
+                            "word": target["pattern"],
+                            "durationMs": duration
+                        }
+                        hub.broadcast(payload)
+        else:
+            # Partial hypothesis for faster reaction
+            pres = json.loads(rec.PartialResult())
+            ptext = pres.get("partial", "")
+            if ptext:
+                ntext = normalize_text(ptext)
+                target = find_target_in_text(ntext)
+                if target:
+                    now_ms = time.time() * 1000.0
+                    if now_ms - last_trigger > COOLDOWN_MS:
+                        last_trigger = now_ms
+                        duration = max(MUTE_FALLBACK_MS, target.get("padding_post_ms", 0) + target.get("padding_pre_ms", 0) + 400)
+                        payload = {
+                            "type": "mute",
+                            "label": "profanity",
+                            "word": target["pattern"],
+                            "durationMs": duration
+                        }
+                        hub.broadcast(payload)
+
+    try:
+        with sd.InputStream(
+            samplerate=SAMPLE_RATE,
+            channels=1,
+            dtype='float32',
+            blocksize=BLOCK_SIZE,
+            device=device_index,
+            extra_settings=extra
+        ) as stream:
+            while not stop_event.is_set():
+                sd.sleep(50)
+    except Exception as e:
+        print(f"[ISweep] Audio stream error: {e}")
+        print("\nTroubleshooting tips:\n"
+              "  • Ensure your default speaker is active and producing sound.\n"
+              "  • On Windows, WASAPI loopback is required. Update your audio drivers.\n"
+              "  • Try selecting a different device index in code if detection fails.\n")
+
+# ---------------- Main Entry ----------------
+
+async def main_async():
+    hub = BroadcastHub()
+    stop_event = threading.Event()
+
+    # Start detection thread
+    t = threading.Thread(target=detection_worker, args=(hub, DetectionState(), stop_event), daemon=True)
+    t.start()
+
+    try:
+        await hub.run_server()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        stop_event.set()
+        t.join(timeout=2.0)
+
+def main():
+    try:
+        asyncio.run(main_async())
+    except KeyboardInterrupt:
+        print("\n[ISweep] Shutting down.")
+
+if __name__ == "__main__":
+    main()
+"""
+with open(os.path.join(listener_dir, "main.py"), "w", encoding="utf-8") as f:
+    f.write(main_py.strip() + "\n")
+
+# -------------------- extension/manifest.json --------------------
+manifest_json = {
+    "manifest_version": 3,
+    "name": "ISweep M1 Demo (YouTube Mute)",
+    "version": "0.1.0",
+    "description": "Mutes YouTube video audio when the local listener detects target words.",
+    "permissions": ["storage", "scripting", "activeTab", "tabs"],
+    "host_permissions": ["*://*.youtube.com/*"],
+    "content_scripts": [{
+        "matches": ["*://*.youtube.com/*"],
+        "js": ["content.js"],
+        "run_at": "document_idle"
+    }],
+    "icons": {
+        "16": "icons/icon16.png",
+        "48": "icons/icon48.png",
+        "128": "icons/icon128.png"
+    },
+    "action": {
+        "default_title": "ISweep M1 Demo"
+    }
+}
+with open(os.path.join(extension_dir, "manifest.json"), "w", encoding="utf-8") as f:
+    json.dump(manifest_json, f, indent=2)
+
+# -------------------- extension/content.js --------------------
+content_js = r"""
+(() => {
+  const WS_URL = "ws://127.0.0.1:8750";
+
+  let ws = null;
+  let reconnectTimer = null;
+  let unmuteTimer = null;
+  let lastMuteAt = 0;
+
+  // Overlay UI
+  const overlay = document.createElement("div");
+  overlay.id = "isweep-overlay";
+  overlay.style.position = "fixed";
+  overlay.style.top = "12px";
+  overlay.style.right = "12px";
+  overlay.style.zIndex = "999999";
+  overlay.style.padding = "8px 12px";
+  overlay.style.borderRadius = "12px";
+  overlay.style.fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif";
+  overlay.style.fontSize = "12px";
+  overlay.style.background = "rgba(0,0,0,0.6)";
+  overlay.style.color = "#fff";
+  overlay.style.backdropFilter = "blur(4px)";
+  overlay.style.pointerEvents = "none";
+  overlay.textContent = "ISweep: connecting…";
+  document.documentElement.appendChild(overlay);
+
+  function setOverlay(text) {
+    overlay.textContent = text;
+  }
+
+  function connect() {
+    try {
+      ws = new WebSocket(WS_URL);
+    } catch (e) {
+      scheduleReconnect();
+      return;
+    }
+
+    ws.onopen = () => {
+      setOverlay("ISweep: listening ✓");
+    };
+
+    ws.onclose = () => {
+      setOverlay("ISweep: disconnected (retrying…)");
+      scheduleReconnect();
+    };
+
+    ws.onerror = () => {
+      setOverlay("ISweep: error (retrying…)");
+      try { ws.close(); } catch {}
+    };
+
+    ws.onmessage = (evt) => {
+      try {
+        const msg = JSON.parse(evt.data);
+        if (msg.type === "mute") {
+          muteFor(msg.durationMs || 1200, msg.word || "target");
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+  }
+
+  function scheduleReconnect() {
+    if (reconnectTimer) return;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      connect();
+    }, 1500);
+  }
+
+  function firstVideoEl() {
+    const v = document.querySelector("video");
+    return v || null;
+  }
+
+  function muteFor(durationMs, label) {
+    const v = firstVideoEl();
+    if (!v) return;
+
+    // Remember user's previous volume/mute state
+    if (!v.dataset._isweep_origmute) {
+      v.dataset._isweep_origmute = String(v.muted);
+      v.dataset._isweep_origvol = String(v.volume);
+    }
+
+    // Mute immediately
+    v.muted = true;
+    lastMuteAt = Date.now();
+    setOverlay(`ISweep: muted (${label})`);
+
+    // Clear prior timer and schedule unmute
+    if (unmuteTimer) clearTimeout(unmuteTimer);
+    unmuteTimer = setTimeout(() => {
+      // Only unmute if no new mute happened since we scheduled
+      if (Date.now() - lastMuteAt >= durationMs - 10) {
+        const origMute = v.dataset._isweep_origmute === "true";
+        const origVol = parseFloat(v.dataset._isweep_origvol || "1");
+        v.muted = origMute;
+        v.volume = isNaN(origVol) ? 1 : origVol;
+        setOverlay("ISweep: listening ✓");
+      }
+    }, Math.max(200, durationMs));
+  }
+
+  connect();
+})();
+"""
+with open(os.path.join(extension_dir, "content.js"), "w", encoding="utf-8") as f:
+    f.write(content_js.strip() + "\n")
+
+# -------------------- extension/icons (simple placeholders) --------------------
+icons_dir = os.path.join(extension_dir, "icons")
+os.makedirs(icons_dir, exist_ok=True)
+from PIL import Image, ImageDraw, ImageFont
+
+def make_icon(size):
+    img = Image.new("RGBA", (size, size), (30, 30, 30, 255))
+    d = ImageDraw.Draw(img)
+    # Simple 'IS' letters
+    try:
+        # Basic default font
+        d.text((size*0.18, size*0.18), "IS", fill=(255,255,255,255))
+    except Exception:
+        pass
+    return img
+
+for s in (16, 48, 128):
+    icon = make_icon(s)
+    icon.save(os.path.join(icons_dir, f"icon{s}.png"))
+
+# -------------------- top-level README --------------------
+readme = """
+# ISweep M1 Starter (YouTube Profanity Auto‑Mute)
+
+This starter gives you a working **Milestone 1**: it mutes a YouTube video automatically when your computer **hears** targeted words, and then **unmutes** after a moment — without changing the media file.
+
+> ✅ Works on **Windows 10/11**.  
+> 🧰 No cloud required.  
+> 🎯 Low-latency, simple setup.
+
+---
+
+## What’s inside
+
