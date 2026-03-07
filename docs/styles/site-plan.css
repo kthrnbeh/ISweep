@@ -177,7 +177,7 @@ body{
 }
 
 .dark .logo-block .site-title {
-  color: #e2f3ff; /* Brighter brand mark in dark header */
+  color: #f0f6ff; /* Brighter brand mark in dark header */
 }
 
 .dark .logo-block .tagline {
@@ -194,7 +194,7 @@ body{
 .main-nav a.active,.main-nav-left a.active{color:var(--brand-2)}
 
 .dark .main-nav a {
-  color: var(--text);
+  color: #e7efff; /* Raise default nav contrast in dark mode */
 }
 
 .dark .main-nav a:hover {
@@ -631,7 +631,7 @@ body.dark .isweep-dev-panel .primary {
 }
 
 .dark .sub-row {
-  background: rgba(15,23,42,0.4);
+  background: rgba(255,255,255,0.06); /* Slight lift for label contrast in dark mode */
 }
 
 .sub-row-left {
@@ -643,11 +643,13 @@ body.dark .isweep-dev-panel .primary {
 }
 
 .dark [data-category-name] {
-  color: #e2f3ff; /* Increase heading contrast inside category card */
+  color: #f0f6ff; /* Increase heading contrast inside category card */
+  text-shadow: 0 0 6px rgba(0,0,0,0.35);
 }
 
 .dark .sub-row-left {
   color: #f8fafc; /* Brighten row labels like Profanity/Slurs in dark mode */
+  text-shadow: 0 0 4px rgba(0,0,0,0.3);
 }
 
 .sub-row-left input {
