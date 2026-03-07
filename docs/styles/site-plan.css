@@ -212,7 +212,7 @@ body{
 
 .dark .main-nav a.active,
 .dark .main-nav-left a.active {
-  color: #e7efff; /* Match Home/Plans brightness for Filters in dark mode */
+  color: #f8fbff; /* Lift active Filters contrast to match other nav items in dark mode */
 }
 .theme-toggle{
   margin-left:6px; border:1px solid var(--border); background:#fff;
@@ -417,6 +417,14 @@ body.dark .step-card{background:#0f172a; border-color:#1f2937}
   color: var(--brand-2);
 }
 
+body.dark .filters-hero h1 {
+  color: #f8fbff; /* Brighten Filters hero title in dark mode */
+}
+
+body.dark .filters-hero .eyebrow {
+  color: #cbd5e1; /* Lighten eyebrow label in dark mode */
+}
+
 .filters-hero .subtitle {
   margin: 0;
   color: var(--muted);
@@ -459,7 +467,7 @@ body.dark .filter-tiles .filter-tile {
   box-shadow: 0 18px 30px rgba(16,37,43,0.26);
 }
 
-    background: linear-gradient(135deg, #30C3D9, #22A9C2);
+.filter-tile .tile-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -510,6 +518,8 @@ body.dark .filter-tiles .filter-tile {
   grid-template-columns: 1.2fr 0.8fr;
   gap: 18px;
   align-items: start;
+
+}
 
 .isweep-dev-panel textarea,
 .isweep-dev-panel #devLog {
@@ -652,7 +662,7 @@ body.dark .isweep-dev-panel .primary {
 }
 
 .dark .sub-row-left {
-  color: #d6e2f5; /* Slightly lighter slate so highlighted labels read cleanly */
+  color: #0f172a; /* Keep label text dark against the light row surface even in dark mode */
 }
 
 .sub-row-left input {
@@ -708,6 +718,7 @@ body.dark .isweep-dev-panel .primary {
 .mask-hint {
   margin: 0 0 6px;
   font-size: 0.9rem;
+  }
 
 .custom-words {
   display: grid;
