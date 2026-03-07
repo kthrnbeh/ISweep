@@ -1,3 +1,90 @@
+.isweep-dev-panel {
+  margin-top: 40px; /* Give breathing room below main filters */
+}
+
+.isweep-dev-panel .dev-toggle {
+  padding: 8px 14px;
+  border-radius: 20px;
+  background: var(--brand-2);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+}
+
+.isweep-dev-panel textarea,
+.isweep-dev-panel #devLog {
+  background: #f8fafc; /* Light-mode card-like surface for inputs/logs */
+  color: var(--text);  /* Match base text color for readability */
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.isweep-dev-panel textarea {
+  padding: 12px;
+  width: 100%;
+}
+
+.isweep-dev-panel textarea::placeholder {
+  color: var(--muted); /* Muted placeholder to avoid low contrast */
+}
+
+.isweep-dev-panel .eyebrow,
+.isweep-dev-panel label,
+.isweep-dev-panel strong,
+.isweep-dev-panel span {
+  color: var(--text); /* Ensure labels/results stay readable */
+}
+
+.isweep-dev-panel .dev-results {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.isweep-dev-panel .dev-results-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.isweep-dev-panel .dev-log {
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #0b1220;
+  border: 1px solid rgba(255,255,255,0.08);
+  font-family: ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 13px;
+}
+
+body.dark .isweep-dev-panel textarea,
+body.dark .isweep-dev-panel #devLog {
+  background: #0f172a; /* Dark surface aligned with cards */
+  color: #e2e8f0;      /* Light text for contrast */
+  border-color: #1f2937;
+}
+
+body.dark .isweep-dev-panel textarea::placeholder {
+  color: #94a3b8; /* Muted placeholder in dark mode */
+}
+
+body.dark .isweep-dev-panel .eyebrow,
+body.dark .isweep-dev-panel label,
+body.dark .isweep-dev-panel strong,
+body.dark .isweep-dev-panel span {
+  color: #e2e8f0; /* Keep labels/results legible in dark */
+}
+
+body.dark .isweep-dev-panel .card,
+body.dark .isweep-dev-panel .dev-results-card {
+  background: #111827; /* Slightly lighter than page bg for separation */
+  border-color: #1f2937;
+}
+
+body.dark .isweep-dev-panel .primary {
+  background: var(--brand-2); /* Reuse accent to maintain contrast */
+  color: #0b1220;
+}
 /* ================================
    ISweep — Polished marketing UI
    ================================ */
