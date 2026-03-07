@@ -418,7 +418,7 @@ body.dark .step-card{background:#0f172a; border-color:#1f2937}
 }
 
 body.dark .filters-hero h1 {
-  color: #ffffff; /* Make Filters hero title fully white in dark mode */
+  color: #ffffff !important; /* Ensure Filters hero title is fully white in dark mode */
 }
 
 body.dark .filters-hero .eyebrow {
