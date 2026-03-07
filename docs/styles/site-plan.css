@@ -450,6 +450,10 @@ body.dark .step-card{background:#0f172a; border-color:#1f2937}
   transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.1s ease, filter 0.15s ease;
 }
 
+body.dark .filter-tiles .filter-tile {
+  filter: brightness(0.9) saturate(0.96); /* Slightly deepen blue gradients in dark mode for better contrast */
+}
+
 .filter-tile:hover {
   transform: translateY(-2px);
   box-shadow: 0 18px 30px rgba(16,37,43,0.26);
@@ -648,7 +652,7 @@ body.dark .isweep-dev-panel .primary {
 }
 
 .dark .sub-row-left {
-  color: #dbe7f3; /* Darker but clear labels in dark mode (e.g., Profanity/Slurs) */
+  color: #c9d6eb; /* Uniform readable slate tone for row labels in dark mode */
 }
 
 .sub-row-left input {
