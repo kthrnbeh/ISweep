@@ -212,7 +212,7 @@ body{
 
 .dark .main-nav a.active,
 .dark .main-nav-left a.active {
-  color: var(--brand-2); /* Keep active state aligned with brand accent */
+  color: #e7efff; /* Match Home/Plans brightness for Filters in dark mode */
 }
 .theme-toggle{
   margin-left:6px; border:1px solid var(--border); background:#fff;
@@ -451,7 +451,7 @@ body.dark .step-card{background:#0f172a; border-color:#1f2937}
 }
 
 body.dark .filter-tiles .filter-tile {
-  filter: brightness(0.83) saturate(0.96); /* Darken gradient slightly in dark mode for easier reading */
+  filter: brightness(0.8) saturate(0.95); /* Darken gradient slightly in dark mode for easier reading */
 }
 
 .filter-tile:hover {
@@ -652,7 +652,7 @@ body.dark .isweep-dev-panel .primary {
 }
 
 .dark .sub-row-left {
-  color: #c5d3e8; /* Consistent slate tone for row labels in dark mode */
+  color: #d6e2f5; /* Slightly lighter slate so highlighted labels read cleanly */
 }
 
 .sub-row-left input {
