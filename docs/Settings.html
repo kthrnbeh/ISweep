@@ -10,9 +10,7 @@
   <script src="api.js" defer></script>
   <script src="main.js" defer></script>
 
-  <!-- Loads your global JavaScript file from root (same folder as this HTML).
-       "defer" means: download script now but only run it after HTML has been parsed.
-       NOTE: You ALSO load scripts/main.js below. That may be accidental duplication. -->
+  <!-- Loads the shared JavaScript files from this folder; "defer" waits to run until HTML is parsed. -->
 
   <meta charset="UTF-8" />
   <!-- Uses UTF-8 character encoding so special characters display correctly. -->
@@ -369,7 +367,7 @@
       <div style="padding: 0.75rem; border: 1px solid #e5e7eb; border-radius: 10px; background: #f8fafc;"> <!-- This box presents current selection details. -->
         <strong>Selected: Profanity</strong> <!-- This placeholder shows the focused category. -->
         <p style="margin: 0.35rem 0 0 0; color: #475569;">Action: Mute audio only</p> <!-- This line summarizes the configured action. -->
-        <p style="margin: 0.15rem 0 0 0; color: #475569;">Duration: 4s</p> <!-- This line shows the action duration. -->
+        <p style="margin: 0.15rem 0 0 0; color: #475569;">Typical mute: ~0.3s–2.5s (adapts to caption timing)</p> <!-- Reflects buffered, timing-based mute length. -->
       </div>
       <div style="padding: 0.75rem; border: 1px solid #e5e7eb; border-radius: 10px; background: #f8fafc;"> <!-- This secondary box can hold tips or helper text. -->
         <strong>Tip</strong> <!-- This heading labels the tip. -->
