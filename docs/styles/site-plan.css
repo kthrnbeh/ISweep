@@ -451,7 +451,7 @@ body.dark .step-card{background:#0f172a; border-color:#1f2937}
 }
 
 body.dark .filter-tiles .filter-tile {
-  filter: brightness(0.9) saturate(0.96); /* Slightly deepen blue gradients in dark mode for better contrast */
+  filter: brightness(0.86) saturate(0.96); /* Darken gradient slightly in dark mode for easier reading */
 }
 
 .filter-tile:hover {
@@ -652,7 +652,7 @@ body.dark .isweep-dev-panel .primary {
 }
 
 .dark .sub-row-left {
-  color: #c9d6eb; /* Uniform readable slate tone for row labels in dark mode */
+  color: #d0d8ea; /* Consistent slate tone for row labels in dark mode */
 }
 
 .sub-row-left input {
