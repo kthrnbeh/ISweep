@@ -426,8 +426,9 @@ body.dark .filters-hero .eyebrow {
 }
 
 body.dark .filters-page .filters-hero h1 {
-  color: #f8fbff !important; /* Force the Filters hero title to render bright white in dark mode */
-  opacity: 1; /* Prevent any inherited dimming from making the title look gray */
+  color: #ffffff !important; /* Force the main Filters hero heading to bright white in dark mode */
+  opacity: 1; /* Prevent inherited dimming from making the heading look gray */
+  text-shadow: none; /* Keep the heading crisp instead of hazy */
 }
 
 body.dark .filters-page .filters-hero .eyebrow {
