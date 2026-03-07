@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Help | ISweep</title>
+  <link rel="stylesheet" href="styles/site-plan.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;500&display=swap" rel="stylesheet">
+  <script src="main.js" defer></script>
+
+</head>
+
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+
+      <div class="nav-left">
+        <a class="logo-box" href="index.html">
+          <img src="images/ISweep.png" alt="ISweep logo" />
+          <div class="logo-block">
+            <h1 class="site-title">ISweep</h1>
+            <span class="tagline">Keeping it all clean.</span>
+          </div>
+        </a>
+
+        <nav class="main-nav-left">
+          <a href="index.html">Home</a>
+          <a href="Filter.html">Filters</a>
+          <a href="Plans.html">Plans</a>
+        </nav>
+      </div>
+
+      <div class="nav-right">
+        <a href="Help.html" class="help-link active">Help</a>
+
+        <div class="kb-wrapper">
+          <button id="kbToggle" class="kb-avatar">KB</button>
+
+          <div id="kbDropdown" class="kb-dropdown hidden">
+            <div class="dropdown-section">
+              <button id="themeToggleDropdown">Toggle Theme</button>
+            </div>
+            <div class="dropdown-section">
+              <a href="Account.html">Account</a>
+              <a href="Settings.html">Settings</a>
+              <button id="signOutBtn" data-logout>Sign Out</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </header>
+
+  <main class="account-page container">
+    <h1>Help &amp; Support</h1>
+    <p class="subtitle">
+      Need a hand? Find quick answers, contact support, or chat with us about ISweep.
+    </p>
+
+    <!-- CONTACT OPTIONS -->
+    <section class="card">
+      <h2>Contact Us</h2>
+
+      <div class="help-contact-grid">
+        <!-- Call & Email -->
+        <div>
+          <strong>Reach us directly</strong>
+          <p>If you need help with setup, billing, or filters, we’re happy to help.</p>
+
+          <p><strong>Phone:</strong> (800) 555-ISWP</p>
+          <p><strong>Email:</strong> support@isweep.app</p>
+          <p><strong>Hours:</strong> Monday–Saturday, 9:00 AM – 7:00 PM (MT)</p>
+        </div>
+
+        <!-- Quick links -->
+        <div>
+          <strong>Quick links</strong>
+          <ul class="help-list">
+            <li><a href="#faq">View common questions</a></li>
+            <li><a href="#contact-form">Send us a support message</a></li>
+            <li><a href="#troubleshooting">Troubleshooting tips</a></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ SECTION -->
+    <section class="card" id="faq">
+      <h2>Frequently Asked Questions</h2>
+
+      <!-- details/summary = built-in collapsible boxes -->
+      <details class="faq-item" open>
+        <summary>What does ISweep actually do?</summary>
+        <p>
+          ISweep listens to your audio and observes your video in real time.
+          When it detects content you’ve chosen to filter, it can mute,
+          skip, or fast-forward automatically—without changing the original media.
+        </p>
+      </details>
+
+      <details class="faq-item">
+        <summary>Which devices does ISweep work with?</summary>
+        <p>
+          You can link ISweep to supported Smart TVs, streaming sticks,
+          and companion devices. Check the Devices section in your Account
+          page to see which devices you’ve connected.
+        </p>
+      </details>
+
+      <details class="faq-item">
+        <summary>Will ISweep work with all streaming services?</summary>
+        <p>
+          ISweep is designed to work at the system level, so it can observe
+          and filter content from most streaming apps, DVDs, and connected
+          devices, as long as your device is supported.
+        </p>
+      </details>
+
+      <details class="faq-item">
+        <summary>Can I customize what is filtered for each child?</summary>
+        <p>
+          Yes. You can create different profiles with their own filter
+          settings under <strong>Settings &gt; Parental Controls</strong>, so each
+          child gets an experience that matches your family rules.
+        </p>
+      </details>
+    </section>
+
+    <!-- TROUBLESHOOTING TIPS -->
+    <section class="card" id="troubleshooting">
+      <h2>Troubleshooting</h2>
+      <ul class="help-list">
+        <li><strong>No sound?</strong> Check that your TV and streaming device audio
+          are not both muted and that ISweep is not set to “Mute Only” for all events.</li>
+        <li><strong>Filters feel too strict?</strong> Lower the sensitivity slider or
+          switch some categories to “Log only” in Settings.</li>
+        <li><strong>ISweep not responding?</strong> Make sure your device is online and
+          that ISweep is still linked under Devices.</li>
+      </ul>
+    </section>
+
+    <!-- CONTACT FORM -->
+    <section class="card" id="contact-form">
+      <h2>Send us a message</h2>
+
+      <form class="profile-form">
+        <div class="item-row">
+          <div class="help-form-fields">
+            <!-- Name -->
+            <label>
+              <strong>Your Name</strong>
+              <input
+                class="profile-input"
+                type="text"
+                name="name"
+                placeholder="Enter your name"
+                required
+              />
+            </label>
+
+            <!-- Email -->
+            <label>
+              <strong>Email</strong>
+              <input
+                class="profile-input"
+                type="email"
+                name="email"
+                placeholder="you@example.com"
+                required
+              />
+            </label>
+
+            <!-- Topic -->
+            <label>
+              <strong>What do you need help with?</strong>
+              <select name="topic" required>
+                <option value="">Choose a topic</option>
+                <option value="setup">Setup / installation</option>
+                <option value="billing">Billing / plans</option>
+                <option value="filters">Filters / settings</option>
+                <option value="technical">Technical issue / bug</option>
+                <option value="other">Something else</option>
+              </select>
+            </label>
+
+            <!-- Message -->
+            <label>
+              <strong>Message</strong>
+              <textarea
+                name="message"
+                rows="4"
+                placeholder="Tell us what’s going on…"
+                required
+              ></textarea>
+            </label>
+          </div>
+
+          <button type="submit">Send</button>
+        </div>
+      </form>
+    </section>
+
+      <!-- Removed the Try ISweep Filter demo card to keep Help focused on support content and avoid unused interactive UI. -->
+
+    <!-- Demo video redirect note -->
+    <section class="card"> <!-- This card keeps the layout consistent while telling users where to watch the single official demo. -->
+      <h2>Demo Video</h2> <!-- This heading preserves the section label so help content stays scannable. -->
+      <p>To watch the demo, head back to the <a href="index.html#demo">Home</a></p> <!-- This sentence links users to the hero demo on Home so no extra videos appear on Help. -->
+    </section>
+
+    <!-- Removed the broom overlay on Help to keep the interface clean and avoid references to non-existent filtering UI. -->
+
+  </main>
+
+  <!-- Auth modal hosts sign-in/create-account flows so the Account link can live inside the dropdown. -->
+  <div id="authModal" class="auth-modal" style="display:none;"> <!-- This outer wrapper provides the modal overlay container. -->
+    <div class="auth-backdrop" data-close-auth style="position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 2000;"> <!-- This backdrop darkens the page and listens for outside clicks to close. -->
+      <div class="auth-dialog" role="dialog" aria-modal="true" style="background: #ffffff; border-radius: 12px; padding: 18px; width: min(480px, 90vw); box-shadow: 0 18px 40px rgba(0,0,0,0.22); position: relative;"> <!-- This dialog holds all auth panels in a compact card. -->
+        <button type="button" class="auth-close" data-close-auth style="position: absolute; top: 10px; right: 10px; border: none; background: transparent; font-size: 1.1rem; cursor: pointer;">×</button> <!-- This close button lets users exit the modal quickly. -->
+
+        <div data-auth-panel="signin" style="display: none;"> <!-- This panel shows the sign-in form. -->
+          <h2 style="margin-top: 0;">Sign In</h2> <!-- This heading labels the sign-in mode. -->
+          <form id="signInForm" style="display: grid; gap: 0.75rem;">
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Email</span>
+              <input type="email" name="email" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Password</span>
+              <input type="password" name="password" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <button type="submit" style="padding: 0.75rem; border-radius: 10px; border: none; background: #2563eb; color: #fff; font-weight: 700;">Continue</button>
+            <button type="button" data-switch-auth="create" style="padding: 0.65rem; border-radius: 10px; border: 1px solid #e5e7eb; background: #fff;">Need an account? Create one</button>
+          </form>
+        </div>
+
+        <div data-auth-panel="create" style="display: none;"> <!-- This panel shows the create-account form. -->
+          <h2 style="margin-top: 0;">Create Account</h2> <!-- This heading labels the registration mode. -->
+          <form id="createAccountForm" style="display: grid; gap: 0.75rem;">
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Full Name</span>
+              <input type="text" name="name" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Email</span>
+              <input type="email" name="email" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Password</span>
+              <input type="password" name="password" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Confirm Password</span>
+              <input type="password" name="confirm" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <button type="submit" style="padding: 0.75rem; border-radius: 10px; border: none; background: #2563eb; color: #fff; font-weight: 700;">Create Account</button>
+            <button type="button" data-switch-auth="signin" style="padding: 0.65rem; border-radius: 10px; border: 1px solid #e5e7eb; background: #fff;">Already have an account? Sign in</button>
+          </form>
+        </div>
+
+        <div data-auth-panel="account" style="display: none;"> <!-- This panel shows a simple account summary when signed in. -->
+          <h2 style="margin-top: 0;">Account</h2> <!-- This heading labels the account view. -->
+          <p id="accountSummary" style="margin: 0 0 0.75rem 0;">Signed in user details appear here.</p> <!-- This paragraph will be populated with the user’s name/email from localStorage. -->
+          <button type="button" data-logout style="padding: 0.75rem; border-radius: 10px; border: none; background: #ef4444; color: #fff; font-weight: 700;">Log Out</button> <!-- This button signs the user out from within the modal. -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <p>&copy; 2025 ISweep Inc. All rights reserved.</p>
+  </footer>
+
+  <!-- Floating Chatbox -->
+  <button class="chat-toggle" id="chatToggle">
+    Chat
+  </button>
+
+  <div class="chat-widget" id="chatWidget">
+    <div class="chat-header">
+      <span>ISweep Support</span>
+      <button class="chat-close" id="chatClose">&times;</button>
+    </div>
+    <div class="chat-body">
+      <p class="chat-message bot">
+        Hi! This is a demo chat. Type your question and imagine this going to support.
+      </p>
+      <div class="chat-log" id="chatLog"></div>
+    </div>
+    <form class="chat-input-row" id="chatForm">
+      <input
+        type="text"
+        id="chatInput"
+        placeholder="Type a message..."
+        required
+      />
+      <button type="submit">Send</button>
+    </form>
+  </div>
+
+</body>
+</html>

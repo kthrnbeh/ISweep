@@ -1,0 +1,56 @@
+{
+  "language": {
+    "profanity": {
+      "items": [
+        { "id": "profanity-1", "token": "aGVjaw==" },
+        { "id": "profanity-2", "token": "ZGFybg==" },
+        { "id": "profanity-3", "token": "c2hvb3Q=" },
+        { "id": "profanity-4", "token": "Y3J1ZA==" },
+        { "id": "profanity-5", "token": "YnV0dA==" },
+        { "id": "profanity-6", "token": "YnVt" },
+        { "id": "profanity-7", "token": "cG9vcA==" },
+        { "id": "profanity-8", "token": "ZGFybml0" },
+        { "id": "profanity-9", "token": "Z29zaA==" },
+        { "id": "profanity-10", "token": "ZnJlYWs=" },
+        { "id": "profanity-11", "token": "ZGFuZw==" },
+        { "id": "profanity-12", "token": "cmF0cw==" },
+        { "id": "profanity-13", "token": "Y3J1ZGR5" },
+        { "id": "profanity-14", "token": "Z29zaGRhcm4=" }
+      ]
+    },
+    "blasphemy": {
+      "items": [
+        { "id": "blasphemy-1", "token": "b2hteWdvc2g=" },
+        { "id": "blasphemy-2", "token": "Z29sbHk=" },
+        { "id": "blasphemy-3", "token": "Z2Vl" },
+        { "id": "blasphemy-4", "token": "Z2Vld2hpeg==" },
+        { "id": "blasphemy-5", "token": "Z29vZG5lc3M=" },
+        { "id": "blasphemy-6", "token": "Z3JhY2lvdXM=" }
+      ]
+    },
+    "childish": {
+      "items": [
+        { "id": "childish-1", "token": "cG9vcHk=" },
+        { "id": "childish-2", "token": "c3Rpbmt5" },
+        { "id": "childish-3", "token": "ZG9v" },
+        { "id": "childish-4", "token": "Ym9vZ2Vy" }
+      ]
+    },
+    "slurs": {
+      "items": [
+        { "id": "slurs-1", "token": "Y2hpbms=" },
+        { "id": "slurs-2", "token": "Y3JhY2tlcgo=" },
+        { "id": "slurs-3", "token": "cG9sbHVjaw==" },
+        { "id": "slurs-4", "token": "CmtyKnV0Cg==" },
+        { "id": "slurs-5", "token": "aCoqYgo=" },
+        { "id": "slurs-6", "token": "ZGluaw==" },
+        { "id": "slurs-7", "token": "Y2hpbmcgY2hvbmc=" },
+        { "id": "slurs-8", "token": "YmFkbmFtZTg=" },
+        { "id": "slurs-9", "token": "YmFkbmFtZTk=" },
+        { "id": "slurs-10", "token": "YmFkbmFtZTEw" },
+        { "id": "slurs-11", "token": "YmFkbmFtZTEx" },
+        { "id": "slurs-12", "token":"bmlnZ2Vy"}
+      ]
+    }
+  }
+}

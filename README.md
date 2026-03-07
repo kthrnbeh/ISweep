@@ -18,7 +18,7 @@ What’s in this repo
 ISweep/
 ├─ ISweep_backend/     # API + preferences + decision engine (Flask/FastAPI-style backend)
 ├─ ISweep_frontend/    # Website UI prototype (static HTML/Tailwind/JS)
-└─ ISweep_extension/   # Chrome extension (controls playback, reads settings, applies filters)
+└─ ISweep_extention/   # Chrome extension (controls playback, reads settings, applies filters)
 
 
 Frontend = website UX: create account, choose plan, set filters, parental PIN, etc. (currently a static prototype using LocalStorage) 
@@ -98,13 +98,11 @@ This is static HTML/JS/Tailwind.
 
 Recommended: VS Code → Live Server
 
-Right-click ISweep_frontend/index.html → Open with Live Server
+Right-click ISweep_frontend/docs/index.html → Open with Live Server
 
 You’ll get something like:
 
-http://127.0.0.1:5500/...
-
-(Your screenshots show 127.0.0.1:5500/docs/Settings.html which means you’re close — the path just needs to match your actual folder structure.)
+http://127.0.0.1:5500/docs/
 
 Frontend details live here: ISweep_frontend/README.md 
 
@@ -142,6 +140,18 @@ Expected: backend running at something like:
 
 http://127.0.0.1:8000 or http://127.0.0.1:5000
 
+Quick HOW TO RUN LOCALLY
+- Backend: in ISweep_backend/ `python app.py` (uses SQLite file isweep.db and .env SECRET_KEY/DATABASE_PATH if set)
+- Frontend: open ISweep_frontend/docs/index.html with Live Server → http://127.0.0.1:5500/ISweep_frontend/docs/
+- Extension: chrome://extensions → Load unpacked → ISweep_extention/; set backend URL to http://127.0.0.1:5000 in Options; login via popup with the same email/password as backend.
+
+End-to-end smoke test checklist
+- Backend up at http://127.0.0.1:5000 and /health returns healthy.
+- Frontend signup/login works; preferences save via PUT /preferences and reload via GET /preferences.
+- Extension configured with backend URL; popup login succeeds and stores token/user id.
+- Open YouTube with captions on; console shows [ISWEEP][YT] caption captured → [ISWEEP][BG] calling /event → [ISWEEP][BG] decision received → [ISWEEP][YT] applying action.
+- Observe mute/skip/fast_forward applied for matching captions; no console errors.
+
 3) Chrome Extension
 
 Open Chrome → chrome://extensions/
@@ -150,9 +160,9 @@ Enable Developer mode
 
 Click Load unpacked
 
-Select the ISweep_extension/ folder
+Select the ISweep_extention/ folder
 
-Extension details live here: ISweep_extension/README.md 
+Extension details live here: ISweep_extention/README.md 
 
 README
 
@@ -162,7 +172,7 @@ To make everything actually talk to each other, you need these to be consistent:
 
 FRONTEND URL (where the website is running)
 
-Example: http://127.0.0.1:5500
+Example: http://127.0.0.1:5500/ISweep_frontend/docs/
 
 BACKEND URL (where the API is running)
 

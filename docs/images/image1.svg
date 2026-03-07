@@ -1,0 +1,19 @@
+<svg width="210" height="70" viewBox="0 0 210 70" xmlns="http://www.w3.org/2000/svg" aria-label="Mute, Fast-Forward, Skip Scene">
+  <!-- Mute -->
+  <g transform="translate(0,0)">
+    <rect x="10" y="18" width="18" height="18" fill="#10252b"></rect>
+    <polygon points="28,20 40,20 52,10 52,46 40,36 28,36" fill="#a2cbd7"></polygon>
+    <line x1="8" y1="8" x2="60" y2="48" stroke="#dc9645" stroke-width="4" stroke-linecap="round"></line>
+  </g>
+  <!-- Fast-forward -->
+  <g transform="translate(70,0)">
+    <polygon points="10,18 36,35 10,52" fill="#7fdcf0"></polygon>
+    <polygon points="32,18 58,35 32,52" fill="#7fdcf0"></polygon>
+    <rect x="60" y="18" width="6" height="34" fill="#10252b"></rect>
+  </g>
+  <!-- Skip scene (with shield) -->
+  <g transform="translate(140,0)">
+    <path d="M35 12l20 6v18c0 13-8 22-20 26-12-4-20-13-20-26V18l20-6Z" fill="#a2cbd7" stroke="#10252b" stroke-width="3"></path>
+    <polygon points="24,26 42,37 24,48" fill="#10252b"></polygon>
+  </g>
+</svg>

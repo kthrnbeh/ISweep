@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Account | ISweep</title>
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="styles/site-plan.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;500&display=swap" rel="stylesheet">
+
+  <!-- Global JS for theme + plan selection -->
+  <script src="main.js" defer></script>
+</head>
+
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+
+      <div class="nav-left">
+        <a class="logo-box" href="index.html">
+          <img src="images/ISweep.png" alt="ISweep logo" />
+          <div class="logo-block">
+            <h1 class="site-title">ISweep</h1>
+            <span class="tagline">Keeping it all clean.</span>
+          </div>
+        </a>
+
+        <nav class="main-nav-left">
+          <a href="index.html">Home</a>
+          <a href="Filter.html">Filters</a>
+          <a href="Plans.html">Plans</a>
+        </nav>
+      </div>
+
+      <div class="nav-right">
+        <a href="Help.html" class="help-link">Help</a>
+
+        <div class="kb-wrapper">
+          <button id="kbToggle" class="kb-avatar">KB</button>
+
+          <div id="kbDropdown" class="kb-dropdown hidden">
+            <div class="dropdown-section">
+              <button id="themeToggleDropdown">Toggle Theme</button>
+            </div>
+            <div class="dropdown-section">
+              <a href="Account.html">Account</a>
+              <a href="Settings.html">Settings</a>
+              <button id="signOutBtn" data-logout>Sign Out</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </header>
+
+  <main class="account-page container" style="display: grid; grid-template-columns: 240px 1fr; gap: 1.5rem; align-items: start;"> <!-- This grid creates a sidebar + content layout to give the page a SaaS dashboard feel without changing the color system. -->
+    <aside class="card" style="padding: 1.25rem; position: sticky; top: 1rem; align-self: start;"> <!-- This sidebar card holds the dashboard navigation and stays visible as users scroll. -->
+      <h2 style="margin-top: 0; margin-bottom: 0.75rem;">Account</h2> <!-- This heading labels the sidebar navigation clearly. -->
+      <nav class="stacked-nav" style="display: grid; gap: 0.5rem;"> <!-- This nav lists account sections to mimic a control panel. -->
+        <a href="#overview" style="padding: 0.65rem 0.75rem; border-radius: 10px; background: #f8fafc; text-decoration: none; color: inherit; font-weight: 600;">Overview</a> <!-- This link jumps to the overview card to orient the user. -->
+        <a href="#subscription" style="padding: 0.65rem 0.75rem; border-radius: 10px; background: #f8fafc; text-decoration: none; color: inherit; font-weight: 600;">Subscription</a> <!-- This link jumps to the subscription card for quick plan access. -->
+        <a href="#devices" style="padding: 0.65rem 0.75rem; border-radius: 10px; background: #f8fafc; text-decoration: none; color: inherit; font-weight: 600;">Devices</a> <!-- This link jumps to the devices card to manage hardware. -->
+        <a href="#filters" style="padding: 0.65rem 0.75rem; border-radius: 10px; background: #f8fafc; text-decoration: none; color: inherit; font-weight: 600;">Filters</a> <!-- This link jumps to filter preferences to mirror a control center feel. -->
+        <a href="#billing" style="padding: 0.65rem 0.75rem; border-radius: 10px; background: #f8fafc; text-decoration: none; color: inherit; font-weight: 600;">Billing</a> <!-- This link jumps to billing for quick payment updates. -->
+        <a href="#security" style="padding: 0.65rem 0.75rem; border-radius: 10px; background: #f8fafc; text-decoration: none; color: inherit; font-weight: 600;">Security</a> <!-- This link jumps to security controls like password and 2FA. -->
+      </nav>
+    </aside>
+
+    <section style="display: grid; gap: 1rem;"> <!-- This column stacks the main cards to keep the layout clean and scannable. -->
+      <header id="overview" class="card" style="padding: 1.25rem; display: grid; gap: 0.5rem;"> <!-- This top card summarizes the account state for quick at-a-glance info. -->
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 1rem;"> <!-- This row aligns the title and plan badge. -->
+          <div>
+            <h1 style="margin: 0;">My Account</h1> <!-- This heading labels the page context. -->
+            <p class="subtitle" style="margin: 0;">Manage your personal info, subscription, devices, and security.</p> <!-- This subtitle reinforces the dashboard scope. -->
+          </div>
+          <span style="padding: 0.35rem 0.65rem; border-radius: 999px; background: #e0f2fe; color: #075985; font-weight: 700;">Active Plan</span> <!-- This badge highlights the plan state to make status obvious. -->
+        </div>
+        <p style="margin: 0; color: #475569;">Keep your contact details, payment methods, and devices in sync so ISweep can protect all your screens.</p> <!-- This supporting line sets a professional tone without changing colors. -->
+      </header>
+
+      <section id="profile" class="card" style="padding: 1.25rem;"> <!-- This card groups profile fields in a tidy stack. -->
+        <h2 style="margin-top: 0;">Profile</h2> <!-- This heading labels the profile details. -->
+        <form class="profile-form" style="display: grid; gap: 0.75rem;"> <!-- This grid spaces the form rows for readability. -->
+          <div class="item-row" style="display: grid; grid-template-columns: 1fr auto; gap: 0.75rem; align-items: center;"> <!-- This row aligns the name field and action button. -->
+            <label style="display: block;"> <!-- This label wraps the name input for accessibility. -->
+              <strong>Name</strong>
+              <input
+                class="profile-input"
+                type="text"
+                name="fullName"
+                placeholder="Add"
+                required
+              />
+            </label>
+            <button type="submit">Edit</button> <!-- This button keeps inline editing affordance. -->
+          </div>
+
+          <div class="item-row" style="display: grid; grid-template-columns: 1fr auto; gap: 0.75rem; align-items: center;"> <!-- This row aligns the email field and action button. -->
+            <label style="display: block;">
+              <strong>Email</strong>
+              <input
+                class="profile-input"
+                type="email"
+                name="email"
+                placeholder="Add"
+                required
+              />
+            </label>
+            <button type="submit">Edit</button> <!-- This button retains the edit flow for email. -->
+          </div>
+
+          <div class="item-row" style="display: grid; grid-template-columns: 1fr auto; gap: 0.75rem; align-items: center;"> <!-- This row aligns the phone field and action button. -->
+            <label style="display: block;">
+              <strong>Mobile Number</strong>
+              <input
+                class="profile-input"
+                type="tel"
+                name="phone"
+                placeholder="Add"
+                required
+                pattern="[0-9]{10}"
+              />
+            </label>
+            <button type="submit">Edit</button> <!-- This button supports inline phone updates. -->
+          </div>
+        </form>
+      </section>
+
+      <section id="subscription" class="card" style="padding: 1.25rem;"> <!-- This card summarizes the plan and actions. -->
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 1rem;"> <!-- This row aligns plan label with actions. -->
+          <div>
+            <h2 style="margin: 0;">Your Plan</h2> <!-- This heading labels the plan section. -->
+            <p style="margin: 0; color: #475569;">Manage your subscription and ownership status.</p> <!-- This subtitle clarifies the card purpose. -->
+          </div>
+          <span style="padding: 0.35rem 0.65rem; border-radius: 999px; background: #e0f2fe; color: #075985; font-weight: 700;">Current</span> <!-- This badge reinforces that the plan shown is active. -->
+        </div>
+        <form class="profile-form" style="margin-top: 0.75rem; display: grid; gap: 0.75rem;">
+          <div class="item-row" style="display: grid; grid-template-columns: 1fr auto; gap: 0.75rem; align-items: center;"> <!-- This row keeps the plan field and action aligned. -->
+            <label style="display: block;">
+              <strong>Current Plan</strong>
+              <input 
+                class="profile-input"
+                type="text"
+                name="plan"
+                placeholder="No plan selected yet"
+                readonly
+              />
+            </label>
+            <button type="submit">Manage Plan</button> <!-- This button links to plan management flow. -->
+          </div>
+        </form>
+        <p style="margin: 0.25rem 0 0 0;">Your current plan: <strong id="current-plan-display"></strong></p> <!-- This line reflects the synced plan label from storage. -->
+      </section>
+
+      <section id="devices" class="card" style="padding: 1.25rem;"> <!-- This card holds device management actions. -->
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 1rem;"> <!-- This row balances the heading and CTA. -->
+          <h2 style="margin: 0;">Devices</h2> <!-- This heading labels the device list. -->
+          <button class="secondary-btn">Add Device</button> <!-- This button stays as the primary device CTA. -->
+        </div>
+        <div class="item-row" style="display: grid; grid-template-columns: 1fr auto; gap: 0.75rem; align-items: center; margin-top: 0.75rem;"> <!-- This row formats the sample device entry. -->
+          <div>
+            <strong>Samsung Smart TV</strong>
+            <p style="margin: 0;">Living Room</p>
+          </div>
+          <button>Remove</button> <!-- This button keeps device removal affordance. -->
+        </div>
+      </section>
+
+      <section id="filters" class="card" style="padding: 1.25rem;"> <!-- This card references filter settings from the dashboard context. -->
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 1rem;"> <!-- This row aligns heading and action. -->
+          <div>
+            <h2 style="margin: 0;">Filters</h2> <!-- This heading points to filtering controls. -->
+            <p style="margin: 0; color: #475569;">Adjust content rules and sensitivity in Settings.</p> <!-- This note guides users to the detailed control center. -->
+          </div>
+          <a href="Settings.html" class="btn btn-primary" style="padding: 0.55rem 0.9rem;">Open Settings</a> <!-- This button jumps to the dedicated filtering page to keep flows intact. -->
+        </div>
+      </section>
+
+      <section id="billing" class="card" style="padding: 1.25rem;"> <!-- This card groups billing actions. -->
+        <h2 style="margin-top: 0;">Billing</h2> <!-- This heading labels the billing card. -->
+        <p style="margin: 0 0 0.5rem 0; color: #475569;">Update payment methods and download invoices.</p> <!-- This note clarifies what belongs here. -->
+        <button class="secondary-btn">Update Payment Method</button> <!-- This button mirrors the existing payment update CTA. -->
+      </section>
+
+      <section id="security" class="card" style="padding: 1.25rem;"> <!-- This card collects security-related actions. -->
+        <h2 style="margin-top: 0;">Security</h2> <!-- This heading labels the security area. -->
+        <div style="display: grid; gap: 0.5rem;"> <!-- This grid stacks the security actions neatly. -->
+          <button>Change Password</button> <!-- This button keeps password change available. -->
+          <button>Enable 2-Step Verification</button> <!-- This button keeps 2FA accessible. -->
+        </div>
+      </section>
+
+      <section id="support" class="card" style="padding: 1.25rem;"> <!-- This card retains support shortcuts. -->
+        <h2 style="margin-top: 0;">Support</h2> <!-- This heading labels support options. -->
+        <div style="display: grid; gap: 0.5rem;"> <!-- This grid spaces the support actions for clarity. -->
+          <button>Contact Support</button> <!-- This button keeps contact support visible. -->
+          <button>Visit Help Center</button> <!-- This button keeps help resources accessible. -->
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <!-- Auth modal hosts sign-in/create-account flows so the Account link can live inside the dropdown. -->
+  <div id="authModal" class="auth-modal" style="display:none;"> <!-- This outer wrapper provides the modal overlay container. -->
+    <div class="auth-backdrop" data-close-auth style="position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 2000;"> <!-- This backdrop darkens the page and listens for outside clicks to close. -->
+      <div class="auth-dialog" role="dialog" aria-modal="true" style="background: #ffffff; border-radius: 12px; padding: 18px; width: min(480px, 90vw); box-shadow: 0 18px 40px rgba(0,0,0,0.22); position: relative;"> <!-- This dialog holds all auth panels in a compact card. -->
+        <button type="button" class="auth-close" data-close-auth style="position: absolute; top: 10px; right: 10px; border: none; background: transparent; font-size: 1.1rem; cursor: pointer;">×</button> <!-- This close button lets users exit the modal quickly. -->
+
+        <div data-auth-panel="signin" style="display: none;"> <!-- This panel shows the sign-in form. -->
+          <h2 style="margin-top: 0;">Sign In</h2> <!-- This heading labels the sign-in mode. -->
+          <form id="signInForm" style="display: grid; gap: 0.75rem;">
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Email</span>
+              <input type="email" name="email" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Password</span>
+              <input type="password" name="password" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <button type="submit" style="padding: 0.75rem; border-radius: 10px; border: none; background: #2563eb; color: #fff; font-weight: 700;">Continue</button>
+            <button type="button" data-switch-auth="create" style="padding: 0.65rem; border-radius: 10px; border: 1px solid #e5e7eb; background: #fff;">Need an account? Create one</button>
+          </form>
+        </div>
+
+        <div data-auth-panel="create" style="display: none;"> <!-- This panel shows the create-account form. -->
+          <h2 style="margin-top: 0;">Create Account</h2> <!-- This heading labels the registration mode. -->
+          <form id="createAccountForm" style="display: grid; gap: 0.75rem;">
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Full Name</span>
+              <input type="text" name="name" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Email</span>
+              <input type="email" name="email" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Password</span>
+              <input type="password" name="password" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Confirm Password</span>
+              <input type="password" name="confirm" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <button type="submit" style="padding: 0.75rem; border-radius: 10px; border: none; background: #2563eb; color: #fff; font-weight: 700;">Create Account</button>
+            <button type="button" data-switch-auth="signin" style="padding: 0.65rem; border-radius: 10px; border: 1px solid #e5e7eb; background: #fff;">Already have an account? Sign in</button>
+          </form>
+        </div>
+
+        <div data-auth-panel="account" style="display: none;"> <!-- This panel shows a simple account summary when signed in. -->
+          <h2 style="margin-top: 0;">Account</h2> <!-- This heading labels the account view. -->
+          <p id="accountSummary" style="margin: 0 0 0.75rem 0;">Signed in user details appear here.</p> <!-- This paragraph will be populated with the user’s name/email from localStorage. -->
+          <button type="button" data-logout style="padding: 0.75rem; border-radius: 10px; border: none; background: #ef4444; color: #fff; font-weight: 700;">Log Out</button> <!-- This button signs the user out from within the modal. -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <p>&copy; 2025 ISweep Inc. All rights reserved.</p>
+  </footer>
+</body>
+</html>

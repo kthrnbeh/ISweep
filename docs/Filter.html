@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Filters | ISweep</title>
+  <link rel="stylesheet" href="styles/site-plan.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;500&display=swap" rel="stylesheet">
+  <script src="main.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+
+      <div class="nav-left">
+        <a class="logo-box" href="index.html">
+          <img src="images/ISweep.png" alt="ISweep logo" />
+          <div class="logo-block">
+            <h1 class="site-title">ISweep</h1>
+            <span class="tagline">Keeping it all clean.</span>
+          </div>
+        </a>
+
+        <nav class="main-nav-left">
+          <a href="index.html">Home</a>
+          <a href="Filter.html" class="active">Filters</a>
+          <a href="Plans.html">Plans</a>
+        </nav>
+      </div>
+
+      <div class="nav-right">
+        <a href="Help.html" class="help-link">Help</a>
+
+        <div class="kb-wrapper">
+          <button id="kbToggle" class="kb-avatar">KB</button>
+
+          <div id="kbDropdown" class="kb-dropdown hidden">
+            <div class="dropdown-section">
+              <button id="themeToggleDropdown">Toggle Theme</button>
+            </div>
+            <div class="dropdown-section">
+              <a href="Account.html">Account</a>
+              <a href="Settings.html">Settings</a>
+              <button id="signOutBtn" data-logout>Sign Out</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </header>
+
+  <main class="filters-page container" data-filters-page>
+    <!-- Page hero summarizing filter purpose without altering layout -->
+    <section class="filters-hero card">
+      <div>
+        <p class="eyebrow">Control center</p>
+        <h1>Filters</h1>
+        <p class="subtitle">Select which types of content you want ISweep to filter and control your media experience.</p>
+      </div>
+      <div style="display: grid; gap: 6px; text-align: right; color: var(--muted);">
+        <span style="font-weight: 700; color: var(--brand-2);">Live policy ready</span>
+        <span>Plans remain public; Preferences live in the KB menu.</span>
+      </div>
+    </section>
+
+    <!-- Category tiles list; selection highlights active category -->
+    <section class="filter-tiles" aria-label="Filter categories">
+      <button class="filter-tile tile-selected" type="button" data-filter-tile="language" style="background: linear-gradient(145deg, #a5d4ff 0%, #3c74ff 100%);">
+        <span class="tile-check"></span>
+        <div class="tile-top">
+          <span class="tile-icon">💬</span>
+        </div>
+        <p class="tile-label">Language</p>
+      </button>
+      <button class="filter-tile" type="button" data-filter-tile="intimacy" style="background: linear-gradient(145deg, #7ec8ff 0%, #2f6ad9 100%);">
+        <span class="tile-check"></span>
+        <div class="tile-top">
+          <span class="tile-icon">❤️</span>
+        </div>
+        <p class="tile-label">Intimacy</p>
+      </button>
+      <button class="filter-tile" type="button" data-filter-tile="violence" style="background: linear-gradient(145deg, #78b7ff 0%, #1f4ea6 100%);">
+        <span class="tile-check"></span>
+        <div class="tile-top">
+          <span class="tile-icon">⚔️</span>
+        </div>
+        <p class="tile-label">Violence</p>
+      </button>
+      <button class="filter-tile" type="button" data-filter-tile="substances" style="background: linear-gradient(145deg, #6db0ff 0%, #1b4c94 100%);">
+        <span class="tile-check"></span>
+        <div class="tile-top">
+          <span class="tile-icon">🍷</span>
+        </div>
+        <p class="tile-label">Substances</p>
+      </button>
+      <button class="filter-tile" type="button" data-filter-tile="horror" style="background: linear-gradient(145deg, #5ba3ff 0%, #163f7b 100%);">
+        <span class="tile-check"></span>
+        <div class="tile-top">
+          <span class="tile-icon">👁️</span>
+        </div>
+        <p class="tile-label">Horror &amp; Fears</p>
+      </button>
+    </section>
+
+    <section class="filters-grid">
+      <!-- Primary category detail panel; toggles and actions live here -->
+      <section class="category-card">
+        <div class="category-header">
+          <div>
+            <p class="eyebrow" style="margin-bottom:4px;">Category Details</p>
+            <h2 data-category-name>💬 Language</h2>
+          </div>
+          <label class="toggle-row" aria-label="Toggle category">
+            <span class="toggle-label">On</span>
+            <input type="checkbox" data-category-toggle class="switch" checked />
+          </label>
+        </div>
+
+        <div class="subcategory-list" data-subcategory-list></div>
+
+        <div id="customWordsSection" class="custom-words-section">
+          <button type="button" class="link-btn" id="customWordAdd" aria-label="Manage custom words" style="margin: 8px 0 6px;">
+            <span class="plus">＋</span>
+            Manage Custom Words
+          </button>
+          <div class="custom-words">
+            <div class="input-row">
+              <input id="customWordInput" type="text" placeholder="Add a custom word or phrase" aria-label="Custom word" />
+              <button type="button" class="pill-btn" id="customWordAddInline">Add</button>
+            </div>
+            <div id="customWordList"></div>
+          </div>
+        </div>
+
+        <div class="sensitivity">
+          <strong>Sensitivity</strong>
+          <div class="range-row">
+            <span class="muted">Low</span>
+            <input id="sensitivityRange" type="range" min="1" max="5" step="1" value="3" />
+            <span class="muted">High</span>
+            <span id="sensitivityValue" class="pill">3</span>
+          </div>
+        </div>
+
+        <div class="action-grid" style="margin-top: 12px;">
+          <label>
+            <strong>Action</strong>
+            <select id="actionSelect">
+              <option value="mute">Mute audio only</option>
+              <option value="skip">Skip scene</option>
+              <option value="fast-forward">Fast-forward</option>
+              <option value="log-only">Log only</option>
+            </select>
+          </label>
+          <label>
+            <strong>Duration</strong>
+            <div class="duration-row">
+              <input id="actionDuration" type="number" min="0" step="1" value="6" />
+              <span class="suffix">secs</span>
+            </div>
+          </label>
+        </div>
+
+        <div class="filters-actions">
+          <button type="button" class="ghost" id="resetCategory">Reset</button>
+          <button type="button" class="ghost" id="cancelFilters">Cancel</button>
+          <button type="button" class="primary" id="saveFilters">Save</button>
+        </div>
+      </section>
+
+      <!-- Sidebar with activity and presets remains unchanged for quick stats -->
+      <aside class="filters-aside">
+        <div class="card" style="padding: 16px;">
+          <div style="display:flex; align-items:center; justify-content: space-between; gap: 10px;">
+            <p class="eyebrow" style="margin:0;">Activity</p>
+            <span class="pill muted">9 Active Filters</span>
+          </div>
+          <h3 style="margin: 6px 0 4px;">Last 7 Days</h3>
+          <div class="activity-meta">
+            <span>27 words muted</span>
+            <span>4 scenes skipped</span>
+            <span>1 scary scene fast-forwarded</span>
+          </div>
+        </div>
+
+        <div class="card" style="padding: 16px;">
+          <p class="eyebrow">Suggested Presets</p>
+          <div class="preset-buttons">
+            <button type="button">Kid Mode (Under 13)</button>
+            <button type="button">Teen Mode</button>
+            <button type="button">Family Safe</button>
+            <button type="button" class="ghost">All Presets</button>
+          </div>
+        </div>
+      </aside>
+    </section>
+  </main>
+</body>
+</html>

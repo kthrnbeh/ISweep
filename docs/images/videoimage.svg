@@ -1,0 +1,32 @@
+<svg width="320" height="180" viewBox="0 0 256 144" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Video player with filter badge">
+  <!-- defs: brand colors -->
+  <defs>
+    <linearGradient id="bar" x1="0" y1="0" x2="256" y2="0">
+      <stop offset="0" stop-color="#a2cbd7"></stop>
+      <stop offset="1" stop-color="#7fdcf0"></stop>
+    </linearGradient>
+  </defs>
+
+  <!-- player frame -->
+  <rect x="2" y="2" width="252" height="140" rx="12" fill="#0b1220" stroke="#10252b" stroke-width="4"></rect>
+  <!-- screen area -->
+  <rect x="10" y="10" width="236" height="112" rx="8" fill="#0f172a" stroke="#10252b" stroke-width="2"></rect>
+
+  <!-- play button -->
+  <circle cx="128" cy="66" r="18" fill="#a2cbd7" opacity="0.18"></circle>
+  <polygon points="122,54 144,66 122,78" fill="#7fdcf0"></polygon>
+
+  <!-- controls bar -->
+  <rect x="10" y="124" width="236" height="6" rx="3" fill="#0f2230"></rect>
+  <rect x="10" y="124" width="140" height="6" rx="3" fill="url(#bar)"></rect>
+  <circle cx="150" cy="127" r="6" fill="#dc9645" stroke="#10252b" stroke-width="2"></circle>
+
+  <!-- filter badge (top-right) -->
+  <g transform="translate(200,10)">
+    <rect x="0" y="0" width="46" height="22" rx="11" fill="#10252b" stroke="#a2cbd7" stroke-width="2"></rect>
+    <!-- star -->
+    <path d="M16 6l2.2 5.6 6.1.3-4.8 3.8 1.7 5.9-5.2-3.4-5.2 3.4 1.7-5.9-4.8-3.8 6.1-.3L16 6z" fill="#f7d155" stroke="#0f172a" stroke-width="1"></path>
+    <!-- label -->
+    <text x="28" y="15" font-family="system-ui, sans-serif" font-size="9" fill="#a2cbd7">Filter</text>
+  </g>
+</svg>

@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!-- Site-wide JS (including theme) -->
+  <script src="main.js" defer></script>
+
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ISweep Wireframe</title>
+
+  <link rel="stylesheet" href="styles/site-plan.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;500&display=swap" rel="stylesheet">
+</head>
+
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+
+      <div class="nav-left">
+        <a class="logo-box" href="index.html">
+          <img src="images/ISweep.png" alt="ISweep logo" />
+          <div class="logo-block">
+            <h1 class="site-title">ISweep</h1>
+            <span class="tagline">Keeping it all clean.</span>
+          </div>
+        </a>
+
+        <nav class="main-nav-left">
+          <a href="index.html" class="active">Home</a>
+          <a href="Filter.html">Filters</a>
+          <a href="Plans.html">Plans</a>
+        </nav>
+      </div>
+
+      <div class="nav-right">
+        <a href="Help.html" class="help-link">Help</a>
+
+        <div class="kb-wrapper">
+          <button id="kbToggle" class="kb-avatar">KB</button>
+
+          <div id="kbDropdown" class="kb-dropdown hidden">
+            <div class="dropdown-section">
+              <button id="themeToggleDropdown">Toggle Theme</button>
+            </div>
+            <div class="dropdown-section">
+              <a href="Account.html">Account</a>
+              <a href="Settings.html">Settings</a>
+              <button id="signOutBtn" data-logout>Sign Out</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- HERO -->
+  <section id="hero" class="hero"> <!-- Added hero anchor id so nav CTAs can jump to the single demo area after removing the duplicate demo section. -->
+    <div class="container hero-inner">
+      <div class="hero-copy">
+        <h1>Smart Filtering in Action</h1>
+        <p class="lead">
+          AI-powered mute, skip, and fast-forward—so you control your media, your way.
+        </p>
+
+        <div class="cta-row">
+          <a class="btn btn-primary" href="#how">Get Started</a> <!-- Kept Get Started link unchanged because it still points to the how-it-works section. -->
+          <a class="btn btn-ghost" href="#hero">Watch Demo</a> <!-- Updated demo link to target the hero video since the duplicate demo section was removed. -->
+        </div>
+      </div>
+
+      <div class="hero-visual"> <!-- This container keeps the single demo video anchored in the hero area so users see the preview instantly. -->
+        <video id="demoVideo" class="hero-video" controls muted playsinline style="width:100%; max-width:640px; border-radius:12px; box-shadow:0 18px 45px rgba(0,0,0,0.18);"> <!-- This video element replaces the old placeholder image so we show the live demo only here. -->
+          <source src="your-video-file.mp4" type="video/mp4" /> <!-- This source points to the demo MP4 so the hero preview can play in all modern browsers. -->
+          Your browser does not support the video tag. <!-- This fallback text explains the video requirement so users understand why playback may not work. -->
+        </video>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section id="how" class="section">
+    <div class="container">
+      <h2 class="section-title">How it works</h2>
+
+      <ol class="steps-grid">
+        <li class="step-card">
+          <h4>Install</h4>
+          <p>Add ISweep to your Smart TV (or companion device). Pair with your streaming source or DVD player.</p>
+        </li>
+        <li class="step-card">
+          <h4>Choose Filters</h4>
+          <p>Remove profanity, sexuality, and violence. Set actions: mute, skip, or fast-forward.</p>
+        </li>
+        <li class="step-card">
+          <h4>Enable Observer Mode</h4>
+          <p>ISweep listens and detects events in real time—then applies your rules automatically.</p>
+        </li>
+        <li class="step-card">
+          <h4>Review &amp; Refine</h4>
+          <p>Check your session log and adjust sensitivity and actions for next time.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- Removed the “See it in action” section to prevent duplicate demo areas; the only demo video lives in the hero preview. -->
+  <!-- Removed the ISweep AI subtitle test and broom overlay to keep the homepage marketing-only with a single hero video. -->
+
+  <!-- Auth modal hosts sign-in/create-account flows so the Account link can live inside the dropdown. -->
+  <div id="authModal" class="auth-modal" style="display:none;"> <!-- This outer wrapper provides the modal overlay container. -->
+    <div class="auth-backdrop" data-close-auth style="position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 2000;"> <!-- This backdrop darkens the page and listens for outside clicks to close. -->
+      <div class="auth-dialog" role="dialog" aria-modal="true" style="background: #ffffff; border-radius: 12px; padding: 18px; width: min(480px, 90vw); box-shadow: 0 18px 40px rgba(0,0,0,0.22); position: relative;"> <!-- This dialog holds all auth panels in a compact card. -->
+        <button type="button" class="auth-close" data-close-auth style="position: absolute; top: 10px; right: 10px; border: none; background: transparent; font-size: 1.1rem; cursor: pointer;">×</button> <!-- This close button lets users exit the modal quickly. -->
+
+        <div data-auth-panel="signin" style="display: none;"> <!-- This panel shows the sign-in form. -->
+          <h2 style="margin-top: 0;">Sign In</h2> <!-- This heading labels the sign-in mode. -->
+          <form id="signInForm" style="display: grid; gap: 0.75rem;">
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Email</span>
+              <input type="email" name="email" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Password</span>
+              <input type="password" name="password" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <button type="submit" style="padding: 0.75rem; border-radius: 10px; border: none; background: #2563eb; color: #fff; font-weight: 700;">Continue</button>
+            <button type="button" data-switch-auth="create" style="padding: 0.65rem; border-radius: 10px; border: 1px solid #e5e7eb; background: #fff;">Need an account? Create one</button>
+          </form>
+        </div>
+
+        <div data-auth-panel="create" style="display: none;"> <!-- This panel shows the create-account form. -->
+          <h2 style="margin-top: 0;">Create Account</h2> <!-- This heading labels the registration mode. -->
+          <form id="createAccountForm" style="display: grid; gap: 0.75rem;">
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Full Name</span>
+              <input type="text" name="name" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Email</span>
+              <input type="email" name="email" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Password</span>
+              <input type="password" name="password" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Confirm Password</span>
+              <input type="password" name="confirm" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <button type="submit" style="padding: 0.75rem; border-radius: 10px; border: none; background: #2563eb; color: #fff; font-weight: 700;">Create Account</button>
+            <button type="button" data-switch-auth="signin" style="padding: 0.65rem; border-radius: 10px; border: 1px solid #e5e7eb; background: #fff;">Already have an account? Sign in</button>
+          </form>
+        </div>
+
+        <div data-auth-panel="account" style="display: none;"> <!-- This panel shows a simple account summary when signed in. -->
+          <h2 style="margin-top: 0;">Account</h2> <!-- This heading labels the account view. -->
+          <p id="accountSummary" style="margin: 0 0 0.75rem 0;">Signed in user details appear here.</p> <!-- This paragraph will be populated with the user’s name/email from localStorage. -->
+          <button type="button" data-logout style="padding: 0.75rem; border-radius: 10px; border: none; background: #ef4444; color: #fff; font-weight: 700;">Log Out</button> <!-- This button signs the user out from within the modal. -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <footer class="site-footer">
+    <div class="social">
+      <a href="https://facebook.com">
+        <img src="images/facebook.png" alt="fb icon">
+      </a>
+      <a href="https://twitter.com">
+        <img src="images/twitter.png" alt="twitter icon">
+      </a>
+      <a href="https://instagram.com">
+        <img src="images/instagram.png" alt="instagram icon">
+      </a>
+    </div>
+
+    <div class="container">
+      <p>&copy; 2025 ISweep Inc. All rights reserved.</p>
+    </div>
+  </footer>
+</body>
+</html>

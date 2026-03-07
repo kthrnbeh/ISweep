@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<!-- Declares this document is HTML5 so the browser uses modern rules. -->
+
+<html lang="en">
+<!-- Root element of the page. lang="en" says the primary language is English. -->
+
+<head>
+  <!-- <head> holds metadata, styles, scripts, and the page title. -->
+
+  <meta charset="UTF-8" />
+  <!-- Use UTF-8 character encoding so nearly all characters/symbols display correctly. -->
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Makes the layout responsive:
+       - width=device-width: viewport matches device width.
+       - initial-scale=1: no zoom by default on mobile. -->
+
+  <title>ISweep – Plans</title>
+  <!-- Text shown in the browser tab for this page. -->
+
+  <!-- Tailwind via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Loads Tailwind CSS from a CDN (Content Delivery Network).
+       This gives you all the utility classes like bg-white, flex, text-xl, etc. -->
+
+  <script>
+    /* Inline JS that customizes Tailwind's configuration before it initializes. */
+    tailwind.config = {
+      darkMode: 'class',
+      /* darkMode:'class' means Tailwind will use .dark on a parent element
+         (usually <html> or <body>) to switch to dark color variants. */
+
+      theme: {
+        extend: {
+          colors: {
+            primary: {
+              /* Custom color palette named "primary" with different shades.
+                 Used by classes like bg-primary-600, text-primary-700, etc. */
+              "50":"#eff6ff","100":"#dbeafe","200":"#bfdbfe","300":"#93c5fd",
+              "400":"#60a5fa","500":"#3b82f6","600":"#2563eb","700":"#1d4ed8",
+              "800":"#1e40af","900":"#1e3a8a","950":"#172554"
+            }
+          }
+        },
+
+        fontFamily: {
+          /* Sets default font stacks for body text and sans-serif text.
+             Tailwind classes like font-sans will use these. */
+          body: ['Inter','ui-sans-serif','system-ui','-apple-system','Segoe UI','Roboto','Helvetica Neue','Arial','sans-serif'],
+          sans: ['Inter','ui-sans-serif','system-ui','-apple-system','Segoe UI','Roboto','Helvetica Neue','Arial','sans-serif']
+        }
+      }
+    }
+  </script>
+
+  <!-- Global JS for theme + plan selection -->
+  <script src="main.js" defer></script>
+  <!-- Loads your shared JS file:
+       - theme toggle behavior (adds/removes dark-mode class)
+       - logic for saving selected plan to localStorage / updating other pages
+       - ISweep backend demo behavior (used on Help page).
+       "defer" waits until HTML is parsed before running. -->
+
+  <!-- Your shared styles -->
+  <link rel="stylesheet" href="styles/site-plan.css" />
+  <!-- Global CSS shared with other pages (header, footer, general layout). -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;500&display=swap" rel="stylesheet">
+</head>
+
+<body>
+  <!-- Everything visible to the user goes inside <body>. -->
+
+  <header class="site-header">
+    <div class="container header-inner">
+
+      <div class="nav-left">
+        <a class="logo-box" href="index.html">
+          <img src="images/ISweep.png" alt="ISweep logo" />
+          <div class="logo-block">
+            <h1 class="site-title">ISweep</h1>
+            <span class="tagline">Keeping it all clean.</span>
+          </div>
+        </a>
+
+        <nav class="main-nav-left">
+          <a href="index.html">Home</a>
+          <a href="Filter.html">Filters</a>
+          <a href="Plans.html" class="active">Plans</a>
+        </nav>
+      </div>
+
+      <div class="nav-right">
+        <a href="Help.html" class="help-link">Help</a>
+
+        <div class="kb-wrapper">
+          <button id="kbToggle" class="kb-avatar">KB</button>
+
+          <div id="kbDropdown" class="kb-dropdown hidden">
+            <div class="dropdown-section">
+              <button id="themeToggleDropdown">Toggle Theme</button>
+            </div>
+            <div class="dropdown-section">
+              <a href="Account.html">Account</a>
+              <a href="Settings.html">Settings</a>
+              <button id="signOutBtn" data-logout>Sign Out</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </header>
+
+  <main>
+    <!-- Main content of the page: pricing/plan cards. -->
+
+    <!-- PRICING SECTION -->
+    <section id="pricing" class="bg-white dark:bg-gray-900">
+      <!-- Section wrapper for the entire pricing area.
+           id="pricing" allows jump links (#pricing).
+           bg-white: white background in light mode.
+           dark:bg-gray-900: dark gray background when .dark-mode is active. -->
+
+      <div class="py-8 px-4 mx-auto max-w-screen-xl lg:py-16 lg:px-6">
+        <!-- Content container for padding and max width.
+             py-8 / px-4: vertical/horizontal padding.
+             mx-auto: horizontally centres the block.
+             max-w-screen-xl: max width for large screens.
+             lg:py-16 / lg:px-6: more padding on larger screens. -->
+
+        <div class="mx-auto max-w-screen-md text-center mb-8 lg:mb-12">
+          <!-- Centered intro text above the pricing cards.
+               mx-auto: center container.
+               max-w-screen-md: limit width so text isn't super wide.
+               text-center: center text.
+               mb-8 / lg:mb-12: bottom margin to separate from cards. -->
+
+          <h2 class="mb-4 text-4xl tracking-tight font-extrabold text-gray-900 dark:text-white">
+            <!-- Main heading describing what the plans are for.
+                 Tailwind classes:
+                 - mb-4: margin-below.
+                 - text-4xl: large font size.
+                 - tracking-tight: closer letter spacing.
+                 - font-extrabold: heavy weight.
+                 - text-gray-900: dark text in light mode.
+                 - dark:text-white: white text in dark mode. -->
+
+            Smart filtering for homes & studios like yours
+          </h2>
+
+          <p class="mb-5 font-light text-gray-500 sm:text-xl dark:text-gray-400">
+            <!-- Subheading/description of ISweep.
+                 font-light: lighter font weight.
+                 text-gray-500: muted gray.
+                 sm:text-xl: larger text on small screens and up.
+                 dark:text-gray-400: lighter gray in dark mode. -->
+
+            ISweep lets you mute, skip, or fast-forward scenes based on your values—on TV, mobile, and desktop.
+            Choose the plan that fits your setup.
+          </p>
+        </div>
+
+        <div class="space-y-8 lg:grid lg:grid-cols-3 sm:gap-6 xl:gap-10 lg:space-y-0">
+          <!-- Container for the three pricing cards.
+               On small screens:
+                 - they stack vertically with space-y-8 between them.
+               On large screens:
+                 - lg:grid: turns into a CSS grid.
+                 - lg:grid-cols-3: three equal columns.
+                 - sm:gap-6 / xl:gap-10: horizontal gaps between cards.
+                 - lg:space-y-0: no vertical spacing once grid is active. -->
+
+          <!-- Free Tier -->
+          <div class="flex flex-col p-6 mx-auto max-w-lg text-center text-gray-900 bg-white rounded-lg border border-gray-100 shadow dark:border-gray-600 xl:p-8 dark:bg-gray-800 dark:text-white">
+            <!-- First pricing card (Free plan).
+                 flex flex-col: layout items in a vertical flex column.
+                 p-6 / xl:p-8: padding inside the card.
+                 mx-auto max-w-lg: center the card with a max width.
+                 text-center: center text.
+                 text-gray-900 bg-white: colors in light mode.
+                 rounded-lg border shadow: card appearance.
+                 dark:border-gray-600 dark:bg-gray-800 dark:text-white:
+                   adjust for dark mode. -->
+
+            <h3 class="mb-4 text-2xl font-semibold">Free Tier</h3>
+            <!-- Plan name heading. text-2xl = large, font-semibold = medium-bold. -->
+
+            <p class="font-light text-gray-500 sm:text-lg dark:text-gray-400">
+              <!-- Short description of what the free plan offers. -->
+
+              Try Smart Filtering with a single streaming device.
+            </p>
+
+            <div class="flex justify-center items-baseline my-8">
+              <!-- Price display row.
+                   flex: lays out price + /month side by side.
+                   justify-center: center horizontally.
+                   items-baseline: align numbers by baseline.
+                   my-8: vertical margin top/bottom. -->
+
+              <span class="mr-2 text-5xl font-extrabold">$0</span>
+              <!-- Big price number. mr-2: right margin space. -->
+
+              <span class="text-gray-500 dark:text-gray-400">/month</span>
+              <!-- Per-month label. -->
+            </div>
+
+            <ul role="list" class="mb-8 space-y-4 text-left">
+              <!-- Feature list for the plan.
+                   role="list": accessibility hint that this is a list.
+                   mb-8: space below list.
+                   space-y-4: vertical space between list items.
+                   text-left: left-align bullets even though overall card is centered. -->
+
+              <li class="flex items-center space-x-3">
+                <!-- One feature line with an icon and text.-->
+
+                <svg class="flex-shrink-0 w-5 h-5 text-green-500 dark:text-green-400"
+                     fill="currentColor"
+                     viewBox="0 0 20 20"
+                     xmlns="http://www.w3.org/2000/svg">
+                  <!-- Checkmark icon (inline SVG). flex-shrink-0 prevents it from shrinking;
+                       w-5 h-5: 20px size; text-green-500: green color. -->
+                  <path fill-rule="evenodd"
+                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                        clip-rule="evenodd" />
+                  <!-- Path data that draws the checkmark shape. -->
+                </svg>
+
+                <span>Basic AI filtering (demo mode)</span>
+                <!-- Text description of the feature. -->
+              </li>
+
+              <li class="flex items-center space-x-3">
+                <!-- Second feature line. Same pattern. -->
+                <svg class="flex-shrink-0 w-5 h-5 text-green-500 dark:text-green-400" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                <span>Works with one streaming device</span>
+              </li>
+
+              <li class="flex items-center space-x-3">
+                <!-- Third feature line. -->
+                <svg class="flex-shrink-0 w-5 h-5 text-green-500 dark:text-green-400" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                <span>No parental lock or logs</span>
+              </li>
+            </ul>
+
+            <a href="#"
+               id="planFreeBtn"
+               class="text-white bg-primary-600 hover:bg-primary-700 focus:ring-4 focus:ring-primary-200 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:text-white dark:focus:ring-primary-900"
+               data-plan-select="Free Tier">
+               <!-- Primary action button for the free plan.
+                    - id="planFreeBtn": main.js uses this to attach a click handler.
+                    - data-plan-select="Free Tier": attribute used by JS to know which
+                      plan the user picked.
+                    When clicked, main.js is supposed to:
+                       * save the plan choice (e.g., localStorage)
+                       * update current-plan display on Account/Help pages.
+                -->
+
+              Try free
+              <!-- Visible button text. -->
+            </a>
+
+          </div>
+
+          <!-- Flexible Subscription -->
+          <div class="flex flex-col p-6 mx-auto max-w-lg text-center text-gray-900 bg-white rounded-lg border border-gray-100 shadow dark:border-gray-600 xl:p-8 dark:bg-gray-800 dark:text-white">
+            <!-- Second pricing card: Flexible Subscription plan.
+                 Uses same style as Free card for consistent look. -->
+
+            <!-- Most Popular pill -->
+            <div class="mb-3 flex justify-center">
+              <!-- Wrapper for the "Most Popular" badge.
+                   flex justify-center centers the badge horizontally. -->
+
+              <span class="inline-flex items-center px-3 py-1 text-xs font-semibold text-primary-700 bg-primary-100 rounded-full">
+                <!-- Badge styled as a small rounded pill.
+                     inline-flex: align icon + text inline.
+                     px/py: padding.
+                     text-xs: tiny text.
+                     rounded-full: fully rounded edges. -->
+
+                Most Popular
+              </span>
+            </div>
+
+            <h3 class="mb-4 text-2xl font-semibold">Flexible Subscription</h3>
+            <!-- Title of this plan. -->
+
+            <p class="font-light text-gray-500 sm:text-lg dark:text-gray-400">
+              <!-- Short description of how this payment structure works. -->
+
+              Pay monthly until you own ISweep. Once you reach $350 total, it’s yours for life.
+            </p>
+
+            <div class="flex justify-center items-baseline my-8">
+              <!-- Price row for this plan. -->
+
+              <span class="mr-2 text-5xl font-extrabold">$6+</span>
+              <!-- Starting price per month (flexible). -->
+
+              <span class="text-gray-500 dark:text-gray-400">/month</span>
+            </div>
+
+            <ul role="list" class="mb-8 space-y-4 text-left">
+              <!-- Feature list for this plan. -->
+
+              <li class="flex items-center space-x-3">
+                <!-- Full Smart Filtering feature. -->
+                <svg class="flex-shrink-0 w-5 h-5 text-green-500 dark:text-green-400" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                <span>Full Smart Filtering on TV, mobile, and desktop</span>
+              </li>
+
+              <li class="flex items-center space-x-3">
+                <!-- Actions feature. -->
+                <svg class="flex-shrink-0 w-5 h-5 text-green-500 dark:text-green-400" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                <span>Actions: mute, skip scene, fast-forward</span>
+              </li>
+
+              <li class="flex items-center space-x-3">
+                <!-- Observer Mode + Parental Lock feature. -->
+                <svg class="flex-shrink-0 w-5 h-5 text-green-500 dark:text-green-400" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                <span>Observer Mode + Parental Lock</span>
+              </li>
+
+              <li class="flex items-center space-x-3">
+                <!-- Log/report feature. -->
+                <svg class="flex-shrink-0 w-5 h-5 text-green-500 dark:text-green-400" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                <span>Monthly session logs & activity reports</span>
+              </li>
+            </ul>
+
+            <a href="#"
+               id="planFlexibleBtn"
+               class="text-white bg-primary-600 hover:bg-primary-700 focus:ring-4 focus:ring-primary-200 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:text-white dark:focus:ring-primary-900"
+               data-plan-select="Flexible Subscription">
+               <!-- Main button for choosing the Flexible Subscription plan.
+                    id="planFlexibleBtn" lets main.js attach click behavior.
+                    data-plan-select="Flexible Subscription" tells JS which
+                    named plan to store.
+                    When clicked, your global script can:
+                      - save "Flexible Subscription" into localStorage,
+                      - mark the current plan on Account page,
+                      - enable the full ISweep demo features. -->
+
+              Subscribe
+            </a>
+
+          </div>
+
+          <!-- Full Ownership -->
+          <div class="flex flex-col p-6 mx-auto max-w-lg text-center text-gray-900 bg-white rounded-lg border border-gray-100 shadow dark:border-gray-600 xl:p-8 dark:bg-gray-800 dark:text-white">
+            <!-- Third pricing card: Full Ownership one-time purchase plan. -->
+
+            <h3 class="mb-4 text-2xl font-semibold">Full Ownership</h3>
+            <!-- Plan title. -->
+
+            <p class="font-light text-gray-500 sm:text-lg dark:text-gray-400">
+              <!-- Description of the one-time purchase. -->
+
+              One-time payment. Lifetime access and updates.
+            </p>
+
+            <div class="flex justify-center items-baseline my-8">
+              <!-- Price row. -->
+
+              <span class="mr-2 text-5xl font-extrabold">$350</span>
+              <!-- Large one-time price. -->
+
+              <span class="text-gray-500 dark:text-gray-400">one-time</span>
+            </div>
+
+            <ul role="list" class="mb-8 space-y-4 text-left">
+              <!-- Feature list for this plan. -->
+
+              <li class="flex items-center space-x-3">
+                <!-- Unlimited devices feature. -->
+                <svg class="flex-shrink-0 w-5 h-5 text-green-500 dark:text-green-400" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                <span>Unlimited devices & offline support</span>
+              </li>
+
+              <li class="flex items-center space-x-3">
+                <!-- Lifetime updates feature. -->
+                <svg class="flex-shrink-0 w-5 h-5 text-green-500 dark:text-green-400" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                <span>Lifetime updates & early features</span>
+              </li>
+
+              <li class="flex items-center space-x-3">
+                <!-- Priority support feature. -->
+                <svg class="flex-shrink-0 w-5 h-5 text-green-500 dark:text-green-400" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                <span>Priority support & parental profiles</span>
+              </li>
+
+              <li class="flex items-center space-x-3">
+                <!-- Best for families/creators. -->
+                <svg class="flex-shrink-0 w-5 h-5 text-green-500 dark:text-green-400" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                <span>Best for families & content creators</span>
+              </li>
+            </ul>
+
+            <a href="#"
+               id="planFullBtn"
+               class="text-white bg-primary-600 hover:bg-primary-700 focus:ring-4 focus:ring-primary-200 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:text-white dark:focus:ring-primary-900"
+               data-plan-select="Full Ownership">
+               <!-- Action button for the Full Ownership plan.
+                    - id="planFullBtn": used in main.js to handle clicks.
+                    - data-plan-select="Full Ownership": tells JS this is the
+                      one-time purchase plan.
+                    Typical behavior in main.js:
+                      * store "Full Ownership" as current plan
+                      * maybe show a confirmation or navigate to checkout in future. -->
+
+              Own it
+            </a>
+
+          </div>
+
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Auth modal hosts sign-in/create-account flows so the Account link can live inside the dropdown. -->
+  <div id="authModal" class="auth-modal" style="display:none;"> <!-- This outer wrapper provides the modal overlay container. -->
+    <div class="auth-backdrop" data-close-auth style="position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 2000;"> <!-- This backdrop darkens the page and listens for outside clicks to close. -->
+      <div class="auth-dialog" role="dialog" aria-modal="true" style="background: #ffffff; border-radius: 12px; padding: 18px; width: min(480px, 90vw); box-shadow: 0 18px 40px rgba(0,0,0,0.22); position: relative;"> <!-- This dialog holds all auth panels in a compact card. -->
+        <button type="button" class="auth-close" data-close-auth style="position: absolute; top: 10px; right: 10px; border: none; background: transparent; font-size: 1.1rem; cursor: pointer;">×</button> <!-- This close button lets users exit the modal quickly. -->
+
+        <div data-auth-panel="signin" style="display: none;"> <!-- This panel shows the sign-in form. -->
+          <h2 style="margin-top: 0;">Sign In</h2> <!-- This heading labels the sign-in mode. -->
+          <form id="signInForm" style="display: grid; gap: 0.75rem;">
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Email</span>
+              <input type="email" name="email" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Password</span>
+              <input type="password" name="password" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <button type="submit" style="padding: 0.75rem; border-radius: 10px; border: none; background: #2563eb; color: #fff; font-weight: 700;">Continue</button>
+            <button type="button" data-switch-auth="create" style="padding: 0.65rem; border-radius: 10px; border: 1px solid #e5e7eb; background: #fff;">Need an account? Create one</button>
+          </form>
+        </div>
+
+        <div data-auth-panel="create" style="display: none;"> <!-- This panel shows the create-account form. -->
+          <h2 style="margin-top: 0;">Create Account</h2> <!-- This heading labels the registration mode. -->
+          <form id="createAccountForm" style="display: grid; gap: 0.75rem;">
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Full Name</span>
+              <input type="text" name="name" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Email</span>
+              <input type="email" name="email" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Password</span>
+              <input type="password" name="password" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Confirm Password</span>
+              <input type="password" name="confirm" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <button type="submit" style="padding: 0.75rem; border-radius: 10px; border: none; background: #2563eb; color: #fff; font-weight: 700;">Create Account</button>
+            <button type="button" data-switch-auth="signin" style="padding: 0.65rem; border-radius: 10px; border: 1px solid #e5e7eb; background: #fff;">Already have an account? Sign in</button>
+          </form>
+        </div>
+
+        <div data-auth-panel="account" style="display: none;"> <!-- This panel shows a simple account summary when signed in. -->
+          <h2 style="margin-top: 0;">Account</h2> <!-- This heading labels the account view. -->
+          <p id="accountSummary" style="margin: 0 0 0.75rem 0;">Signed in user details appear here.</p> <!-- This paragraph will be populated with the user’s name/email from localStorage. -->
+          <button type="button" data-logout style="padding: 0.75rem; border-radius: 10px; border: none; background: #ef4444; color: #fff; font-weight: 700;">Log Out</button> <!-- This button signs the user out from within the modal. -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

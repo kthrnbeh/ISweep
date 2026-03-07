@@ -1,0 +1,19 @@
+commit 3257d6143cfe8400eb597ddda1473b624e80075f
+Author: kthrnbeh <kthrnbeh@yahoo.com>
+Date:   Sat Feb 14 14:41:20 2026 -0700
+
+    comp up
+
+diff --git a/app.py b/app.py
+index 7e28a3e..ce1f664 100644
+--- a/app.py
++++ b/app.py
+@@ -238,7 +238,7 @@ def analyze_event():
+     if isinstance(raw_user_id, int) or (isinstance(raw_user_id, str) and raw_user_id.isdigit()):
+         numeric_id = int(raw_user_id)
+         user = db.get_user_by_id(numeric_id)
+-    if user is None and isinstance(raw_user_id, str):
++    if user is None and isinstance(raw_user_id, str) and hasattr(db, 'get_user_by_username'):
+         user = db.get_user_by_username(raw_user_id)
+         if user:
+             numeric_id = user['id']

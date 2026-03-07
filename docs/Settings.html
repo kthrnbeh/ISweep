@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<!-- Declares this document uses HTML5. Helps browsers render with modern standards. -->
+
+<html lang="en">
+<!-- Root HTML element. lang="en" tells tools and screen readers the content is in English. -->
+
+<head>
+  <!-- HEAD: metadata, scripts, styles, and document title. Not directly visible content. -->
+
+  <script src="api.js" defer></script>
+  <script src="main.js" defer></script>
+
+  <!-- Loads your global JavaScript file from root (same folder as this HTML).
+       "defer" means: download script now but only run it after HTML has been parsed.
+       NOTE: You ALSO load scripts/main.js below. That may be accidental duplication. -->
+
+  <meta charset="UTF-8" />
+  <!-- Uses UTF-8 character encoding so special characters display correctly. -->
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Makes the layout responsive:
+       - width=device-width: viewport width matches device width.
+       - initial-scale=1.0: default zoom is 1 (no zoom) on mobile. -->
+
+  <title>Settings | ISweep</title>
+  <!-- Text displayed in the browser tab for this page. -->
+
+  <link rel="stylesheet" href="styles/site-plan.css" />
+  <!-- Shared stylesheet for site-wide layout, header, cards, fonts, etc. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;500&display=swap" rel="stylesheet">
+
+</head>
+
+<body>
+  <!-- BODY: everything the user sees or interacts with. -->
+
+  <header class="site-header">
+    <div class="container header-inner">
+
+      <div class="nav-left">
+        <a class="logo-box" href="index.html">
+          <img src="images/ISweep.png" alt="ISweep logo" />
+          <div class="logo-block">
+            <h1 class="site-title">ISweep</h1>
+            <span class="tagline">Keeping it all clean.</span>
+          </div>
+        </a>
+
+        <nav class="main-nav-left">
+          <a href="index.html">Home</a>
+          <a href="Filter.html">Filters</a>
+          <a href="Plans.html">Plans</a>
+        </nav>
+      </div>
+
+      <div class="nav-right">
+        <a href="Help.html" class="help-link">Help</a>
+
+        <div class="kb-wrapper">
+          <button id="kbToggle" class="kb-avatar">KB</button>
+
+          <div id="kbDropdown" class="kb-dropdown hidden">
+            <div class="dropdown-section">
+              <button id="themeToggleDropdown">Toggle Theme</button>
+            </div>
+            <div class="dropdown-section">
+              <a href="Account.html">Account</a>
+              <a href="Settings.html">Settings</a>
+              <button id="signOutBtn" data-logout>Sign Out</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- Main Settings Content -->
+  <main class="account-page container" style="display: grid; grid-template-columns: 1fr 320px; gap: 1.25rem; align-items: start;"> <!-- This grid creates a main column plus a right contextual panel to mimic a control center without changing colors. -->
+
+    <section style="display: grid; gap: 1rem;"> <!-- This column stacks primary settings cards to keep the layout organized. -->
+
+      <header class="card" style="padding: 1.1rem; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: center;"> <!-- This status header surfaces observer mode and active filters to feel like a dashboard bar. -->
+        <div style="display: flex; align-items: center; gap: 0.6rem;"> <!-- This row shows observer mode state. -->
+          <span style="width: 10px; height: 10px; border-radius: 999px; background: #22c55e;"></span> <!-- This dot signals observer mode is on. -->
+          <div>
+            <strong>Observer Mode</strong> <!-- This label names the monitoring state. -->
+            <p style="margin: 0; color: #475569;">On</p> <!-- This text shows the current observer mode status. -->
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.6rem; justify-content: flex-end;"> <!-- This row summarizes active filters. -->
+          <span style="padding: 0.35rem 0.65rem; border-radius: 999px; background: #e0f2fe; color: #075985; font-weight: 700;">3 Active</span> <!-- This badge highlights how many filters are active to reinforce control awareness. -->
+          <span style="color: #475569;">Filters</span> <!-- This label clarifies the badge meaning. -->
+        </div>
+      </header>
+
+      <h1 style="margin: 0;">Settings</h1> <!-- This heading labels the main column clearly. -->
+      <p class="subtitle" style="margin-top: 0;">Choose how ISweep filters content, responds to media, and keeps your experience safe.</p> <!-- This subtitle keeps context while fitting the new layout. -->
+
+      <!-- CONTENT FILTERS -->
+      <section class="card"> <!-- Card-shaped block for Content Filters section (box with padding and shadow). -->
+
+        <h2>Content Filters</h2> <!-- Section heading for what types of content get filtered. -->
+
+        <form class="profile-form" id="contentFiltersForm"> <!-- Form grouping the filter checkboxes. In a full app, you'd handle submission with JS or server. -->
+
+        <div class="item-row"> <!-- Row layout: text + checkboxes on left, Save button on right. -->
+
+          <div> <!-- Container for the filter labels and checkboxes. -->
+
+            <strong>Filter Categories</strong> <!-- Bold label for the group of filters. -->
+
+            <p>Select what you want ISweep to catch and manage.</p> <!-- Short explanation text. -->
+
+            <label> <!-- Label wraps the checkbox and text so clicking text toggles checkbox. -->
+
+              <input type="checkbox" name="filter-profanity" checked />
+              <!-- Checkbox to enable/disable filtering profanity.
+                   name="filter-profanity": value used when form submits.
+                   checked: default state is ON. -->
+
+              Profanity / swearing
+              <!-- Visible text describing this filter category. -->
+            </label><br />
+            <!-- <br> adds a line break after this label. -->
+
+            <label>
+              <input type="checkbox" name="filter-sexual" checked />
+              <!-- Checkbox for filtering sexual content. On by default. -->
+
+              Sexual content / nudity
+            </label><br />
+
+            <label>
+              <input type="checkbox" name="filter-violence" />
+              <!-- Checkbox for graphic violence filter. Not checked by default
+                   so user has to opt-in to this level. -->
+
+              Graphic violence
+            </label><br />
+
+            <label>
+              <input type="checkbox" name="filter-horror" />
+              <!-- Checkbox for horror/jump scare filtering. -->
+
+              Horror / jump scares
+            </label><br />
+
+            <label>
+              <input type="checkbox" name="filter-crude" />
+              <!-- Checkbox for crude/inappropriate humor. -->
+
+              Crude or inappropriate humor
+            </label>
+          </div>
+
+          <button type="submit">Save</button> <!-- Button that submits this form. A full implementation would prevent default submission in JS, collect checkbox values, and save them to backend or localStorage as user’s filter prefs. -->
+        </div>
+      </form>
+    </section>
+
+    <!-- ACTIONS (MUTE / SKIP / FAST-FORWARD) -->
+    <section class="card"> <!-- Card controlling *what* ISweep should do when it detects each category. -->
+
+      <h2>Filter Actions</h2> <!-- Section heading for filter behavior (mute/skip/FF/log). -->
+
+       <form class="profile-form" id="filterActionsForm"> <!-- Form for all action settings. Could be per-category Save or one big save. -->
+
+        <!-- Profanity action -->
+        <div class="item-row"> <!-- Row for profanity behavior + Save button. -->
+
+          <div>
+            <strong>Profanity</strong> <!-- Label naming the category. -->
+
+            <p>What should ISweep do when it hears profanity?</p> <!-- Description of the setting. -->
+
+            <select name="action-profanity" required> <!-- Drop-down to choose how to respond to profanity.
+                   name="action-profanity": key when we submit or process the form. -->
+
+              <option value="mute" selected>Mute audio only</option> <!-- Default action: audio only is muted. (No skipping.) -->
+
+              <option value="skip">Skip the scene</option> <!-- Alternative: jump ahead past the scene. -->
+
+              <option value="fast-forward">Fast-forward 10 seconds</option> <!-- Alternative: auto fast-forward a fixed duration. -->
+
+              <option value="log-only">Just log it (no action)</option> <!-- Alternative: do nothing to the video, just record that it happened. -->
+            </select>
+          </div>
+
+          <button type="submit">Save</button> <!-- Saves profanity action setting (in a real app). For now, just a visual "Save" button; behavior handled by JS later. -->
+        </div>
+
+        <!-- Sexual content action -->
+        <div class="item-row"> <!-- Row for sexual content behavior. -->
+
+          <div>
+            <strong>Sexual Content</strong> <!-- Label for this category. -->
+
+            <p>Choose how ISweep responds to sexual content.</p> <!-- Explanation text. -->
+
+            <select name="action-sexual" required> <!-- Drop-down of possible actions for sexual content. -->
+
+              <option value="skip" selected>Skip the scene</option> <!-- Default: skip entire scene when sexual content is detected. -->
+
+              <option value="fast-forward">Fast-forward 30 seconds</option> <!-- Alternative: jump forward a bit. -->
+
+              <option value="mute">Mute audio only</option> <!-- Alternative: only mute audio, leave video shown. -->
+
+              <option value="log-only">Just log it (no action)</option> <!-- Alternative: quietly log the event but don’t interfere. -->
+            </select>
+          </div>
+
+          <button type="submit">Save</button> <!-- Button to save sexual content action preference. -->
+        </div>
+
+        <!-- Violence action -->
+        <div class="item-row"> <!-- Row for violence behavior. -->
+
+          <div>
+            <strong>Violence</strong> <!-- Label for violence category. -->
+
+            <p>How strict do you want ISweep to be with violence?</p> <!-- Explanation text. -->
+
+            <select name="action-violence" required> <!-- Drop-down for violence settings. -->
+
+              <option value="mute">Mute audio only</option> <!-- Option: only mute sound. -->
+
+              <option value="skip" selected>Skip intense scenes</option> <!-- Default: skip scenes flagged as intense/gory/etc. -->
+
+              <option value="fast-forward">Fast-forward 15 seconds</option> <!-- Option: jump ahead by a fixed time. -->
+
+              <option value="log-only">Just log it (no action)</option> <!-- Option: do nothing but record it in logs. -->
+            </select>
+          </div>
+
+          <button type="submit">Save</button> <!-- Saves chosen violence behavior (once wired to JS/backend). -->
+        </div>
+      </form>
+    </section>
+
+    <!-- SENSITIVITY -->
+    <section class="card"> <!-- Card for overall strictness of filtering. -->
+
+      <h2>Sensitivity</h2> <!-- Heading for sensitivity / strictness control. -->
+
+      <form class="profile-form" id="sensitivityForm">
+        <div class="item-row"> <!-- Row for slider + label + Save button. -->
+
+          <div>
+            <strong>Filter Sensitivity</strong> <!-- Title describing what the slider controls. -->
+
+            <p>Adjust how strict ISweep should be overall.</p> <!-- Explanation. -->
+
+            <label> <!-- Label wraps Low text, slider, and High text so they’re grouped. -->
+
+              Low <!-- Text shown left of slider. -->
+
+              <input type="range" name="sensitivity" min="1" max="3" value="2" /> <!-- Range slider input.
+                   name="sensitivity": form field name.
+                   min="1", max="3": possible values are 1, 2, or 3 (3 levels).
+                   value="2": default is middle level.
+                   In an implementation, JS would read this and tune thresholds. -->
+
+              High <!-- Text shown right of slider. -->
+            </label>
+          </div>
+
+          <button type="submit">Save</button> <!-- Saves chosen sensitivity level. JS/backend would persist this. -->
+        </div>
+      </form>
+    </section>
+
+    <!-- NOTIFICATIONS -->
+    <section class="card"> <!-- Card for notification preferences. -->
+
+      <h2>Notifications</h2> <!-- Heading for notifications section. -->
+
+      <form class="profile-form" id="notificationsForm">
+        <div class="item-row">
+          <div>
+            <strong>Session Reports</strong> <!-- Title for this group of notification settings. -->
+
+            <p>How would you like to receive viewing summaries?</p> <!-- Explanation text. -->
+
+            <label>
+              <input type="checkbox" name="notify-email" checked />
+              <!-- Checkbox to get a weekly email summary.
+                   checked by default means they start on. -->
+
+              Email me a weekly summary
+            </label><br />
+
+            <label>
+              <input type="checkbox" name="notify-inapp" checked />
+              <!-- Checkbox to show in-app notification after each session. -->
+
+              Show in-app notifications after each session
+            </label><br />
+
+            <label>
+              <input type="checkbox" name="notify-none" />
+              <!-- Checkbox to opt-out of all notifications. -->
+
+              Don’t send any notifications
+            </label>
+          </div>
+
+          <button type="submit">Save</button> <!-- Saves notification choices. Real behavior: JS might enforce that "notify-none" unchecks others, etc. -->
+        </div>
+      </form>
+    </section>
+
+    <!-- PARENTAL CONTROLS -->
+    <section class="card"> <!-- Card offering parental PIN and lock settings. -->
+
+      <h2>Parental Controls</h2> <!-- Heading for parental control section. -->
+
+      <form class="profile-form" id="parentalForm">
+        <div class="item-row">
+          <div>
+            <strong>Parental PIN</strong> <!-- Title describing PIN settings. -->
+
+            <p>Lock settings so kids can’t change filters without a PIN.</p> <!-- Explanation of what the PIN protects. -->
+
+            <label> <!-- Label wrapping PIN input. -->
+
+              Create / Update PIN<br /> <!-- Text above the PIN input, plus a line break. -->
+
+              <input
+                class="profile-input"
+                type="password"
+                name="parent-pin"
+                minlength="4"
+                maxlength="6"
+                placeholder="Enter 4–6 digit PIN"
+                required
+              />
+              <!-- Password-type input so digits are hidden.
+                   class="profile-input": shared styling.
+                   name="parent-pin": field name.
+                   minlength/maxlength: restricts length to 4–6 characters.
+                   placeholder: hints user to enter 4–6 digits.
+                   required: cannot submit without a PIN value. -->
+            </label>
+
+            <br /><br /> <!-- Two line breaks for visual spacing. -->
+
+            <label>
+              <input type="checkbox" name="require-pin" checked />
+              <!-- Checkbox controlling whether a PIN is required to change filters/plans.
+                   checked by default = PIN-based locking is on. -->
+
+              Require PIN to change filters or plans
+            </label>
+          </div>
+
+          <button type="submit">Save</button> <!-- In full implementation: saves PIN and lock preference. Backend must handle secure storage and verification; JS can handle gating the UI as well. -->
+        </div>
+      </form>
+    </section>
+
+    </section>
+
+    <aside class="card" style="padding: 1.1rem; position: sticky; top: 1rem; display: grid; gap: 0.75rem;"> <!-- This contextual panel shows focused category info to mirror a control center sidebar. -->
+      <h3 style="margin: 0;">Context</h3> <!-- This heading labels the sidebar. -->
+      <p style="margin: 0; color: #475569;">Select a category to preview its current action and sensitivity.</p> <!-- This note guides users on how the panel is used. -->
+      <div style="padding: 0.75rem; border: 1px solid #e5e7eb; border-radius: 10px; background: #f8fafc;"> <!-- This box presents current selection details. -->
+        <strong>Selected: Profanity</strong> <!-- This placeholder shows the focused category. -->
+        <p style="margin: 0.35rem 0 0 0; color: #475569;">Action: Mute audio only</p> <!-- This line summarizes the configured action. -->
+        <p style="margin: 0.15rem 0 0 0; color: #475569;">Duration: 4s</p> <!-- This line shows the action duration. -->
+      </div>
+      <div style="padding: 0.75rem; border: 1px solid #e5e7eb; border-radius: 10px; background: #f8fafc;"> <!-- This secondary box can hold tips or helper text. -->
+        <strong>Tip</strong> <!-- This heading labels the tip. -->
+        <p style="margin: 0.35rem 0 0 0; color: #475569;">Use “Log only” for categories you’re still tuning.</p> <!-- This advice encourages cautious experimentation. -->
+      </div>
+    </aside>
+
+  </main>
+
+  <!-- Auth modal hosts sign-in/create-account flows so the Account link can live inside the dropdown. -->
+  <div id="authModal" class="auth-modal" style="display:none;"> <!-- This outer wrapper provides the modal overlay container. -->
+    <div class="auth-backdrop" data-close-auth style="position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 2000;"> <!-- This backdrop darkens the page and listens for outside clicks to close. -->
+      <div class="auth-dialog" role="dialog" aria-modal="true" style="background: #ffffff; border-radius: 12px; padding: 18px; width: min(480px, 90vw); box-shadow: 0 18px 40px rgba(0,0,0,0.22); position: relative;"> <!-- This dialog holds all auth panels in a compact card. -->
+        <button type="button" class="auth-close" data-close-auth style="position: absolute; top: 10px; right: 10px; border: none; background: transparent; font-size: 1.1rem; cursor: pointer;">×</button> <!-- This close button lets users exit the modal quickly. -->
+
+        <div data-auth-panel="signin" style="display: none;"> <!-- This panel shows the sign-in form. -->
+          <h2 style="margin-top: 0;">Sign In</h2> <!-- This heading labels the sign-in mode. -->
+          <form id="signInForm" style="display: grid; gap: 0.75rem;">
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Email</span>
+              <input type="email" name="email" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Password</span>
+              <input type="password" name="password" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <button type="submit" style="padding: 0.75rem; border-radius: 10px; border: none; background: #2563eb; color: #fff; font-weight: 700;">Continue</button>
+            <button type="button" data-switch-auth="create" style="padding: 0.65rem; border-radius: 10px; border: 1px solid #e5e7eb; background: #fff;">Need an account? Create one</button>
+          </form>
+        </div>
+
+        <div data-auth-panel="create" style="display: none;"> <!-- This panel shows the create-account form. -->
+          <h2 style="margin-top: 0;">Create Account</h2> <!-- This heading labels the registration mode. -->
+          <form id="createAccountForm" style="display: grid; gap: 0.75rem;">
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Full Name</span>
+              <input type="text" name="name" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Email</span>
+              <input type="email" name="email" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Password</span>
+              <input type="password" name="password" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <label style="display: grid; gap: 0.25rem;">
+              <span>Confirm Password</span>
+              <input type="password" name="confirm" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" />
+            </label>
+            <button type="submit" style="padding: 0.75rem; border-radius: 10px; border: none; background: #2563eb; color: #fff; font-weight: 700;">Create Account</button>
+            <button type="button" data-switch-auth="signin" style="padding: 0.65rem; border-radius: 10px; border: 1px solid #e5e7eb; background: #fff;">Already have an account? Sign in</button>
+          </form>
+        </div>
+
+        <div data-auth-panel="account" style="display: none;"> <!-- This panel shows a simple account summary when signed in. -->
+          <h2 style="margin-top: 0;">Account</h2> <!-- This heading labels the account view. -->
+          <p id="accountSummary" style="margin: 0 0 0.75rem 0;">Signed in user details appear here.</p> <!-- This paragraph will be populated with the user’s name/email from localStorage. -->
+          <button type="button" data-logout style="padding: 0.75rem; border-radius: 10px; border: none; background: #ef4444; color: #fff; font-weight: 700;">Log Out</button> <!-- This button signs the user out from within the modal. -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <!-- Site footer at bottom of the page. -->
+
+    <p>&copy; 2025 ISweep Inc. All rights reserved.</p>
+    <!-- Copyright text. &copy; = © symbol. -->
+  </footer>
+  <!-- In a robust version, you’d first check if (btn) exists before adding the listener. -->
+</body>
+</html>
