@@ -54,6 +54,8 @@
   </script>
 
   <!-- Global JS for theme + plan selection -->
+  <!-- Load backend helpers first so window.ISweepApi exists before main.js. -->
+  <script src="api.js" defer></script>
   <script src="main.js" defer></script>
   <!-- Loads your shared JS file:
        - theme toggle behavior (adds/removes dark-mode class)
