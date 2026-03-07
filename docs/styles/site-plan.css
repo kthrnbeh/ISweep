@@ -675,8 +675,15 @@ body.dark .isweep-dev-panel .primary {
   text-shadow: 0 0 6px rgba(0,0,0,0.35);
 }
 
-.dark .sub-row-left {
-  color: #0f172a; /* Keep label text dark against the light row surface even in dark mode */
+body.dark .subcategory-list .sub-row {
+  background: rgba(255,255,255,0.08); /* Lift rows slightly off the dark card */
+  border-color: rgba(255,255,255,0.24);
+}
+
+body.dark .subcategory-list .sub-row-left,
+body.dark .subcategory-list .sub-row-right,
+body.dark .subcategory-list .sub-row strong {
+  color: #ffffff; /* Keep subcategory labels (profanity, etc.) bright in dark mode */
 }
 
 .sub-row-left input {
