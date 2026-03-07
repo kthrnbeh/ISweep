@@ -171,6 +171,19 @@ body{
 .logo-block{display:flex; flex-direction:column; line-height:1;}
 .logo-block .site-title{margin:0; font-size:20px; color:var(--brand-2);}
 .logo-block .tagline{font-family:'Dancing Script', cursive; font-size:0.7rem; margin-top:3px; opacity:0.65; letter-spacing:0.5px;}
+
+.dark .logo-box img {
+  filter: brightness(1.08) contrast(1.05); /* Subtle lift for logo visibility */
+}
+
+.dark .logo-block .site-title {
+  color: #e2f3ff; /* Brighter brand mark in dark header */
+}
+
+.dark .logo-block .tagline {
+  color: #cbd5e1;
+  opacity: 0.8;
+}
 .main-nav{margin-left:auto; display:flex; gap:20px}
 .main-nav a,
 .main-nav-left a{
@@ -186,6 +199,20 @@ body{
 
 .dark .main-nav a:hover {
   background: var(--card);
+}
+
+.dark .main-nav-left a {
+  color: #e2e8f0; /* Lift default nav contrast in dark mode */
+}
+
+.dark .main-nav-left a:hover {
+  background: #1b2a3f; /* Slightly brighter hover without redesigning */
+  color: #f8fafc;
+}
+
+.dark .main-nav a.active,
+.dark .main-nav-left a.active {
+  color: var(--brand-2); /* Keep active state aligned with brand accent */
 }
 .theme-toggle{
   margin-left:6px; border:1px solid var(--border); background:#fff;
@@ -613,6 +640,14 @@ body.dark .isweep-dev-panel .primary {
   gap: 10px;
   font-weight: 600;
   color: var(--text);
+}
+
+.dark [data-category-name] {
+  color: #e2f3ff; /* Increase heading contrast inside category card */
+}
+
+.dark .sub-row-left {
+  color: #f8fafc; /* Brighten row labels like Profanity/Slurs in dark mode */
 }
 
 .sub-row-left input {
