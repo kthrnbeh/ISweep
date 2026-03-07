@@ -648,8 +648,7 @@ body.dark .isweep-dev-panel .primary {
 }
 
 .dark .sub-row-left {
-  color: #f8fafc; /* Brighten row labels like Profanity/Slurs in dark mode */
-  text-shadow: 0 0 4px rgba(0,0,0,0.3);
+  color: #dbe7f3; /* Darker but clear labels in dark mode (e.g., Profanity/Slurs) */
 }
 
 .sub-row-left input {
