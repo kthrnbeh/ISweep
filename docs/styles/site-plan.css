@@ -425,6 +425,19 @@ body.dark .filters-hero .eyebrow {
   color: #cbd5e1; /* Lighten eyebrow label in dark mode */
 }
 
+body.dark .filters-page .filters-hero h1 {
+  color: #f8fbff !important; /* Force the Filters hero title to render bright white in dark mode */
+  opacity: 1; /* Prevent any inherited dimming from making the title look gray */
+}
+
+body.dark .filters-page .filters-hero .eyebrow {
+  color: #cbd5e1 !important; /* Brighten the CONTROL CENTER label in dark mode */
+}
+
+body.dark .filters-page .filters-hero .subtitle {
+  color: #dbe7f3 !important; /* Lift the subtitle so it reads clearly on the dark hero card */
+}
+
 .filters-hero .subtitle {
   margin: 0;
   color: var(--muted);
