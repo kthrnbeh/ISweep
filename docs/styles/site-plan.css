@@ -427,16 +427,19 @@ body.dark .filters-hero .eyebrow {
 
 body.dark .filters-page .filters-hero h1 {
   color: #ffffff !important; /* Force the main Filters hero heading to bright white in dark mode */
-  opacity: 1; /* Prevent inherited dimming from making the heading look gray */
-  text-shadow: none; /* Keep the heading crisp instead of hazy */
+  opacity: 1 !important; /* Prevent inherited dimming from making the heading look gray */
+  filter: none !important; /* Prevent any visual darkening */
+  text-shadow: none !important; /* Keep the heading crisp */
 }
 
 body.dark .filters-page .filters-hero .eyebrow {
   color: #cbd5e1 !important; /* Brighten the CONTROL CENTER label in dark mode */
 }
 
-body.dark .filters-page .filters-hero .subtitle {
-  color: #dbe7f3 !important; /* Lift the subtitle so it reads clearly on the dark hero card */
+body.dark .filters-page .filters-hero .subtitle,
+body.dark .filters-page .filters-hero p {
+  color: #dbe7f3 !important; /* Keep hero helper text readable on the dark card */
+  opacity: 1 !important;
 }
 
 .filters-hero .subtitle {
@@ -680,10 +683,12 @@ body.dark .subcategory-list .sub-row {
   border-color: rgba(255,255,255,0.24);
 }
 
-body.dark .subcategory-list .sub-row-left,
-body.dark .subcategory-list .sub-row-right,
-body.dark .subcategory-list .sub-row strong {
-  color: #ffffff; /* Keep subcategory labels (profanity, etc.) bright in dark mode */
+body.dark .filters-page .subcategory-list .sub-row .sub-row-left,
+body.dark .filters-page .subcategory-list .sub-row .sub-row-left span,
+body.dark .filters-page .subcategory-list .sub-row .sub-row-left label,
+body.dark .filters-page .subcategory-list .sub-row .sub-row-left strong {
+  color: #ffffff !important; /* Make the visible row label text white on the dark row */
+  opacity: 1 !important;
 }
 
 .sub-row-left input {
