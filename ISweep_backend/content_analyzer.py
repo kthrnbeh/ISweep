@@ -1,164 +1,171 @@
 """
 ISWEEP COMPONENT: Content Analyzer
+# Explains this file belongs to the ISWEEP content analyzer module
 
 This module inspects caption text and assigns playback actions (mute/skip/fast_forward/none)
+# States the main purpose: map captions to playback controls
 based on user preferences. It is invoked by /event so the extension can react in real time.
+# Notes when this analyzer is called (via /event)
 
 System connection:
     Extension sends caption -> Backend /event -> ContentAnalyzer.analyze_decision -> decision JSON
+# Shows end-to-end data flow from extension to backend decision
 """
 
-import re
-from typing import Dict, List
-from better_profanity import profanity
+import re  # Imports regex utilities for pattern matching
+from typing import Dict, List  # Imports type annotations for dictionaries and lists
+from better_profanity import profanity  # Imports third-party profanity checker
+
 
 class ContentAnalyzer:
     """Analyzes caption/transcript text and determines playback control actions."""
-    
+    # Class docstring describes purpose of the analyzer
+
     # Define content patterns for different categories
     VIOLENCE_PATTERNS = [
-        r'\b(kill|killed|murder|shot|shoot|stab|blood|violence|violent|attack|fight|gun|weapon)\b',
-        r'\b(death|die|dying|dead)\b',
-        r'\b(assault|beat|beating|punch|hit)\b'
+        r'\b(kill|killed|murder|shot|shoot|stab|blood|violence|violent|attack|fight|gun|weapon)\b',  # Regex for common violence terms
+        r'\b(death|die|dying|dead)\b',  # Regex for death-related words
+        r'\b(assault|beat|beating|punch|hit)\b'  # Regex for assault/fighting words
     ]
-    
+
     SEXUAL_PATTERNS = [
-        r'\b(sex|sexual|naked|nude|explicit)\b',
-        r'\b(rape|assault|abuse)\b',
-        r'\b(intercourse|seduce|seduction)\b'
+        r'\b(sex|sexual|naked|nude|explicit)\b',  # Regex for explicit/sexual terms
+        r'\b(rape|assault|abuse)\b',  # Regex for severe sexual violence terms
+        r'\b(intercourse|seduce|seduction)\b'  # Regex for intercourse/innuendo terms
     ]
-    
+
     # Sensitivity thresholds (number of matches before triggering action)
     SENSITIVITY_THRESHOLDS = {
-        'low': 5,      # Very lenient, needs many matches
+        'low': 5,      # Very lenient: needs many matches
         'medium': 2,   # Moderate sensitivity
-        'high': 1      # Very strict, one match triggers action
+        'high': 1      # Very strict: one match triggers action
     }
     SENSITIVITY_ACTIONS = {
-        'low': ('mute', 5),          # least restrictive
-        'medium': ('fast_forward', 10),
-        'high': ('skip', 15)         # most restrictive
+        'low': ('mute', 5),          # Low sensitivity maps to mute for 5 seconds
+        'medium': ('fast_forward', 10),  # Medium sensitivity maps to fast-forward for 10 seconds
+        'high': ('skip', 15)         # High sensitivity maps to skip for 15 seconds
     }
     DEFAULT_DURATIONS = {
-        'mute': 4,
-        'skip': 12,
-        'fast_forward': 8,
-        'none': 0
+        'mute': 4,           # Default mute duration in seconds
+        'skip': 12,          # Default skip duration in seconds
+        'fast_forward': 8,   # Default fast-forward duration in seconds
+        'none': 0            # Default duration when no action is taken
     }
-    SEXUAL_KEYWORDS = ['sex', 'sexual', 'naked', 'nude', 'explicit', 'rape', 'intercourse', 'seduce', 'seduction']
-    VIOLENCE_KEYWORDS = ['kill', 'killed', 'murder', 'shot', 'shoot', 'stab', 'blood', 'violence', 'violent', 'attack', 'fight', 'gun', 'weapon', 'death', 'die', 'dying', 'dead', 'assault', 'beat', 'beating', 'punch', 'hit']
-    LANGUAGE_KEYWORDS = ['hell']
-    
+    SEXUAL_KEYWORDS = ['sex', 'sexual', 'naked', 'nude', 'explicit', 'rape', 'intercourse', 'seduce', 'seduction']  # Simple keyword list for sexual content
+    VIOLENCE_KEYWORDS = ['kill', 'killed', 'murder', 'shot', 'shoot', 'stab', 'blood', 'violence', 'violent', 'attack', 'fight', 'gun', 'weapon', 'death', 'die', 'dying', 'dead', 'assault', 'beat', 'beating', 'punch', 'hit']  # Simple keyword list for violence
+    LANGUAGE_KEYWORDS = ['hell']  # Mild language keyword not always caught by the library
+
     def __init__(self):
         """Initialize the content analyzer."""
-        profanity.load_censor_words()
-    
+        profanity.load_censor_words()  # Load the profanity word list into memory
+
     def analyze(self, text: str, user_preferences: Dict) -> str:
         """
         Analyze text and return playback action based on user preferences.
-        
+        # Explains this is a legacy simple API returning just an action string
+
         Args:
-            text: Caption or transcript text to analyze
-            user_preferences: User's filtering preferences
-            
+            text: Caption or transcript text to analyze  # Describes incoming caption
+            user_preferences: User's filtering preferences  # Describes user config
+
         Returns:
-            One of: 'mute', 'skip', 'fast_forward', 'none'
+            One of: 'mute', 'skip', 'fast_forward', 'none'  # Lists possible outputs
         """
         if not text:
-            return 'none'
+            return 'none'  # If no text provided, do nothing
         """Shallow analysis that maps severities to a single action string for legacy APIs."""
-        text_lower = text.lower()
-        
+        text_lower = text.lower()  # Normalize text for case-insensitive checks
+
         # Check language (profanity) filter
         if user_preferences.get('language_filter', True):
-            language_severity = self._check_language(text_lower)
+            language_severity = self._check_language(text_lower)  # Count profanity severity
             threshold = self.SENSITIVITY_THRESHOLDS.get(
                 user_preferences.get('language_sensitivity', 'medium'), 2
-            )
+            )  # Pick threshold based on preferences with default medium
             if language_severity >= threshold:
-                return 'mute'  # Mute for brief profanity
-        
+                return 'mute'  # Mute when profanity meets threshold
+
         # Check sexual content filter
         if user_preferences.get('sexual_content_filter', True):
-            sexual_severity = self._check_sexual_content(text_lower)
+            sexual_severity = self._check_sexual_content(text_lower)  # Count sexual content severity
             threshold = self.SENSITIVITY_THRESHOLDS.get(
                 user_preferences.get('sexual_content_sensitivity', 'medium'), 2
-            )
+            )  # Threshold from preferences with default medium
             if sexual_severity >= threshold:
-                return 'skip'  # Skip sexual content scenes
-        
+                return 'skip'  # Skip scenes with sexual content
+
         # Check violence filter
         if user_preferences.get('violence_filter', True):
-            violence_severity = self._check_violence(text_lower)
+            violence_severity = self._check_violence(text_lower)  # Count violence severity
             threshold = self.SENSITIVITY_THRESHOLDS.get(
                 user_preferences.get('violence_sensitivity', 'medium'), 2
-            )
+            )  # Threshold from preferences with default medium
             if violence_severity >= threshold:
-                return 'fast_forward'  # Fast forward through violence
-        
-        return 'none'
-    
+                return 'fast_forward'  # Fast-forward through violent segments
+
+        return 'none'  # Default action when nothing triggers
+
     def _check_language(self, text: str) -> int:
         """Count profane words using the library plus manual mild keywords (e.g., 'hell')."""
-        score = 0
+        score = 0  # Start severity counter
         if profanity.contains_profanity(text):
-            words = text.split()
-            score += sum(1 for word in words if profanity.contains_profanity(word))
+            words = text.split()  # Split text into individual words
+            score += sum(1 for word in words if profanity.contains_profanity(word))  # Add one for each profane word
 
         # Manual lightweight keyword list for missed mild profanities
-        score += self._count_whole_words(text, self.LANGUAGE_KEYWORDS)
-        return score
-    
+        score += self._count_whole_words(text, self.LANGUAGE_KEYWORDS)  # Add count for custom mild terms
+        return score  # Return total language severity
+
     def _check_sexual_content(self, text: str) -> int:
         """Count sexual-pattern matches to drive skip decisions for explicit scenes."""
-        severity = self._count_whole_words(text, self.SEXUAL_KEYWORDS)
+        severity = self._count_whole_words(text, self.SEXUAL_KEYWORDS)  # Count exact keyword hits
         for pattern in self.SEXUAL_PATTERNS:
-            matches = re.findall(pattern, text, re.IGNORECASE)
-            severity += len(matches)
-        return severity
-    
+            matches = re.findall(pattern, text, re.IGNORECASE)  # Find regex matches for sexual patterns
+            severity += len(matches)  # Add number of regex matches to severity
+        return severity  # Return sexual content severity
+
     def _check_violence(self, text: str) -> int:
         """Count violence-pattern matches to fast-forward through fights/blood."""
-        severity = self._count_whole_words(text, self.VIOLENCE_KEYWORDS)
+        severity = self._count_whole_words(text, self.VIOLENCE_KEYWORDS)  # Count exact violence keyword hits
         for pattern in self.VIOLENCE_PATTERNS:
-            matches = re.findall(pattern, text, re.IGNORECASE)
-            severity += len(matches)
-        return severity
+            matches = re.findall(pattern, text, re.IGNORECASE)  # Find regex matches for violence patterns
+            severity += len(matches)  # Add number of regex matches to severity
+        return severity  # Return violence severity
 
     def _count_whole_words(self, text: str, words: List[str]) -> int:
         """Utility to count whole-word hits so partial matches don't inflate severity."""
-        count = 0
+        count = 0  # Initialize counter
         for word in words:
-            count += len(re.findall(rf'\b{re.escape(word)}\b', text, re.IGNORECASE))
-        return count
+            count += len(re.findall(rf'\b{re.escape(word)}\b', text, re.IGNORECASE))  # Count whole-word matches for each keyword
+        return count  # Return total matches for provided keywords
 
     def analyze_decision(self, text: str, preferences: Dict, confidence: float | None = None) -> Dict:
         """Return structured decision with priority: sexual > violence > language."""
 
         def base_decision(reason: str) -> Dict:
             return {
-                "action": "none",
-                "duration_seconds": 0,
-                "matched_category": None,
-                "reason": reason
+                "action": "none",             # Default action is none
+                "duration_seconds": 0,        # Default duration when no action
+                "matched_category": None,     # No category matched yet
+                "reason": reason              # Explanation for the decision
             }
 
         if not text:
-            return base_decision("No match")
+            return base_decision("No match")  # If empty text, return default decision
 
         if not preferences.get('enabled', True):
-            return base_decision("Filtering disabled")
+            return base_decision("Filtering disabled")  # If filtering disabled, return default
 
-        blocklist = preferences.get('blocklist') if isinstance(preferences.get('blocklist'), dict) else {}
-        items = blocklist.get('items') if isinstance(blocklist.get('items'), list) else []
+        blocklist = preferences.get('blocklist') if isinstance(preferences.get('blocklist'), dict) else {}  # Safely read blocklist config
+        items = blocklist.get('items') if isinstance(blocklist.get('items'), list) else []  # Extract blocklist items if list
         if blocklist.get('enabled') and items:
-            duration = blocklist.get('duration') or self.DEFAULT_DURATIONS.get('mute', 4)
+            duration = blocklist.get('duration') or self.DEFAULT_DURATIONS.get('mute', 4)  # Duration for blocklist action
             for raw_item in items:
-                item = str(raw_item).strip()
+                item = str(raw_item).strip()  # Normalize each blocklist entry to string
                 if not item:
-                    continue
+                    continue  # Skip empty strings
                 if ' ' in item:
-                    if item.lower() in text.lower():
+                    if item.lower() in text.lower():  # Substring match for multi-word phrases
                         return {
                             "action": "mute",
                             "duration_seconds": duration,
@@ -166,8 +173,8 @@ class ContentAnalyzer:
                             "reason": f"blocklist match: {item}"
                         }
                 else:
-                    pattern = rf'\b{re.escape(item)}\b'
-                    if re.search(pattern, text, re.IGNORECASE):
+                    pattern = rf'\b{re.escape(item)}\b'  # Whole-word regex for single words
+                    if re.search(pattern, text, re.IGNORECASE):  # Match single-word blocklist item
                         return {
                             "action": "mute",
                             "duration_seconds": duration,
@@ -175,32 +182,32 @@ class ContentAnalyzer:
                             "reason": f"blocklist match: {item}"
                         }
 
-        text_lower = text.lower()
+        text_lower = text.lower()  # Normalize text for severity checks
         severities = {
-            'language': self._check_language(text_lower),
-            'sexual': self._check_sexual_content(text_lower),
-            'violence': self._check_violence(text_lower)
+            'language': self._check_language(text_lower),       # Profanity severity count
+            'sexual': self._check_sexual_content(text_lower),   # Sexual content severity count
+            'violence': self._check_violence(text_lower)        # Violence severity count
         }
 
         def threshold_for(category: str) -> int:
-            categories = preferences.get('categories', {}) if isinstance(preferences.get('categories'), dict) else {}
-            cat_config = categories.get(category, {}) if isinstance(categories, dict) else {}
-            sensitivity_value = cat_config.get('sensitivity') or preferences.get('sensitivity', 0.7)
+            categories = preferences.get('categories', {}) if isinstance(preferences.get('categories'), dict) else {}  # Pull category-level config map
+            cat_config = categories.get(category, {}) if isinstance(categories, dict) else {}  # Config for specific category
+            sensitivity_value = cat_config.get('sensitivity') or preferences.get('sensitivity', 0.7)  # Sensitivity override or global default
             if isinstance(sensitivity_value, str):
-                return self.SENSITIVITY_THRESHOLDS.get(sensitivity_value, 2)
-            numeric = float(sensitivity_value)
+                return self.SENSITIVITY_THRESHOLDS.get(sensitivity_value, 2)  # Map string sensitivity to threshold
+            numeric = float(sensitivity_value)  # Cast numeric sensitivity
             if numeric < 0.34:
-                return self.SENSITIVITY_THRESHOLDS['low']
+                return self.SENSITIVITY_THRESHOLDS['low']  # Low threshold if numeric below 0.34
             if numeric < 0.67:
-                return self.SENSITIVITY_THRESHOLDS['medium']
-            return self.SENSITIVITY_THRESHOLDS['high']
+                return self.SENSITIVITY_THRESHOLDS['medium']  # Medium threshold if numeric below 0.67
+            return self.SENSITIVITY_THRESHOLDS['high']  # Otherwise high threshold
 
         def category_config(category: str) -> Dict:
-            categories = preferences.get('categories', {}) if isinstance(preferences.get('categories'), dict) else {}
-            config = categories.get(category, {}) if isinstance(categories, dict) else {}
-            action = config.get('action') or ('mute' if category == 'language' else 'skip')
-            duration = config.get('duration') or self.DEFAULT_DURATIONS.get(action, 4)
-            enabled = config.get('enabled', True)
+            categories = preferences.get('categories', {}) if isinstance(preferences.get('categories'), dict) else {}  # Pull category configuration map
+            config = categories.get(category, {}) if isinstance(categories, dict) else {}  # Specific category settings
+            action = config.get('action') or ('mute' if category == 'language' else 'skip')  # Default action fallback per category
+            duration = config.get('duration') or self.DEFAULT_DURATIONS.get(action, 4)  # Duration fallback using defaults
+            enabled = config.get('enabled', True)  # Whether this category is enabled
             return {
                 'action': action,
                 'duration': duration,
@@ -208,25 +215,25 @@ class ContentAnalyzer:
             }
 
         for category in ['sexual', 'violence', 'language']:
-            config = category_config(category)
+            config = category_config(category)  # Get configuration for this category
             if not config['enabled']:
-                continue
+                continue  # Skip disabled categories
 
-            threshold = threshold_for(category)
+            threshold = threshold_for(category)  # Get threshold for this category
             if severities[category] < threshold:
-                continue
+                continue  # If severity is below threshold, move on
 
-            action = config['action']
-            duration = config.get('duration') or self.DEFAULT_DURATIONS.get(action, 4)
+            action = config['action']  # Action chosen for this category
+            duration = config.get('duration') or self.DEFAULT_DURATIONS.get(action, 4)  # Duration chosen with default fallback
             reason_parts = [
-                f"{category} content detected",
-                f"severity={severities[category]}",
-                f"threshold={threshold}",
-                f"action={action}",
-                f"duration={duration}",
+                f"{category} content detected",           # Note which category matched
+                f"severity={severities[category]}",       # Include measured severity
+                f"threshold={threshold}",                 # Include threshold used
+                f"action={action}",                       # Include action selected
+                f"duration={duration}",                   # Include duration selected
             ]
             if confidence is not None:
-                reason_parts.append(f"confidence={confidence}")
+                reason_parts.append(f"confidence={confidence}")  # Add optional confidence if provided
 
             return {
                 "action": action,
@@ -235,4 +242,4 @@ class ContentAnalyzer:
                 "reason": "; ".join(reason_parts)
             }
 
-        return base_decision("No match")
+        return base_decision("No match")  # Fallback when nothing triggers
