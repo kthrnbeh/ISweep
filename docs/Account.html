@@ -59,19 +59,7 @@
     </div>
   </header>
 
-  <main class="account-page container" style="display: grid; grid-template-columns: 240px 1fr; gap: 1.5rem; align-items: start;"> <!-- This grid creates a sidebar + content layout to give the page a SaaS dashboard feel without changing the color system. -->
-    <aside class="card" style="padding: 1.25rem; position: sticky; top: 1rem; align-self: start;"> <!-- This sidebar card holds the dashboard navigation and stays visible as users scroll. -->
-      <h2 style="margin-top: 0; margin-bottom: 0.75rem;">Account</h2> <!-- This heading labels the sidebar navigation clearly. -->
-      <nav class="stacked-nav" style="display: grid; gap: 0.5rem;"> <!-- This nav lists account sections to mimic a control panel. -->
-        <a href="#overview" style="padding: 0.65rem 0.75rem; border-radius: 10px; background: #f8fafc; text-decoration: none; color: inherit; font-weight: 600;">Overview</a> <!-- This link jumps to the overview card to orient the user. -->
-        <a href="#subscription" style="padding: 0.65rem 0.75rem; border-radius: 10px; background: #f8fafc; text-decoration: none; color: inherit; font-weight: 600;">Subscription</a> <!-- This link jumps to the subscription card for quick plan access. -->
-        <a href="#devices" style="padding: 0.65rem 0.75rem; border-radius: 10px; background: #f8fafc; text-decoration: none; color: inherit; font-weight: 600;">Devices</a> <!-- This link jumps to the devices card to manage hardware. -->
-        <a href="#filters" style="padding: 0.65rem 0.75rem; border-radius: 10px; background: #f8fafc; text-decoration: none; color: inherit; font-weight: 600;">Filters</a> <!-- This link jumps to filter preferences to mirror a control center feel. -->
-        <a href="#billing" style="padding: 0.65rem 0.75rem; border-radius: 10px; background: #f8fafc; text-decoration: none; color: inherit; font-weight: 600;">Billing</a> <!-- This link jumps to billing for quick payment updates. -->
-        <a href="#security" style="padding: 0.65rem 0.75rem; border-radius: 10px; background: #f8fafc; text-decoration: none; color: inherit; font-weight: 600;">Security</a> <!-- This link jumps to security controls like password and 2FA. -->
-      </nav>
-    </aside>
-
+  <main class="account-page container" style="display: grid; gap: 1.25rem; align-items: start;"> <!-- Single-column layout centered by container width. -->
     <section style="display: grid; gap: 1rem;"> <!-- This column stacks the main cards to keep the layout clean and scannable. -->
       <header id="overview" class="card" style="padding: 1.25rem; display: grid; gap: 0.5rem;"> <!-- This top card summarizes the account state for quick at-a-glance info. -->
         <div style="display: flex; align-items: center; justify-content: space-between; gap: 1rem;"> <!-- This row aligns the title and plan badge. -->

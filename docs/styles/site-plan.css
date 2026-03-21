@@ -385,7 +385,7 @@ body.dark .step-card{background:#0f172a; border-color:#1f2937}
 
 /* Main wrapper for the Account page content */
 .account-page {
-  max-width: 1100px;        /* keeps content from stretching too wide */
+  max-width: 1000px;        /* keeps content from stretching too wide */
   margin: 2rem auto 3rem;   /* centers the content and adds space on top/bottom */
   padding: 0 1.5rem;        /* small left/right padding so text doesn’t hug the edge */
 }
