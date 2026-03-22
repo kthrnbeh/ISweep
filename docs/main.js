@@ -630,6 +630,12 @@ function filterSettingsToPreferences(filterSettings) {
   const predefinedItems = getSelectedPredefinedWords(safe);
   const blocklistItems = Array.from(new Set([...predefinedItems, ...customLanguageItems]));
 
+  // Also stash the words directly under language so the extension can read them without blocklist.
+  categories.language = {
+    ...categories.language,
+    items: blocklistItems,
+  };
+
   const languageDuration = Number(safe.actions.language?.duration) || 4;
 
   return {
@@ -664,7 +670,9 @@ function preferencesToFilterSettings(prefs, existingFilterSettings = {}) {
 
   const blocklistItems = Array.isArray(prefs?.blocklist?.items)
     ? prefs.blocklist.items.map((w) => (typeof w === 'string' ? w.trim() : '')).filter(Boolean)
-    : [];
+    : Array.isArray(prefs?.categories?.language?.items)
+      ? prefs.categories.language.items.map((w) => (typeof w === 'string' ? w.trim() : '')).filter(Boolean)
+      : [];
 
   const languageLists = wordLibrary.language || {};
   const wordToId = {};
