@@ -54,6 +54,9 @@ class ContentAnalyzer:
     SEXUAL_KEYWORDS = ['sex', 'sexual', 'naked', 'nude', 'explicit', 'rape', 'intercourse', 'seduce', 'seduction']  # Simple keyword list for sexual content
     VIOLENCE_KEYWORDS = ['kill', 'killed', 'murder', 'shot', 'shoot', 'stab', 'blood', 'violence', 'violent', 'attack', 'fight', 'gun', 'weapon', 'death', 'die', 'dying', 'dead', 'assault', 'beat', 'beating', 'punch', 'hit']  # Simple keyword list for violence
     LANGUAGE_KEYWORDS = ['hell']  # Mild language keyword not always caught by the library
+    PROFANITY_KEYWORDS = [
+        'fuck', 'fucking', 'fucked', 'bitch', 'shit', 'asshole', 'bastard', 'damn', 'crap'
+    ]  # Explicit language the library occasionally misses with punctuation variants
 
     def __init__(self):
         """Initialize the content analyzer."""
@@ -107,13 +110,15 @@ class ContentAnalyzer:
 
     def _check_language(self, text: str) -> int:
         """Count profane words using the library plus manual mild keywords (e.g., 'hell')."""
-        score = 0  # Start severity counter
-        if profanity.contains_profanity(text):
-            words = text.split()  # Split text into individual words
-            score += sum(1 for word in words if profanity.contains_profanity(word))  # Add one for each profane word
+        normalized = text.lower()
+        words = re.findall(r"[A-Za-z']+", normalized)
 
-        # Manual lightweight keyword list for missed mild profanities
-        score += self._count_whole_words(text, self.LANGUAGE_KEYWORDS)  # Add count for custom mild terms
+        # Count per-word profanity so punctuation-adjacent terms still register
+        score = sum(1 for word in words if profanity.contains_profanity(word))
+
+        # Manual lists backstop the library for explicit and mild terms
+        score += self._count_whole_words(normalized, self.PROFANITY_KEYWORDS)
+        score += self._count_whole_words(normalized, self.LANGUAGE_KEYWORDS)
         return score  # Return total language severity
 
     def _check_sexual_content(self, text: str) -> int:
