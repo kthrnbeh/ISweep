@@ -139,3 +139,83 @@ class TestContentAnalyzer:
         assert decision['matched_category'] == 'blocklist'  # Category blocklist
         assert decision['duration_seconds'] == 5  # Duration from prefs
         assert 'blocklist match' in decision['reason']  # Reason mentions blocklist
+
+    def test_transcript_generates_mute_marker(self, analyzer):
+        """Transcript segment with blocklist phrase should generate mute marker."""
+        prefs = {
+            'enabled': True,
+            'blocklist': {
+                'enabled': True,
+                'items': ['strip club'],
+                'duration': 6,
+            },
+        }
+
+        analyzer._fetch_transcript_segments = lambda _: [
+            {'text': 'He walked into a strip club downtown', 'start': 12.3, 'duration': 1.3}
+        ]
+
+        result = analyzer.analyze_video_markers('abc123', prefs)
+        assert result['status'] == 'ready'
+        assert result['source'] == 'transcript'
+        assert len(result['events']) == 1
+        marker = result['events'][0]
+        assert marker['action'] == 'mute'
+        assert marker['matched_category'] == 'blocklist'
+        assert marker['start_seconds'] == pytest.approx(12.3)
+        assert marker['duration_seconds'] == pytest.approx(6.0)
+        assert marker['end_seconds'] == pytest.approx(18.3)
+        assert isinstance(marker['id'], str) and marker['id']
+
+    def test_transcript_generates_skip_marker(self, analyzer):
+        """Transcript segment with sexual content should generate skip marker."""
+        prefs = {
+            'enabled': True,
+            'categories': {
+                'sexual': {'enabled': True, 'action': 'skip', 'duration': 10},
+                'language': {'enabled': False, 'action': 'mute', 'duration': 4},
+                'violence': {'enabled': False, 'action': 'fast_forward', 'duration': 8},
+            },
+            'sensitivity': 0.7,
+        }
+
+        analyzer._fetch_transcript_segments = lambda _: [
+            {'text': 'The sexual scene was explicit', 'start': 30.0, 'duration': 1.8}
+        ]
+
+        result = analyzer.analyze_video_markers('video456', prefs)
+        assert result['status'] == 'ready'
+        assert len(result['events']) == 1
+        marker = result['events'][0]
+        assert marker['action'] == 'skip'
+        assert marker['matched_category'] == 'sexual'
+        assert marker['start_seconds'] == pytest.approx(30.0)
+        assert marker['duration_seconds'] == pytest.approx(10.0)
+        assert marker['end_seconds'] == pytest.approx(40.0)
+
+    def test_transcript_markers_are_non_overlapping(self, analyzer):
+        """Overlapping events should be merged/trimmed to deterministic non-overlapping output."""
+        events = [
+            {
+                'id': 'a',
+                'start_seconds': 10.0,
+                'end_seconds': 14.0,
+                'action': 'mute',
+                'duration_seconds': 4.0,
+                'matched_category': 'language',
+                'reason': 'first',
+            },
+            {
+                'id': 'b',
+                'start_seconds': 12.0,
+                'end_seconds': 15.0,
+                'action': 'skip',
+                'duration_seconds': 3.0,
+                'matched_category': 'sexual',
+                'reason': 'second',
+            },
+        ]
+
+        merged = analyzer._merge_marker_events(events)
+        assert len(merged) == 2
+        assert merged[0]['end_seconds'] <= merged[1]['start_seconds']
