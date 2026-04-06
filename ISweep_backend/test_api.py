@@ -263,3 +263,48 @@ class TestAPI:
         assert data['matched_category'] == 'language'  # Matched category language
         assert data['duration_seconds'] == pytest.approx(0.65, abs=0.05)  # Duration scaled to caption length
         assert 0.2 <= data['duration_seconds'] <= 4.0  # Duration bounded within limits
+
+    def test_videos_analyze_unavailable_transcript(self, client):
+        token, _ = signup_and_get_token(client, email='video-unavailable@example.com')
+
+        class AnalyzerStub:
+            def analyze_video_markers(self, video_id, preferences):
+                return {'status': 'unavailable', 'source': None, 'events': []}
+
+        client.application.analyzer = AnalyzerStub()
+        response = client.post('/videos/analyze', json={'video_id': 'no-transcript-video'}, headers=auth_headers(token))
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['status'] == 'unavailable'
+        assert data['source'] is None
+        assert data['events'] == []
+
+    def test_videos_analyze_ready_with_markers(self, client):
+        token, _ = signup_and_get_token(client, email='video-ready@example.com')
+
+        class AnalyzerStub:
+            def analyze_video_markers(self, video_id, preferences):
+                return {
+                    'status': 'ready',
+                    'source': 'transcript',
+                    'events': [
+                        {
+                            'id': 'm1',
+                            'start_seconds': 12.3,
+                            'end_seconds': 13.6,
+                            'action': 'mute',
+                            'duration_seconds': 1.3,
+                            'matched_category': 'language',
+                            'reason': 'test marker',
+                        }
+                    ],
+                }
+
+        client.application.analyzer = AnalyzerStub()
+        response = client.post('/videos/analyze', json={'video_id': 'abc123'}, headers=auth_headers(token))
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['status'] == 'ready'
+        assert data['source'] == 'transcript'
+        assert len(data['events']) == 1
+        assert data['events'][0]['id'] == 'm1'
