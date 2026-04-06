@@ -390,7 +390,7 @@ def analyze_event():
             return None
         return value
 
-    if decision.get('action') == 'mute':
+    if decision.get('action') == 'mute' and decision.get('matched_category') != 'blocklist':
         # Prefer the caption's timing so the mute aligns with the spoken word duration.
         coerced = coerce_caption_duration(caption_duration_seconds)
         if coerced is not None:
