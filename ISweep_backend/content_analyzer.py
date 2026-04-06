@@ -13,6 +13,7 @@ System connection:
 """
 
 import re  # Imports regex utilities for pattern matching
+import hashlib  # Stable marker ids for deterministic scheduling
 from typing import Dict, List  # Imports type annotations for dictionaries and lists
 from better_profanity import profanity  # Imports third-party profanity checker
 
@@ -248,3 +249,153 @@ class ContentAnalyzer:
             }
 
         return base_decision("No match")  # Fallback when nothing triggers
+
+    def _fetch_transcript_segments(self, video_id: str) -> List[Dict]:
+        """Fetch transcript segments from YouTube when available."""
+        try:
+            from youtube_transcript_api import YouTubeTranscriptApi
+            from youtube_transcript_api._errors import (
+                NoTranscriptFound,
+                TranscriptsDisabled,
+                VideoUnavailable,
+                CouldNotRetrieveTranscript,
+            )
+        except Exception as exc:
+            raise RuntimeError("transcript dependency unavailable") from exc
+
+        try:
+            raw_segments = YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
+        except TypeError:
+            # Some versions do not support the languages keyword.
+            raw_segments = YouTubeTranscriptApi.get_transcript(video_id)
+        except (NoTranscriptFound, TranscriptsDisabled, VideoUnavailable, CouldNotRetrieveTranscript):
+            return []
+
+        segments: List[Dict] = []
+        for row in raw_segments or []:
+            try:
+                text = str(row.get('text') or '').strip()
+                start = float(row.get('start', 0))
+                duration = float(row.get('duration', 0))
+            except (TypeError, ValueError):
+                continue
+            if not text:
+                continue
+            if start < 0:
+                start = 0.0
+            if duration < 0:
+                duration = 0.0
+            segments.append({
+                'text': text,
+                'start': start,
+                'duration': duration,
+            })
+        return segments
+
+    def _stable_marker_id(self, video_id: str, start_seconds: float, end_seconds: float, action: str, category: str) -> str:
+        """Create deterministic marker id from video + timing + action tuple."""
+        raw = f"{video_id}|{start_seconds:.3f}|{end_seconds:.3f}|{action}|{category}"
+        return hashlib.sha1(raw.encode('utf-8')).hexdigest()[:16]
+
+    def _merge_marker_events(self, events: List[Dict]) -> List[Dict]:
+        """Merge same-kind overlaps; trim conflicting overlaps for deterministic non-overlapping output."""
+        if not events:
+            return []
+
+        sorted_events = sorted(events, key=lambda event: (event['start_seconds'], event['end_seconds'], event['action']))
+        merged: List[Dict] = []
+
+        for event in sorted_events:
+            current = dict(event)
+            if current['end_seconds'] <= current['start_seconds']:
+                continue
+
+            if not merged:
+                merged.append(current)
+                continue
+
+            previous = merged[-1]
+
+            # Same behavior/category + overlap/touching: merge windows.
+            if (
+                current['start_seconds'] <= previous['end_seconds']
+                and current['action'] == previous['action']
+                and current['matched_category'] == previous['matched_category']
+            ):
+                previous['end_seconds'] = max(previous['end_seconds'], current['end_seconds'])
+                previous['duration_seconds'] = round(previous['end_seconds'] - previous['start_seconds'], 3)
+                continue
+
+            # Conflicting overlap: trim current start to keep non-overlapping markers.
+            if current['start_seconds'] < previous['end_seconds']:
+                current['start_seconds'] = previous['end_seconds']
+                current['duration_seconds'] = round(current['end_seconds'] - current['start_seconds'], 3)
+                if current['duration_seconds'] <= 0:
+                    continue
+
+            merged.append(current)
+
+        return merged
+
+    def analyze_video_markers(self, video_id: str, preferences: Dict) -> Dict:
+        """Build watch-ahead markers for a YouTube video transcript."""
+        try:
+            segments = self._fetch_transcript_segments(video_id)
+        except Exception:
+            return {
+                'status': 'error',
+                'source': None,
+                'events': [],
+            }
+
+        if not segments:
+            return {
+                'status': 'unavailable',
+                'source': None,
+                'events': [],
+            }
+
+        events: List[Dict] = []
+        for segment in segments:
+            text = segment.get('text') or ''
+            start_seconds = float(segment.get('start', 0) or 0)
+            transcript_duration = float(segment.get('duration', 0) or 0)
+
+            decision = self.analyze_decision(text, preferences)
+            action = decision.get('action')
+            if action not in {'mute', 'skip', 'fast_forward'}:
+                continue
+
+            decision_duration = float(decision.get('duration_seconds') or 0)
+            effective_duration = decision_duration if decision_duration > 0 else transcript_duration
+            if effective_duration <= 0:
+                continue
+
+            end_seconds = start_seconds + effective_duration
+            category = decision.get('matched_category') or 'language'
+
+            events.append({
+                'id': self._stable_marker_id(video_id, start_seconds, end_seconds, action, category),
+                'start_seconds': round(start_seconds, 3),
+                'end_seconds': round(end_seconds, 3),
+                'action': action,
+                'duration_seconds': round(effective_duration, 3),
+                'matched_category': category,
+                'reason': decision.get('reason') or 'transcript match',
+            })
+
+        merged_events = self._merge_marker_events(events)
+        for event in merged_events:
+            event['id'] = self._stable_marker_id(
+                video_id,
+                event['start_seconds'],
+                event['end_seconds'],
+                event['action'],
+                event['matched_category'],
+            )
+
+        return {
+            'status': 'ready',
+            'source': 'transcript',
+            'events': merged_events,
+        }

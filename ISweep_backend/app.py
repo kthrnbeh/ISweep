@@ -414,6 +414,26 @@ def analyze_event():
     return jsonify(response_payload), 200
 
 
+@app.route('/videos/analyze', methods=['POST'])
+@require_auth
+def analyze_video_markers():
+    """Watch-ahead endpoint: returns transcript-derived marker events for a video."""
+    data = request.get_json() or {}
+    video_id = str(data.get('video_id') or '').strip()
+    if not video_id:
+        return jsonify({'error': 'video_id is required'}), 400
+
+    db = get_db()
+    preferences = db.get_user_preferences(request.user_id) or {}
+    analyzer = get_analyzer()
+    result = analyzer.analyze_video_markers(video_id, preferences)
+    return jsonify({
+        'status': result.get('status', 'error'),
+        'source': result.get('source'),
+        'events': result.get('events', []),
+    }), 200
+
+
 @app.errorhandler(404)
 def not_found(error):
     """Handle 404 errors."""
