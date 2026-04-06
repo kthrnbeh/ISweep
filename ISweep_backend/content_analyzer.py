@@ -14,6 +14,7 @@ System connection:
 
 import re  # Imports regex utilities for pattern matching
 import hashlib  # Stable marker ids for deterministic scheduling
+import importlib
 from typing import Dict, List  # Imports type annotations for dictionaries and lists
 from better_profanity import profanity  # Imports third-party profanity checker
 
@@ -253,15 +254,16 @@ class ContentAnalyzer:
     def _fetch_transcript_segments(self, video_id: str) -> List[Dict]:
         """Fetch transcript segments from YouTube when available."""
         try:
-            from youtube_transcript_api import YouTubeTranscriptApi
-            from youtube_transcript_api._errors import (
-                NoTranscriptFound,
-                TranscriptsDisabled,
-                VideoUnavailable,
-                CouldNotRetrieveTranscript,
-            )
+            yta_module = importlib.import_module('youtube_transcript_api')
+            errors_module = importlib.import_module('youtube_transcript_api._errors')
         except Exception as exc:
             raise RuntimeError("transcript dependency unavailable") from exc
+
+        YouTubeTranscriptApi = getattr(yta_module, 'YouTubeTranscriptApi')
+        NoTranscriptFound = getattr(errors_module, 'NoTranscriptFound', Exception)
+        TranscriptsDisabled = getattr(errors_module, 'TranscriptsDisabled', Exception)
+        VideoUnavailable = getattr(errors_module, 'VideoUnavailable', Exception)
+        CouldNotRetrieveTranscript = getattr(errors_module, 'CouldNotRetrieveTranscript', Exception)
 
         try:
             raw_segments = YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
@@ -341,7 +343,7 @@ class ContentAnalyzer:
         """Build watch-ahead markers for a YouTube video transcript."""
         try:
             segments = self._fetch_transcript_segments(video_id)
-        except Exception:
+        except RuntimeError:
             return {
                 'status': 'error',
                 'source': None,
