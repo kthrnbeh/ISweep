@@ -63,6 +63,7 @@ class ContentAnalyzer:
     def __init__(self):
         """Initialize the content analyzer."""
         profanity.load_censor_words()  # Load the profanity word list into memory
+        self._vosk_model = None  # Lazy-loaded local speech model for audio watch-ahead.
 
     def analyze(self, text: str, user_preferences: Dict) -> str:
         """
@@ -403,73 +404,78 @@ class ContentAnalyzer:
         }
 
     def _transcribe_audio_chunk(self, audio_bytes: bytes, mime_type: str = 'audio/wav') -> List[Dict]:
-        """Transcribe WAV audio bytes via speech_recognition (Google Web Speech API).
+        """Transcribe WAV audio bytes with a local Vosk model.
 
-        NOTE: audio is sent to Google's speech API; install openai-whisper for offline use
-        in a future phase. Requires: pip install SpeechRecognition
-        Returns list of {'text', 'start', 'duration'} dicts (single segment for full chunk).
-        Raises RuntimeError('transcription_unavailable') when ASR is not set up.
+        Expected env var:
+            ISWEEP_VOSK_MODEL_PATH=/absolute/path/to/vosk-model-small-en-us-0.15
+        Returns list of {'text', 'start', 'duration'} for the whole chunk.
         """
+        import io
+        import json
         import os
-        import tempfile
+        import wave
 
         if 'wav' not in (mime_type or '').lower():
-            raise RuntimeError(f'transcription_unavailable: unsupported mime_type={mime_type}')
+            raise RuntimeError('transcription_unavailable')
 
         try:
-            sr_module = importlib.import_module('speech_recognition')
+            vosk_module = importlib.import_module('vosk')
         except Exception as exc:
             raise RuntimeError('transcription_unavailable') from exc
 
-        Recognizer = getattr(sr_module, 'Recognizer')
-        AudioFile = getattr(sr_module, 'AudioFile')
-        UnknownValueError = getattr(sr_module, 'UnknownValueError', Exception)
-        RequestError = getattr(sr_module, 'RequestError', Exception)
+        model_path = os.getenv('ISWEEP_VOSK_MODEL_PATH', '').strip()
+        if not model_path:
+            model_path = os.path.join(os.path.dirname(__file__), 'models', 'vosk-model-small-en-us-0.15')
+        if not os.path.isdir(model_path):
+            raise RuntimeError('transcription_unavailable')
 
-        r = Recognizer()
+        if not hasattr(self, '_vosk_model') or self._vosk_model is None:
+            self._vosk_model = vosk_module.Model(model_path)
 
-        # Write to a temp file; AudioFile path API is most portable across sr versions.
-        tmp_path = None
         try:
-            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
-                tmp.write(audio_bytes)
-                tmp_path = tmp.name
-
-            with AudioFile(tmp_path) as src:
-                audio_data = r.record(src)
-
-            text = r.recognize_google(audio_data)
-        except UnknownValueError:
-            return []  # No intelligible speech in this chunk
-        except RequestError as exc:
-            raise RuntimeError(f'transcription_unavailable: google api error: {exc}') from exc
+            with wave.open(io.BytesIO(audio_bytes), 'rb') as wav_file:
+                channels = wav_file.getnchannels()
+                sample_width = wav_file.getsampwidth()
+                sample_rate = wav_file.getframerate()
+                frame_count = wav_file.getnframes()
+                raw_pcm = wav_file.readframes(frame_count)
         except Exception as exc:
-            raise RuntimeError(f'transcription_unavailable: {exc}') from exc
-        finally:
-            if tmp_path:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
+            raise RuntimeError('transcription_unavailable') from exc
 
+        if sample_width != 2 or sample_rate <= 0:
+            raise RuntimeError('transcription_unavailable')
+
+        # Keep first channel when stereo audio is encountered.
+        if channels > 1:
+            frame_size = channels * sample_width
+            mono = bytearray()
+            for i in range(0, len(raw_pcm), frame_size):
+                mono.extend(raw_pcm[i:i + sample_width])
+            raw_pcm = bytes(mono)
+
+        recognizer = vosk_module.KaldiRecognizer(self._vosk_model, float(sample_rate))
+        chunk_bytes = 4000
+        for i in range(0, len(raw_pcm), chunk_bytes):
+            recognizer.AcceptWaveform(raw_pcm[i:i + chunk_bytes])
+
+        try:
+            final_result = json.loads(recognizer.FinalResult() or '{}')
+        except json.JSONDecodeError:
+            final_result = {}
+
+        text = str(final_result.get('text') or '').strip()
         if not text:
             return []
 
-        # speech_recognition returns the full chunk as one string with no per-word timestamps.
-        # Estimate duration from WAV data length (16-bit, 16 kHz mono assumed).
-        wav_header_bytes = 44
-        bytes_per_sample = 2
-        sample_rate = 16000
-        total_samples = max(len(audio_bytes) - wav_header_bytes, 0) // bytes_per_sample
-        duration_sec = round(total_samples / sample_rate, 3)
-
+        duration_sec = round(frame_count / float(sample_rate), 3)
         return [{'text': text, 'start': 0.0, 'duration': duration_sec}]
 
     def analyze_audio_chunk(
         self,
         audio_b64: str,
         mime_type: str,
-        chunk_offset_seconds: float,
+        start_seconds: float,
+        end_seconds: float,
         preferences: Dict,
         video_id: str = '',
     ) -> Dict:
@@ -479,7 +485,8 @@ class ContentAnalyzer:
         ----------
         audio_b64 : base64-encoded WAV bytes from the extension
         mime_type : MIME type hint (e.g. 'audio/wav')
-        chunk_offset_seconds : absolute video time when this chunk started
+        start_seconds : absolute video time when this chunk started
+        end_seconds : absolute video time when this chunk ended
         preferences : user filter preferences
         video_id : YouTube video ID used for stable marker IDs
         """
@@ -511,7 +518,7 @@ class ContentAnalyzer:
             text = segment.get('text') or ''
             rel_start = float(segment.get('start', 0) or 0)
             rel_duration = float(segment.get('duration', 0) or 0)
-            abs_start = round(chunk_offset_seconds + rel_start, 3)
+            abs_start = round(start_seconds + rel_start, 3)
 
             decision = self.analyze_decision(text, preferences)
             action = decision.get('action')
@@ -519,7 +526,8 @@ class ContentAnalyzer:
                 continue
 
             decision_duration = float(decision.get('duration_seconds') or 0)
-            effective_duration = decision_duration if decision_duration > 0 else rel_duration
+            source_duration = rel_duration if rel_duration > 0 else max(end_seconds - start_seconds, 0)
+            effective_duration = decision_duration if decision_duration > 0 else source_duration
             if effective_duration <= 0:
                 continue
 
@@ -549,7 +557,8 @@ class ContentAnalyzer:
         return {
             'status': 'ready' if merged else 'unavailable',
             'source': 'audio_chunk',
-            'chunk_offset_seconds': chunk_offset_seconds,
+            'start_seconds': start_seconds,
+            'end_seconds': end_seconds,
             'events': merged,
             'failure_reason': 'marker_list_empty' if not merged else None,
         }

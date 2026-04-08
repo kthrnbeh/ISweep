@@ -437,36 +437,24 @@ def analyze_video_markers():
 @app.route('/audio/analyze', methods=['POST'])
 @require_auth
 def analyze_audio_chunk():
-    """Audio watch-ahead endpoint: transcribes a real-time audio chunk and returns marker events.
-
-    Request body:
-        {
-            "video_id": "dQw4w9WgXcQ",         # YouTube video ID (for stable marker IDs)
-            "audio_b64": "<base64 WAV bytes>",  # 16 kHz 16-bit mono WAV encoded in base64
-            "mime_type": "audio/wav",            # always audio/wav from the extension
-            "chunk_offset_seconds": 120.5        # absolute video time when chunk started
-        }
-    Response:
-        {
-            "status": "ready" | "unavailable" | "error",
-            "source": "audio_chunk",
-            "chunk_offset_seconds": 120.5,
-            "events": [ /* marker objects */ ],
-            "failure_reason": null | "transcription_unavailable" | "marker_list_empty" | ...
-        }
-    Install notes:
-        pip install SpeechRecognition    — for Google Web Speech API (requires internet)
-        pip install openai-whisper        — future upgrade for offline transcription
-    """
+    """Audio watch-ahead endpoint: transcribe chunk audio and emit marker events."""
     data = request.get_json() or {}
     audio_b64 = str(data.get('audio_b64') or '').strip()
     mime_type = str(data.get('mime_type') or 'audio/wav').strip()
     video_id = str(data.get('video_id') or '').strip()
 
     try:
-        chunk_offset_seconds = float(data.get('chunk_offset_seconds') or 0)
+        start_seconds = float(data.get('start_seconds') or data.get('chunk_offset_seconds') or 0)
     except (TypeError, ValueError):
-        chunk_offset_seconds = 0.0
+        start_seconds = 0.0
+
+    try:
+        end_seconds = float(data.get('end_seconds') or start_seconds)
+    except (TypeError, ValueError):
+        end_seconds = start_seconds
+
+    if end_seconds < start_seconds:
+        end_seconds = start_seconds
 
     if not audio_b64:
         return jsonify({'error': 'audio_b64 is required'}), 400
@@ -475,13 +463,14 @@ def analyze_audio_chunk():
     preferences = db.get_user_preferences(request.user_id) or {}
     analyzer = get_analyzer()
     result = analyzer.analyze_audio_chunk(
-        audio_b64, mime_type, chunk_offset_seconds, preferences, video_id
+        audio_b64, mime_type, start_seconds, end_seconds, preferences, video_id
     )
 
     return jsonify({
         'status': result.get('status', 'error'),
         'source': result.get('source'),
-        'chunk_offset_seconds': chunk_offset_seconds,
+        'start_seconds': start_seconds,
+        'end_seconds': end_seconds,
         'events': result.get('events', []),
         'failure_reason': result.get('failure_reason'),
     }), 200
