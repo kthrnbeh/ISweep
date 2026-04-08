@@ -401,3 +401,155 @@ class ContentAnalyzer:
             'source': 'transcript',
             'events': merged_events,
         }
+
+    def _transcribe_audio_chunk(self, audio_bytes: bytes, mime_type: str = 'audio/wav') -> List[Dict]:
+        """Transcribe WAV audio bytes via speech_recognition (Google Web Speech API).
+
+        NOTE: audio is sent to Google's speech API; install openai-whisper for offline use
+        in a future phase. Requires: pip install SpeechRecognition
+        Returns list of {'text', 'start', 'duration'} dicts (single segment for full chunk).
+        Raises RuntimeError('transcription_unavailable') when ASR is not set up.
+        """
+        import os
+        import tempfile
+
+        if 'wav' not in (mime_type or '').lower():
+            raise RuntimeError(f'transcription_unavailable: unsupported mime_type={mime_type}')
+
+        try:
+            sr_module = importlib.import_module('speech_recognition')
+        except Exception as exc:
+            raise RuntimeError('transcription_unavailable') from exc
+
+        Recognizer = getattr(sr_module, 'Recognizer')
+        AudioFile = getattr(sr_module, 'AudioFile')
+        UnknownValueError = getattr(sr_module, 'UnknownValueError', Exception)
+        RequestError = getattr(sr_module, 'RequestError', Exception)
+
+        r = Recognizer()
+
+        # Write to a temp file; AudioFile path API is most portable across sr versions.
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+                tmp.write(audio_bytes)
+                tmp_path = tmp.name
+
+            with AudioFile(tmp_path) as src:
+                audio_data = r.record(src)
+
+            text = r.recognize_google(audio_data)
+        except UnknownValueError:
+            return []  # No intelligible speech in this chunk
+        except RequestError as exc:
+            raise RuntimeError(f'transcription_unavailable: google api error: {exc}') from exc
+        except Exception as exc:
+            raise RuntimeError(f'transcription_unavailable: {exc}') from exc
+        finally:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
+        if not text:
+            return []
+
+        # speech_recognition returns the full chunk as one string with no per-word timestamps.
+        # Estimate duration from WAV data length (16-bit, 16 kHz mono assumed).
+        wav_header_bytes = 44
+        bytes_per_sample = 2
+        sample_rate = 16000
+        total_samples = max(len(audio_bytes) - wav_header_bytes, 0) // bytes_per_sample
+        duration_sec = round(total_samples / sample_rate, 3)
+
+        return [{'text': text, 'start': 0.0, 'duration': duration_sec}]
+
+    def analyze_audio_chunk(
+        self,
+        audio_b64: str,
+        mime_type: str,
+        chunk_offset_seconds: float,
+        preferences: Dict,
+        video_id: str = '',
+    ) -> Dict:
+        """Transcribe an audio chunk and return time-offset marker events.
+
+        Parameters
+        ----------
+        audio_b64 : base64-encoded WAV bytes from the extension
+        mime_type : MIME type hint (e.g. 'audio/wav')
+        chunk_offset_seconds : absolute video time when this chunk started
+        preferences : user filter preferences
+        video_id : YouTube video ID used for stable marker IDs
+        """
+        import base64
+
+        if not audio_b64:
+            return {'status': 'error', 'source': None, 'events': [],
+                    'failure_reason': 'missing_audio_b64'}
+
+        try:
+            audio_bytes = base64.b64decode(audio_b64)
+        except ValueError:
+            return {'status': 'error', 'source': None, 'events': [],
+                    'failure_reason': 'invalid_audio_b64'}
+
+        try:
+            segments = self._transcribe_audio_chunk(audio_bytes, mime_type)
+        except RuntimeError as exc:
+            reason = str(exc)
+            return {'status': 'unavailable', 'source': None, 'events': [],
+                    'failure_reason': reason}
+
+        if not segments:
+            return {'status': 'unavailable', 'source': 'audio_chunk', 'events': [],
+                    'failure_reason': 'transcription_unavailable'}
+
+        events: List[Dict] = []
+        for segment in segments:
+            text = segment.get('text') or ''
+            rel_start = float(segment.get('start', 0) or 0)
+            rel_duration = float(segment.get('duration', 0) or 0)
+            abs_start = round(chunk_offset_seconds + rel_start, 3)
+
+            decision = self.analyze_decision(text, preferences)
+            action = decision.get('action')
+            if action not in {'mute', 'skip', 'fast_forward'}:
+                continue
+
+            decision_duration = float(decision.get('duration_seconds') or 0)
+            effective_duration = decision_duration if decision_duration > 0 else rel_duration
+            if effective_duration <= 0:
+                continue
+
+            abs_end = round(abs_start + effective_duration, 3)
+            category = decision.get('matched_category') or 'language'
+
+            events.append({
+                'id': self._stable_marker_id(
+                    video_id or 'audio', abs_start, abs_end, action, category),
+                'start_seconds': abs_start,
+                'end_seconds': abs_end,
+                'action': action,
+                'duration_seconds': round(effective_duration, 3),
+                'matched_category': category,
+                'reason': decision.get('reason') or 'audio chunk match',
+            })
+
+        merged = self._merge_marker_events(events)
+        # Re-stamp IDs after merge since boundaries may have changed.
+        for ev in merged:
+            ev['id'] = self._stable_marker_id(
+                video_id or 'audio',
+                ev['start_seconds'], ev['end_seconds'],
+                ev['action'], ev['matched_category'],
+            )
+
+        return {
+            'status': 'ready' if merged else 'unavailable',
+            'source': 'audio_chunk',
+            'chunk_offset_seconds': chunk_offset_seconds,
+            'events': merged,
+            'failure_reason': 'marker_list_empty' if not merged else None,
+        }
