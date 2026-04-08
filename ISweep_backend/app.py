@@ -439,7 +439,7 @@ def analyze_video_markers():
 def analyze_audio_chunk():
     """Audio watch-ahead endpoint: transcribe chunk audio and emit marker events."""
     data = request.get_json() or {}
-    audio_b64 = str(data.get('audio_b64') or '').strip()
+    audio_chunk = str(data.get('audio_chunk') or data.get('audio_b64') or '').strip()
     mime_type = str(data.get('mime_type') or 'audio/wav').strip()
     video_id = str(data.get('video_id') or '').strip()
 
@@ -456,14 +456,14 @@ def analyze_audio_chunk():
     if end_seconds < start_seconds:
         end_seconds = start_seconds
 
-    if not audio_b64:
-        return jsonify({'error': 'audio_b64 is required'}), 400
+    if not audio_chunk:
+        return jsonify({'error': 'audio_chunk is required'}), 400
 
     db = get_db()
     preferences = db.get_user_preferences(request.user_id) or {}
     analyzer = get_analyzer()
     result = analyzer.analyze_audio_chunk(
-        audio_b64, mime_type, start_seconds, end_seconds, preferences, video_id
+        audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id
     )
 
     return jsonify({

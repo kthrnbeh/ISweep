@@ -15,8 +15,43 @@ System connection:
 import re  # Imports regex utilities for pattern matching
 import hashlib  # Stable marker ids for deterministic scheduling
 import importlib
+import os
 from typing import Dict, List  # Imports type annotations for dictionaries and lists
 from better_profanity import profanity  # Imports third-party profanity checker
+
+
+class Phase1AudioTranscriptionAdapter:
+    """Phase 1 local transcription adapter.
+
+    This adapter is intentionally small and swappable. It lets us validate the
+    end-to-end audio-ahead control flow (capture -> backend -> markers -> scheduler)
+    without coupling Phase 1 to a heavy STT engine.
+
+    Behavior:
+      - Reads optional env var ISWEEP_AUDIO_AHEAD_STUB_TEXT.
+      - If set, returns one transcript segment spanning the chunk window.
+      - If unset, returns transcription_unavailable so fallback paths remain active.
+    """
+
+    def transcribe(
+        self,
+        audio_chunk: str,
+        mime_type: str,
+        start_seconds: float,
+        end_seconds: float,
+    ) -> List[Dict]:
+        if 'wav' not in (mime_type or '').lower():
+            raise RuntimeError('transcription_unavailable')
+
+        if not audio_chunk:
+            raise RuntimeError('analyze_exception')
+
+        stub_text = os.getenv('ISWEEP_AUDIO_AHEAD_STUB_TEXT', '').strip()
+        if not stub_text:
+            raise RuntimeError('transcription_unavailable')
+
+        duration = max(float(end_seconds) - float(start_seconds), 0.0)
+        return [{'text': stub_text, 'start': 0.0, 'duration': duration}]
 
 
 class ContentAnalyzer:
@@ -63,7 +98,7 @@ class ContentAnalyzer:
     def __init__(self):
         """Initialize the content analyzer."""
         profanity.load_censor_words()  # Load the profanity word list into memory
-        self._vosk_model = None  # Lazy-loaded local speech model for audio watch-ahead.
+        self.audio_transcription_adapter = Phase1AudioTranscriptionAdapter()
 
     def analyze(self, text: str, user_preferences: Dict) -> str:
         """
@@ -403,76 +438,9 @@ class ContentAnalyzer:
             'events': merged_events,
         }
 
-    def _transcribe_audio_chunk(self, audio_bytes: bytes, mime_type: str = 'audio/wav') -> List[Dict]:
-        """Transcribe WAV audio bytes with a local Vosk model.
-
-        Expected env var:
-            ISWEEP_VOSK_MODEL_PATH=/absolute/path/to/vosk-model-small-en-us-0.15
-        Returns list of {'text', 'start', 'duration'} for the whole chunk.
-        """
-        import io
-        import json
-        import os
-        import wave
-
-        if 'wav' not in (mime_type or '').lower():
-            raise RuntimeError('transcription_unavailable')
-
-        try:
-            vosk_module = importlib.import_module('vosk')
-        except Exception as exc:
-            raise RuntimeError('transcription_unavailable') from exc
-
-        model_path = os.getenv('ISWEEP_VOSK_MODEL_PATH', '').strip()
-        if not model_path:
-            model_path = os.path.join(os.path.dirname(__file__), 'models', 'vosk-model-small-en-us-0.15')
-        if not os.path.isdir(model_path):
-            raise RuntimeError('transcription_unavailable')
-
-        if not hasattr(self, '_vosk_model') or self._vosk_model is None:
-            self._vosk_model = vosk_module.Model(model_path)
-
-        try:
-            with wave.open(io.BytesIO(audio_bytes), 'rb') as wav_file:
-                channels = wav_file.getnchannels()
-                sample_width = wav_file.getsampwidth()
-                sample_rate = wav_file.getframerate()
-                frame_count = wav_file.getnframes()
-                raw_pcm = wav_file.readframes(frame_count)
-        except Exception as exc:
-            raise RuntimeError('transcription_unavailable') from exc
-
-        if sample_width != 2 or sample_rate <= 0:
-            raise RuntimeError('transcription_unavailable')
-
-        # Keep first channel when stereo audio is encountered.
-        if channels > 1:
-            frame_size = channels * sample_width
-            mono = bytearray()
-            for i in range(0, len(raw_pcm), frame_size):
-                mono.extend(raw_pcm[i:i + sample_width])
-            raw_pcm = bytes(mono)
-
-        recognizer = vosk_module.KaldiRecognizer(self._vosk_model, float(sample_rate))
-        chunk_bytes = 4000
-        for i in range(0, len(raw_pcm), chunk_bytes):
-            recognizer.AcceptWaveform(raw_pcm[i:i + chunk_bytes])
-
-        try:
-            final_result = json.loads(recognizer.FinalResult() or '{}')
-        except json.JSONDecodeError:
-            final_result = {}
-
-        text = str(final_result.get('text') or '').strip()
-        if not text:
-            return []
-
-        duration_sec = round(frame_count / float(sample_rate), 3)
-        return [{'text': text, 'start': 0.0, 'duration': duration_sec}]
-
     def analyze_audio_chunk(
         self,
-        audio_b64: str,
+        audio_chunk: str,
         mime_type: str,
         start_seconds: float,
         end_seconds: float,
@@ -483,31 +451,41 @@ class ContentAnalyzer:
 
         Parameters
         ----------
-        audio_b64 : base64-encoded WAV bytes from the extension
+        audio_chunk : encoded WAV audio from the extension
         mime_type : MIME type hint (e.g. 'audio/wav')
         start_seconds : absolute video time when this chunk started
         end_seconds : absolute video time when this chunk ended
         preferences : user filter preferences
         video_id : YouTube video ID used for stable marker IDs
         """
-        import base64
-
-        if not audio_b64:
-            return {'status': 'error', 'source': None, 'events': [],
-                    'failure_reason': 'missing_audio_b64'}
-
-        try:
-            audio_bytes = base64.b64decode(audio_b64)
-        except ValueError:
-            return {'status': 'error', 'source': None, 'events': [],
-                    'failure_reason': 'invalid_audio_b64'}
+        if not audio_chunk:
+            return {
+                'status': 'error',
+                'source': 'audio_chunk',
+                'events': [],
+                'failure_reason': 'analyze_exception',
+            }
 
         try:
-            segments = self._transcribe_audio_chunk(audio_bytes, mime_type)
+            segments = self.audio_transcription_adapter.transcribe(
+                audio_chunk=audio_chunk,
+                mime_type=mime_type,
+                start_seconds=start_seconds,
+                end_seconds=end_seconds,
+            )
         except RuntimeError as exc:
             reason = str(exc)
-            return {'status': 'unavailable', 'source': None, 'events': [],
-                    'failure_reason': reason}
+            normalized_reason = reason if reason in {
+                'transcription_unavailable',
+                'analyze_exception',
+            } else 'analyze_exception'
+            status = 'unavailable' if normalized_reason == 'transcription_unavailable' else 'error'
+            return {
+                'status': status,
+                'source': 'audio_chunk',
+                'events': [],
+                'failure_reason': normalized_reason,
+            }
 
         if not segments:
             return {'status': 'unavailable', 'source': 'audio_chunk', 'events': [],
