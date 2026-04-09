@@ -16,6 +16,12 @@ import re  # Imports regex utilities for pattern matching
 import hashlib  # Stable marker ids for deterministic scheduling
 import importlib
 import os
+
+# Seconds to shift audio-derived mute markers earlier so the audio is
+# already silent when the speaker reaches the flagged word.
+# Layered with the scheduler's MARKER_FIRE_EARLY_SEC for a total lead time
+# of ~400 ms (200 ms pre-roll + 200 ms early-fire).
+AUDIO_MUTE_PREROLL_SEC: float = 0.20
 from typing import Dict, List  # Imports type annotations for dictionaries and lists
 from better_profanity import profanity  # Imports third-party profanity checker
 
@@ -512,10 +518,29 @@ class ContentAnalyzer:
             abs_end = round(abs_start + effective_duration, 3)
             category = decision.get('matched_category') or 'language'
 
+            # Apply pre-roll to mute markers so the mute starts before the
+            # speaker reaches the flagged word.  Skip/fast_forward are not
+            # shifted because their seek/rate logic depends on exact timing.
+            if action == 'mute':
+                adj_start = max(round(abs_start - AUDIO_MUTE_PREROLL_SEC, 3), 0.0)
+                print(
+                    f'[ISWEEP][AUDIO_AHEAD] audio marker created '
+                    f'video_id={video_id!r} action={action!r} '
+                    f'original_start={abs_start} adj_start={adj_start} '
+                    f'end={abs_end} preroll={AUDIO_MUTE_PREROLL_SEC}s'
+                )
+            else:
+                adj_start = abs_start
+                print(
+                    f'[ISWEEP][AUDIO_AHEAD] audio marker created '
+                    f'video_id={video_id!r} action={action!r} '
+                    f'start={abs_start} end={abs_end}'
+                )
+
             events.append({
                 'id': self._stable_marker_id(
-                    video_id or 'audio', abs_start, abs_end, action, category),
-                'start_seconds': abs_start,
+                    video_id or 'audio', adj_start, abs_end, action, category),
+                'start_seconds': adj_start,
                 'end_seconds': abs_end,
                 'action': action,
                 'duration_seconds': round(effective_duration, 3),
