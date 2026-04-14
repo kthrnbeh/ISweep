@@ -269,5 +269,5 @@ class TestContentAnalyzer:
         marker = result['events'][0]
         assert marker['action'] == 'mute'
         assert marker['matched_category'] == 'language'
-        assert marker['start_seconds'] == pytest.approx(19.8)
+        assert marker['start_seconds'] == pytest.approx(19.9)
         assert marker['end_seconds'] == pytest.approx(24.0)

@@ -20,8 +20,8 @@ import os
 # Seconds to shift audio-derived mute markers earlier so the audio is
 # already silent when the speaker reaches the flagged word.
 # Layered with the scheduler's MARKER_FIRE_EARLY_SEC for a total lead time
-# of ~400 ms (200 ms pre-roll + 200 ms early-fire).
-AUDIO_MUTE_PREROLL_SEC: float = 0.20
+# of ~220 ms total lead when combined with the content-script mute fire lead.
+AUDIO_MUTE_PREROLL_SEC: float = 0.10
 DEFAULT_AUDIO_AHEAD_FALLBACK_TEXT = 'test profanity fuck'
 from typing import Dict, List  # Imports type annotations for dictionaries and lists
 from better_profanity import profanity  # Imports third-party profanity checker
@@ -552,6 +552,7 @@ class ContentAnalyzer:
                 print(
                     f'[ISWEEP][AUDIO_AHEAD] audio marker created '
                     f'video_id={video_id!r} action={action!r} '
+                    f'chunk_start={start_seconds} chunk_end={end_seconds} '
                     f'original_start={abs_start} adj_start={adj_start} '
                     f'end={abs_end} preroll={AUDIO_MUTE_PREROLL_SEC}s'
                 )
