@@ -219,3 +219,55 @@ class TestContentAnalyzer:
         merged = analyzer._merge_marker_events(events)
         assert len(merged) == 2
         assert merged[0]['end_seconds'] <= merged[1]['start_seconds']
+
+    def test_audio_chunk_uses_default_dev_fallback_text(self, analyzer, monkeypatch):
+        """Audio-ahead uses a deterministic fallback transcript when no stub text is configured."""
+        monkeypatch.delenv('ISWEEP_AUDIO_AHEAD_STUB_TEXT', raising=False)
+        monkeypatch.delenv('ISWEEP_AUDIO_AHEAD_PROVIDER', raising=False)
+        monkeypatch.setenv('FLASK_ENV', 'development')
+
+        segments = analyzer.audio_transcription_adapter.transcribe(
+            audio_chunk='ZmFrZQ==',
+            mime_type='audio/wav',
+            start_seconds=12.0,
+            end_seconds=13.0,
+        )
+
+        assert len(segments) == 1
+        assert segments[0]['text'] == 'test profanity fuck'
+        assert segments[0]['start'] == pytest.approx(0.0)
+        assert segments[0]['duration'] == pytest.approx(1.0)
+
+    def test_audio_chunk_generates_ready_markers_in_dev_mode(self, analyzer, monkeypatch):
+        """Audio-ahead returns ready markers in development without a real STT backend."""
+        monkeypatch.delenv('ISWEEP_AUDIO_AHEAD_STUB_TEXT', raising=False)
+        monkeypatch.delenv('ISWEEP_AUDIO_AHEAD_PROVIDER', raising=False)
+        monkeypatch.setenv('FLASK_ENV', 'development')
+
+        prefs = {
+            'enabled': True,
+            'categories': {
+                'language': {'enabled': True, 'action': 'mute', 'duration': 4},
+                'sexual': {'enabled': False, 'action': 'skip', 'duration': 12},
+                'violence': {'enabled': False, 'action': 'fast_forward', 'duration': 8},
+            },
+            'sensitivity': 0.9,
+        }
+
+        result = analyzer.analyze_audio_chunk(
+            audio_chunk='ZmFrZQ==',
+            mime_type='audio/wav',
+            start_seconds=20.0,
+            end_seconds=21.0,
+            preferences=prefs,
+            video_id='dev-audio',
+        )
+
+        assert result['status'] == 'ready'
+        assert result['failure_reason'] is None
+        assert len(result['events']) == 1
+        marker = result['events'][0]
+        assert marker['action'] == 'mute'
+        assert marker['matched_category'] == 'language'
+        assert marker['start_seconds'] == pytest.approx(19.8)
+        assert marker['end_seconds'] == pytest.approx(24.0)

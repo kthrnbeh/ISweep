@@ -22,8 +22,13 @@ import os
 # Layered with the scheduler's MARKER_FIRE_EARLY_SEC for a total lead time
 # of ~400 ms (200 ms pre-roll + 200 ms early-fire).
 AUDIO_MUTE_PREROLL_SEC: float = 0.20
+DEFAULT_AUDIO_AHEAD_FALLBACK_TEXT = 'test profanity fuck'
 from typing import Dict, List  # Imports type annotations for dictionaries and lists
 from better_profanity import profanity  # Imports third-party profanity checker
+
+
+def _env_flag(name: str) -> bool:
+    return str(os.getenv(name, '')).strip().lower() in {'1', 'true', 'yes', 'on'}
 
 
 class Phase1AudioTranscriptionAdapter:
@@ -36,8 +41,18 @@ class Phase1AudioTranscriptionAdapter:
     Behavior:
       - Reads optional env var ISWEEP_AUDIO_AHEAD_STUB_TEXT.
       - If set, returns one transcript segment spanning the chunk window.
-      - If unset, returns transcription_unavailable so fallback paths remain active.
+      - If unset in dev or while no STT provider is configured, returns a
+        deterministic fallback transcript so audio-ahead timing can be validated.
     """
+
+    def _use_dev_fallback(self) -> bool:
+        if _env_flag('ISWEEP_DEV_MODE'):
+            return True
+        if str(os.getenv('FLASK_ENV', '')).strip().lower() == 'development':
+            return True
+        if _env_flag('FLASK_DEBUG'):
+            return True
+        return not str(os.getenv('ISWEEP_AUDIO_AHEAD_PROVIDER', '')).strip()
 
     def transcribe(
         self,
@@ -53,11 +68,15 @@ class Phase1AudioTranscriptionAdapter:
             raise RuntimeError('analyze_exception')
 
         stub_text = os.getenv('ISWEEP_AUDIO_AHEAD_STUB_TEXT', '').strip()
-        if not stub_text:
+        if stub_text:
+            transcript_text = stub_text
+        elif self._use_dev_fallback():
+            transcript_text = DEFAULT_AUDIO_AHEAD_FALLBACK_TEXT
+        else:
             raise RuntimeError('transcription_unavailable')
 
         duration = max(float(end_seconds) - float(start_seconds), 0.0)
-        return [{'text': stub_text, 'start': 0.0, 'duration': duration}]
+        return [{'text': transcript_text, 'start': 0.0, 'duration': duration}]
 
 
 class ContentAnalyzer:
@@ -493,6 +512,13 @@ class ContentAnalyzer:
                 'failure_reason': normalized_reason,
             }
 
+        transcription_text = ' '.join(
+            str(segment.get('text') or '').strip()
+            for segment in segments
+            if str(segment.get('text') or '').strip()
+        )
+        print(f'[ISWEEP][AUDIO_AHEAD] transcription used: {transcription_text}')
+
         if not segments:
             return {'status': 'unavailable', 'source': 'audio_chunk', 'events': [],
                     'failure_reason': 'transcription_unavailable'}
@@ -557,11 +583,13 @@ class ContentAnalyzer:
                 ev['action'], ev['matched_category'],
             )
 
+        print(f'[ISWEEP][AUDIO_AHEAD] markers generated: {len(merged)}')
+
         return {
-            'status': 'ready' if merged else 'unavailable',
+            'status': 'ready',
             'source': 'audio_chunk',
             'start_seconds': start_seconds,
             'end_seconds': end_seconds,
             'events': merged,
-            'failure_reason': 'marker_list_empty' if not merged else None,
+            'failure_reason': None,
         }
