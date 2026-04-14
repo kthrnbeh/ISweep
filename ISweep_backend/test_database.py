@@ -1,4 +1,4 @@
-import pytest  # Testing framework
+from datetime import datetime, timedelta
 from database import Database  # Database class under test
 
 
@@ -84,3 +84,38 @@ class TestDatabase:
         assert prefs['categories']['language']['enabled'] is False  # Language disabled
         assert prefs['categories']['sexual']['enabled'] is False  # Sexual disabled
         assert prefs['categories']['violence']['enabled'] is True  # Violence enabled
+
+    def test_store_and_validate_token_lifecycle(self, database):
+        user_id = create_test_user(database, 'tokenlife')
+        token = 'token-life-123'
+        database.store_user_token(user_id, token, datetime.utcnow() + timedelta(minutes=30))
+
+        validated_user_id = database.validate_token(token)
+        assert validated_user_id == user_id
+
+    def test_validate_token_unknown_returns_none(self, database):
+        assert database.validate_token('missing-token') is None
+
+    def test_expired_token_returns_none_and_is_removed(self, database):
+        user_id = create_test_user(database, 'expiredtoken')
+        token = 'expired-token-123'
+        database.store_user_token(user_id, token, datetime.utcnow() - timedelta(minutes=1))
+
+        assert database.validate_token(token) is None
+        assert database.get_user_by_token(token) is None
+
+    def test_preferences_roundtrip_json_consistency(self, database):
+        user_id = create_test_user(database, 'prefroundtrip')
+        payload = {
+            'enabled': True,
+            'categories': {
+                'language': {'enabled': True, 'action': 'mute', 'duration': 4},
+                'sexual': {'enabled': False, 'action': 'skip', 'duration': 12},
+                'violence': {'enabled': False, 'action': 'fast_forward', 'duration': 8},
+            },
+            'sensitivity': 0.9,
+        }
+
+        assert database.update_user_preferences(user_id, payload) is True
+        loaded = database.get_user_preferences(user_id)
+        assert loaded == payload
