@@ -264,6 +264,23 @@ class TestAPI:
         assert data['duration_seconds'] == pytest.approx(0.65, abs=0.05)  # Duration scaled to caption length
         assert 0.2 <= data['duration_seconds'] <= 4.0  # Duration bounded within limits
 
+    def test_event_endpoint_caption_duration_clamp_still_works(self, client):
+        token, _ = signup_and_get_token(client, email='duration-clamp@example.com')
+
+        response = client.post(
+            '/event',
+            json={'text': 'fuck', 'caption_duration_seconds': 10.0},
+            headers=auth_headers(token),
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert set(data.keys()) == {'action', 'duration_seconds', 'matched_category', 'reason'}
+        assert data['action'] == 'mute'
+        assert data['matched_category'] == 'language'
+        assert data['duration_seconds'] == pytest.approx(2.5)
+        assert isinstance(data['reason'], str) and data['reason']
+
     def test_videos_analyze_unavailable_transcript(self, client):
         token, _ = signup_and_get_token(client, email='video-unavailable@example.com')
 

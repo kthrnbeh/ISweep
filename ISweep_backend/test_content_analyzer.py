@@ -1,5 +1,5 @@
 import pytest  # Testing framework
-from content_analyzer import ContentAnalyzer  # Class under test
+from content_analyzer import AUDIO_MUTE_PREROLL_SEC, ContentAnalyzer, DEFAULT_AUDIO_AHEAD_FALLBACK_TEXT  # Class under test
 
 
 class TestContentAnalyzer:
@@ -21,6 +21,19 @@ class TestContentAnalyzer:
             'sexual_content_sensitivity': 'medium',
             'violence_sensitivity': 'medium'
         }  # Default settings mimicking normal use
+
+    @pytest.fixture
+    def audio_language_preferences(self):
+        """Audio-ahead preferences enabling only language mute."""
+        return {
+            'enabled': True,
+            'categories': {
+                'language': {'enabled': True, 'action': 'mute', 'duration': 4},
+                'sexual': {'enabled': False, 'action': 'skip', 'duration': 12},
+                'violence': {'enabled': False, 'action': 'fast_forward', 'duration': 8},
+            },
+            'sensitivity': 0.9,
+        }
 
     def test_clean_content_returns_none(self, analyzer, default_preferences):
         """Test that clean content returns 'none' action."""
@@ -234,32 +247,22 @@ class TestContentAnalyzer:
         )
 
         assert len(segments) == 1
-        assert segments[0]['text'] == 'test profanity fuck'
+        assert segments[0]['text'] == DEFAULT_AUDIO_AHEAD_FALLBACK_TEXT
         assert segments[0]['start'] == pytest.approx(0.0)
         assert segments[0]['duration'] == pytest.approx(1.0)
 
-    def test_audio_chunk_generates_ready_markers_in_dev_mode(self, analyzer, monkeypatch):
-        """Audio-ahead returns ready markers in development without a real STT backend."""
+    def test_audio_mute_marker_applies_preroll(self, analyzer, monkeypatch, audio_language_preferences):
+        """Audio-ahead mute markers are shifted earlier by the configured preroll."""
         monkeypatch.delenv('ISWEEP_AUDIO_AHEAD_STUB_TEXT', raising=False)
         monkeypatch.delenv('ISWEEP_AUDIO_AHEAD_PROVIDER', raising=False)
         monkeypatch.setenv('FLASK_ENV', 'development')
-
-        prefs = {
-            'enabled': True,
-            'categories': {
-                'language': {'enabled': True, 'action': 'mute', 'duration': 4},
-                'sexual': {'enabled': False, 'action': 'skip', 'duration': 12},
-                'violence': {'enabled': False, 'action': 'fast_forward', 'duration': 8},
-            },
-            'sensitivity': 0.9,
-        }
 
         result = analyzer.analyze_audio_chunk(
             audio_chunk='ZmFrZQ==',
             mime_type='audio/wav',
             start_seconds=20.0,
             end_seconds=21.0,
-            preferences=prefs,
+            preferences=audio_language_preferences,
             video_id='dev-audio',
         )
 
@@ -269,5 +272,100 @@ class TestContentAnalyzer:
         marker = result['events'][0]
         assert marker['action'] == 'mute'
         assert marker['matched_category'] == 'language'
-        assert marker['start_seconds'] == pytest.approx(19.9)
+        assert marker['start_seconds'] == pytest.approx(20.0 - AUDIO_MUTE_PREROLL_SEC)
         assert marker['end_seconds'] == pytest.approx(24.0)
+
+    def test_audio_marker_start_never_below_zero(self, analyzer, monkeypatch, audio_language_preferences):
+        """Audio mute marker preroll clamps at zero for near-start chunks."""
+        monkeypatch.delenv('ISWEEP_AUDIO_AHEAD_STUB_TEXT', raising=False)
+        monkeypatch.delenv('ISWEEP_AUDIO_AHEAD_PROVIDER', raising=False)
+        monkeypatch.setenv('FLASK_ENV', 'development')
+
+        result = analyzer.analyze_audio_chunk(
+            audio_chunk='ZmFrZQ==',
+            mime_type='audio/wav',
+            start_seconds=0.05,
+            end_seconds=1.05,
+            preferences=audio_language_preferences,
+            video_id='dev-audio-start',
+        )
+
+        assert result['status'] == 'ready'
+        assert len(result['events']) == 1
+        assert result['events'][0]['start_seconds'] == pytest.approx(0.0)
+
+    def test_audio_marker_ids_are_deterministic(self, analyzer, monkeypatch, audio_language_preferences):
+        """Repeated audio chunk analysis with the same inputs yields the same marker id."""
+        monkeypatch.delenv('ISWEEP_AUDIO_AHEAD_STUB_TEXT', raising=False)
+        monkeypatch.delenv('ISWEEP_AUDIO_AHEAD_PROVIDER', raising=False)
+        monkeypatch.setenv('FLASK_ENV', 'development')
+
+        first = analyzer.analyze_audio_chunk(
+            audio_chunk='ZmFrZQ==',
+            mime_type='audio/wav',
+            start_seconds=20.0,
+            end_seconds=21.0,
+            preferences=audio_language_preferences,
+            video_id='stable-audio',
+        )
+        second = analyzer.analyze_audio_chunk(
+            audio_chunk='ZmFrZQ==',
+            mime_type='audio/wav',
+            start_seconds=20.0,
+            end_seconds=21.0,
+            preferences=audio_language_preferences,
+            video_id='stable-audio',
+        )
+
+        assert first['status'] == 'ready'
+        assert second['status'] == 'ready'
+        assert first['events'][0]['id'] == second['events'][0]['id']
+
+    def test_audio_overlapping_mute_markers_merge_cleanly(self, analyzer):
+        """Overlapping audio mute markers merge into one stable mute window."""
+        events = [
+            {
+                'id': 'audio-a',
+                'start_seconds': 10.0,
+                'end_seconds': 12.0,
+                'action': 'mute',
+                'duration_seconds': 2.0,
+                'matched_category': 'language',
+                'reason': 'audio first',
+            },
+            {
+                'id': 'audio-b',
+                'start_seconds': 11.25,
+                'end_seconds': 14.0,
+                'action': 'mute',
+                'duration_seconds': 2.75,
+                'matched_category': 'language',
+                'reason': 'audio second',
+            },
+        ]
+
+        merged = analyzer._merge_marker_events(events)
+
+        assert len(merged) == 1
+        assert merged[0]['start_seconds'] == pytest.approx(10.0)
+        assert merged[0]['end_seconds'] == pytest.approx(14.0)
+        assert merged[0]['duration_seconds'] == pytest.approx(4.0)
+
+    def test_audio_chunk_without_match_returns_ready_with_empty_events_in_dev_mode(self, analyzer, monkeypatch, audio_language_preferences):
+        """Development audio fallback still returns ready when the transcript has no match."""
+        monkeypatch.setenv('ISWEEP_AUDIO_AHEAD_STUB_TEXT', 'hello there friend')
+        monkeypatch.delenv('ISWEEP_AUDIO_AHEAD_PROVIDER', raising=False)
+        monkeypatch.setenv('FLASK_ENV', 'development')
+
+        result = analyzer.analyze_audio_chunk(
+            audio_chunk='ZmFrZQ==',
+            mime_type='audio/wav',
+            start_seconds=20.0,
+            end_seconds=21.0,
+            preferences=audio_language_preferences,
+            video_id='clean-audio',
+        )
+
+        assert result['status'] == 'ready'
+        assert result['events'] == []
+        assert result['failure_reason'] is None
