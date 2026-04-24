@@ -16,6 +16,7 @@ import re  # Imports regex utilities for pattern matching
 import hashlib  # Stable marker ids for deterministic scheduling
 import importlib
 import os
+from io import BytesIO
 
 # Seconds to shift audio-derived mute markers earlier so the audio is
 # already silent when the speaker reaches the flagged word.
@@ -29,6 +30,79 @@ from better_profanity import profanity  # Imports third-party profanity checker
 
 def _env_flag(name: str) -> bool:
     return str(os.getenv(name, '')).strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+class SpeechToTextAdapter:
+    """Interface for optional word-level speech-to-text timing providers."""
+
+    def transcribe_with_word_timestamps(
+        self,
+        audio_path_or_bytes,
+        text_hint: str = '',
+        start_seconds: float = 0.0,
+        duration_seconds: float = 0.0,
+    ) -> Dict:
+        raise NotImplementedError()
+
+
+class FasterWhisperSpeechToTextAdapter(SpeechToTextAdapter):
+    """Optional faster-whisper adapter loaded only when STT is enabled."""
+
+    def __init__(self, model_size: str = 'base', device: str = 'cpu', compute_type: str = 'int8'):
+        self.model_size = model_size
+        self.device = device
+        self.compute_type = compute_type
+        self._model = None
+
+    def _ensure_model(self):
+        if self._model is not None:
+            return self._model
+        try:
+            fw_module = importlib.import_module('faster_whisper')
+            WhisperModel = getattr(fw_module, 'WhisperModel')
+            self._model = WhisperModel(self.model_size, device=self.device, compute_type=self.compute_type)
+            return self._model
+        except Exception as exc:  # pragma: no cover - environment dependent import/runtime
+            raise RuntimeError('stt_unavailable') from exc
+
+    def transcribe_with_word_timestamps(
+        self,
+        audio_path_or_bytes,
+        text_hint: str = '',
+        start_seconds: float = 0.0,
+        duration_seconds: float = 0.0,
+    ) -> Dict:
+        if audio_path_or_bytes is None:
+            raise RuntimeError('stt_unavailable')
+
+        model = self._ensure_model()
+        audio_input = BytesIO(audio_path_or_bytes) if isinstance(audio_path_or_bytes, (bytes, bytearray)) else audio_path_or_bytes
+
+        segments, _ = model.transcribe(
+            audio_input,
+            word_timestamps=True,
+            vad_filter=True,
+            language='en',
+        )
+
+        words: List[Dict] = []
+        for segment in segments:
+            for word in (getattr(segment, 'words', None) or []):
+                word_text = str(getattr(word, 'word', '') or '').strip()
+                word_start = getattr(word, 'start', None)
+                word_end = getattr(word, 'end', None)
+                if not word_text:
+                    continue
+                if word_start is None or word_end is None:
+                    continue
+                words.append({
+                    'word': word_text,
+                    'start': round(max(start_seconds + float(word_start), 0.0), 3),
+                    'end': round(max(start_seconds + float(word_end), start_seconds + float(word_start)), 3),
+                    'source': 'whisper',
+                })
+
+        return {'words': words}
 
 
 class Phase1AudioTranscriptionAdapter:
@@ -120,10 +194,130 @@ class ContentAnalyzer:
         'fuck', 'fucking', 'fucked', 'bitch', 'shit', 'asshole', 'bastard', 'damn', 'crap'
     ]  # Explicit language the library occasionally misses with punctuation variants
 
-    def __init__(self):
+    def __init__(self, speech_to_text_adapter: SpeechToTextAdapter | None = None):
         """Initialize the content analyzer."""
         profanity.load_censor_words()  # Load the profanity word list into memory
         self.audio_transcription_adapter = Phase1AudioTranscriptionAdapter()
+        self.stt_enabled = _env_flag('ISWEEP_STT_ENABLED')
+        self.stt_model_size = str(os.getenv('ISWEEP_STT_MODEL_SIZE', 'base') or 'base').strip() or 'base'
+        self.stt_device = str(os.getenv('ISWEEP_STT_DEVICE', 'cpu') or 'cpu').strip() or 'cpu'
+        self.stt_compute_type = str(os.getenv('ISWEEP_STT_COMPUTE_TYPE', 'int8') or 'int8').strip() or 'int8'
+        self.speech_to_text_adapter = speech_to_text_adapter
+        if self.stt_enabled:
+            print('[ISWEEP][STT] whisper enabled', {
+                'model': self.stt_model_size,
+                'device': self.stt_device,
+                'compute_type': self.stt_compute_type,
+            })
+        else:
+            print('[ISWEEP][STT] disabled fallback estimated')
+
+    def get_stt_cache_mode(self) -> Dict:
+        """Expose STT mode so cache keys can include timing source behavior."""
+        if not self.stt_enabled:
+            return {'enabled': False, 'model': None}
+        return {'enabled': True, 'model': self.stt_model_size}
+
+    def _get_or_create_stt_adapter(self) -> SpeechToTextAdapter | None:
+        if self.speech_to_text_adapter is not None:
+            return self.speech_to_text_adapter
+        if not self.stt_enabled:
+            return None
+        self.speech_to_text_adapter = FasterWhisperSpeechToTextAdapter(
+            model_size=self.stt_model_size,
+            device=self.stt_device,
+            compute_type=self.stt_compute_type,
+        )
+        return self.speech_to_text_adapter
+
+    def _estimate_word_timings(self, text: str, start_seconds: float, duration: float) -> List[Dict]:
+        tokens = [match.group(0) for match in re.finditer(r"[A-Za-z0-9']+", text)]
+        if not tokens:
+            return []
+
+        words: List[Dict] = []
+        step = duration / len(tokens) if duration > 0 else 0.0
+        end_seconds = start_seconds + duration
+        for index, token in enumerate(tokens):
+            word_start = start_seconds + (step * index)
+            word_end = start_seconds + (step * (index + 1)) if step > 0 else start_seconds
+            if step > 0 and index == len(tokens) - 1:
+                word_end = end_seconds
+            words.append({
+                'word': token,
+                'start': round(word_start, 3),
+                'end': round(max(word_end, word_start), 3),
+                'source': 'estimated',
+            })
+        return words
+
+    def _build_segment_word_timings(self, segment: Dict, text: str, start_seconds: float, duration: float) -> List[Dict]:
+        estimated_words = self._estimate_word_timings(text, start_seconds, duration)
+
+        if not self.stt_enabled:
+            print('[ISWEEP][STT] disabled fallback estimated')
+            return estimated_words
+
+        adapter = self._get_or_create_stt_adapter()
+        if adapter is None:
+            print('[ISWEEP][STT] unavailable fallback estimated', {'reason': 'adapter_missing'})
+            return estimated_words
+
+        audio_payload = segment.get('audio_path_or_bytes')
+        if audio_payload is None:
+            print('[ISWEEP][STT] unavailable fallback estimated', {'reason': 'missing_audio'})
+            return estimated_words
+
+        try:
+            result = adapter.transcribe_with_word_timestamps(
+                audio_payload,
+                text_hint=text,
+                start_seconds=start_seconds,
+                duration_seconds=duration,
+            )
+        except RuntimeError:
+            print('[ISWEEP][STT] unavailable fallback estimated', {'reason': 'runtime_unavailable'})
+            return estimated_words
+        except Exception:
+            print('[ISWEEP][STT] unavailable fallback estimated', {'reason': 'unexpected_error'})
+            return estimated_words
+
+        words = result.get('words') if isinstance(result, dict) else None
+        if not isinstance(words, list) or not words:
+            print('[ISWEEP][STT] unavailable fallback estimated', {'reason': 'no_words'})
+            return estimated_words
+
+        normalized_words = []
+        for word in words:
+            if not isinstance(word, dict):
+                continue
+            w = str(word.get('word') or '').strip()
+            start = word.get('start')
+            end = word.get('end')
+            if not w:
+                continue
+            if start is None or end is None:
+                continue
+            try:
+                ws = float(start)
+                we = float(end)
+            except (TypeError, ValueError):
+                continue
+            if we < ws:
+                continue
+            normalized_words.append({
+                'word': w,
+                'start': round(ws, 3),
+                'end': round(we, 3),
+                'source': str(word.get('source') or 'whisper'),
+            })
+
+        if not normalized_words:
+            print('[ISWEEP][STT] unavailable fallback estimated', {'reason': 'normalized_empty'})
+            return estimated_words
+
+        print('[ISWEEP][STT] word timestamps generated', {'count': len(normalized_words)})
+        return normalized_words
 
     def analyze(self, text: str, user_preferences: Dict) -> str:
         """
@@ -277,7 +471,7 @@ class ContentAnalyzer:
         )
 
     def _build_cleaned_caption_entry(self, segment: Dict, preferences: Dict) -> Dict | None:
-        """Build one cleaned caption entry with approximate word timing when needed."""
+        """Build one cleaned caption entry with STT-derived or estimated word timing."""
         text = str(segment.get('text') or '').strip()
         if not text:
             return None
@@ -294,23 +488,10 @@ class ContentAnalyzer:
             duration = 0.0
 
         end_seconds = start_seconds + duration
-        tokens = [match.group(0) for match in re.finditer(r"[A-Za-z0-9']+", text)]
-
-        words: List[Dict] = []
+        words = self._build_segment_word_timings(segment, text, start_seconds, duration)
         filtered_flags: List[bool] = []
-        if tokens:
-            step = duration / len(tokens) if duration > 0 else 0.0
-            for index, token in enumerate(tokens):
-                word_start = start_seconds + (step * index)
-                word_end = start_seconds + (step * (index + 1)) if step > 0 else start_seconds
-                if step > 0 and index == len(tokens) - 1:
-                    word_end = end_seconds
-                words.append({
-                    'word': token,
-                    'start': round(word_start, 3),
-                    'end': round(max(word_end, word_start), 3),
-                })
-                filtered_flags.append(self._is_clean_caption_word_filtered(token, preferences))
+        for word in words:
+            filtered_flags.append(self._is_clean_caption_word_filtered(word.get('word', ''), preferences))
 
         clean_resume_time = None
         first_blocked_word_start = None

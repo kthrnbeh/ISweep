@@ -346,6 +346,123 @@ class TestContentAnalyzer:
         assert cleaned[0]['words'] == []
         assert 'clean_resume_time' not in cleaned[0]
 
+    def test_stt_disabled_falls_back_to_estimated_word_timing(self, monkeypatch):
+        """When STT is disabled, cleaned caption words use estimated timing source."""
+        monkeypatch.setenv('ISWEEP_STT_ENABLED', 'false')
+        analyzer = ContentAnalyzer()
+        prefs = {
+            'enabled': True,
+            'categories': {
+                'language': {'enabled': True, 'action': 'mute', 'duration': 4},
+                'sexual': {'enabled': False, 'action': 'skip', 'duration': 12},
+                'violence': {'enabled': False, 'action': 'fast_forward', 'duration': 8},
+            },
+        }
+
+        cleaned = analyzer.build_cleaned_captions([
+            {'text': 'What the heck', 'start': 10.0, 'duration': 0.9}
+        ], prefs)
+
+        assert len(cleaned) == 1
+        assert len(cleaned[0]['words']) == 3
+        assert cleaned[0]['words'][0]['source'] == 'estimated'
+
+    def test_stt_unavailable_falls_back_to_estimated_word_timing(self, monkeypatch):
+        """When STT is enabled but unavailable, analyzer falls back to estimated timings."""
+        monkeypatch.setenv('ISWEEP_STT_ENABLED', 'true')
+        analyzer = ContentAnalyzer()
+
+        class FailingAdapter:
+            def transcribe_with_word_timestamps(self, audio_path_or_bytes, text_hint='', start_seconds=0.0, duration_seconds=0.0):
+                raise RuntimeError('stt_unavailable')
+
+        analyzer.speech_to_text_adapter = FailingAdapter()
+        prefs = {
+            'enabled': True,
+            'categories': {
+                'language': {'enabled': True, 'action': 'mute', 'duration': 4},
+                'sexual': {'enabled': False, 'action': 'skip', 'duration': 12},
+                'violence': {'enabled': False, 'action': 'fast_forward', 'duration': 8},
+            },
+        }
+
+        cleaned = analyzer.build_cleaned_captions([
+            {'text': 'What the heck', 'start': 10.0, 'duration': 0.9, 'audio_path_or_bytes': b'fake-audio'}
+        ], prefs)
+
+        assert len(cleaned) == 1
+        assert cleaned[0]['words'][0]['source'] == 'estimated'
+
+    def test_stt_word_timestamps_used_when_adapter_returns_words(self, monkeypatch):
+        """When STT adapter provides words, cleaned captions preserve whisper timings and sources."""
+        monkeypatch.setenv('ISWEEP_STT_ENABLED', 'true')
+        analyzer = ContentAnalyzer()
+
+        class StubAdapter:
+            def transcribe_with_word_timestamps(self, audio_path_or_bytes, text_hint='', start_seconds=0.0, duration_seconds=0.0):
+                return {
+                    'words': [
+                        {'word': 'What', 'start': 12.3, 'end': 12.5, 'source': 'whisper'},
+                        {'word': 'the', 'start': 12.5, 'end': 12.6, 'source': 'whisper'},
+                        {'word': 'heck', 'start': 12.62, 'end': 12.91, 'source': 'whisper'},
+                        {'word': 'man', 'start': 12.95, 'end': 13.12, 'source': 'whisper'},
+                    ]
+                }
+
+        analyzer.speech_to_text_adapter = StubAdapter()
+        prefs = {
+            'enabled': True,
+            'blocklist': {'enabled': True, 'items': ['heck']},
+            'categories': {
+                'language': {'enabled': True, 'action': 'mute', 'duration': 4},
+                'sexual': {'enabled': False, 'action': 'skip', 'duration': 12},
+                'violence': {'enabled': False, 'action': 'fast_forward', 'duration': 8},
+            },
+        }
+
+        cleaned = analyzer.build_cleaned_captions([
+            {'text': 'What the heck man', 'start': 12.3, 'duration': 1.0, 'audio_path_or_bytes': b'fake-audio'}
+        ], prefs)
+
+        assert len(cleaned) == 1
+        assert cleaned[0]['words'][2]['word'] == 'heck'
+        assert cleaned[0]['words'][2]['start'] == pytest.approx(12.62)
+        assert cleaned[0]['words'][2]['source'] == 'whisper'
+        assert cleaned[0]['clean_resume_time'] == pytest.approx(12.95)
+
+    def test_clean_resume_time_prefers_stt_word_timing(self, monkeypatch):
+        """clean_resume_time uses STT timing boundaries when available."""
+        monkeypatch.setenv('ISWEEP_STT_ENABLED', 'true')
+        analyzer = ContentAnalyzer()
+
+        class StubAdapter:
+            def transcribe_with_word_timestamps(self, audio_path_or_bytes, text_hint='', start_seconds=0.0, duration_seconds=0.0):
+                return {
+                    'words': [
+                        {'word': 'croc', 'start': 10.0, 'end': 10.3, 'source': 'whisper'},
+                        {'word': 'heck', 'start': 10.31, 'end': 10.7, 'source': 'whisper'},
+                        {'word': 'man', 'start': 10.71, 'end': 11.0, 'source': 'whisper'},
+                    ]
+                }
+
+        analyzer.speech_to_text_adapter = StubAdapter()
+        prefs = {
+            'enabled': True,
+            'blocklist': {'enabled': True, 'items': ['heck']},
+            'categories': {'language': {'enabled': True, 'action': 'mute', 'duration': 4}},
+        }
+
+        # Inject segment directly by monkeypatching transcript fetch.
+        analyzer._fetch_transcript_segments = lambda _: [
+            {'text': 'croc heck man', 'start': 10.0, 'duration': 1.0, 'audio_path_or_bytes': b'fake-audio'}
+        ]
+        result = analyzer.analyze_video_markers('stt-video', prefs)
+
+        assert result['status'] == 'ready'
+        assert len(result['events']) == 1
+        assert result['events'][0]['blocked_word_start'] == pytest.approx(10.31)
+        assert result['events'][0]['clean_resume_time'] == pytest.approx(10.71)
+
     def test_transcript_markers_are_non_overlapping(self, analyzer):
         """Overlapping events should be merged/trimmed to deterministic non-overlapping output."""
         events = [

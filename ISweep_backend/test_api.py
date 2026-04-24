@@ -24,6 +24,21 @@ class TestAPI:
         assert data['status'] == 'healthy'  # Verify status field
         assert data['service'] == 'ISweep Backend'  # Verify service name
 
+    def test_cache_fingerprint_differs_when_stt_mode_changes(self):
+        from app import build_preferences_fingerprint
+
+        prefs = {
+            'enabled': True,
+            'categories': {'language': {'enabled': True, 'action': 'mute', 'duration': 4}},
+        }
+
+        no_stt = build_preferences_fingerprint(prefs, {'enabled': False, 'model': None})
+        with_stt = build_preferences_fingerprint(prefs, {'enabled': True, 'model': 'base'})
+
+        assert isinstance(no_stt, str)
+        assert isinstance(with_stt, str)
+        assert no_stt != with_stt
+
     def test_health_root(self, client):
         response = client.get('/health')  # Hit root health endpoint
         assert response.status_code == 200  # Expect OK
@@ -363,6 +378,15 @@ class TestAPI:
         response = client.post('/videos/analyze', json={'video_id': 'abc123'}, headers=auth_headers(token))
         assert response.status_code == 200
         data = json.loads(response.data)
+        assert set(data.keys()) == {
+            'status',
+            'source',
+            'events',
+            'cleaned_captions',
+            'clean_captions',
+            'failure_reason',
+            'cached',
+        }
         assert data['status'] == 'ready'
         assert data['source'] == 'transcript'
         assert len(data['events']) == 1
@@ -371,6 +395,7 @@ class TestAPI:
         assert data['cleaned_captions'][0]['clean_text'] == 'What the ____ is going on?'
         assert data['cleaned_captions'][0]['clean_resume_time'] == 13.1
         assert len(data['cleaned_captions'][0]['words']) == 4
+        assert data['cleaned_captions'][0]['words'][0]['word'] == 'What'
         assert data['clean_captions'] == data['cleaned_captions']
         assert data['failure_reason'] is None
         assert data['cached'] is False

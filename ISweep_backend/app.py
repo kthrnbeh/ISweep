@@ -79,9 +79,12 @@ def get_analyzer():
     return app.analyzer
 
 
-def build_preferences_fingerprint(preferences: dict) -> str:
+def build_preferences_fingerprint(preferences: dict, stt_mode: dict | None = None) -> str:
     """Build stable hash for preference payloads used by /videos/analyze cache."""
-    canonical = json.dumps(preferences or {}, sort_keys=True, separators=(',', ':'))
+    canonical = json.dumps({
+        'preferences': preferences or {},
+        'stt_mode': stt_mode or {'enabled': False, 'model': None},
+    }, sort_keys=True, separators=(',', ':'))
     return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
 
 
@@ -444,7 +447,9 @@ def analyze_video_markers():
 
     db = get_db()
     preferences = db.get_user_preferences(request.user_id) or {}
-    preferences_fingerprint = build_preferences_fingerprint(preferences)
+    analyzer = get_analyzer()
+    stt_mode = analyzer.get_stt_cache_mode() if hasattr(analyzer, 'get_stt_cache_mode') else {'enabled': False, 'model': None}
+    preferences_fingerprint = build_preferences_fingerprint(preferences, stt_mode)
     force_refresh = as_bool(data.get('force_refresh'))
 
     if force_refresh:
@@ -474,7 +479,6 @@ def analyze_video_markers():
             'preferences_fingerprint': preferences_fingerprint,
         })
 
-    analyzer = get_analyzer()
     result = analyzer.analyze_video_markers(video_id, preferences)
 
     if result.get('status') != 'error':
