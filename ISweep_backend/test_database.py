@@ -119,3 +119,53 @@ class TestDatabase:
         assert database.update_user_preferences(user_id, payload) is True
         loaded = database.get_user_preferences(user_id)
         assert loaded == payload
+
+    def test_video_analysis_cache_roundtrip(self, database):
+        payload = {
+            'status': 'ready',
+            'source': 'transcript',
+            'events': [{'id': 'm1', 'start_seconds': 1.0, 'end_seconds': 2.0, 'action': 'mute'}],
+            'cleaned_captions': [{'start_seconds': 1.0, 'end_seconds': 2.0, 'text': 'a', 'clean_text': 'a'}],
+            'clean_captions': [{'start_seconds': 1.0, 'end_seconds': 2.0, 'text': 'a', 'clean_text': 'a'}],
+            'failure_reason': None,
+        }
+
+        database.save_video_analysis_cache('vid-1', 'prefs-1', payload)
+        cached = database.get_video_analysis_cache('vid-1', 'prefs-1')
+
+        assert cached is not None
+        assert cached['status'] == 'ready'
+        assert cached['source'] == 'transcript'
+        assert cached['events'][0]['id'] == 'm1'
+        assert cached['cleaned_captions'][0]['clean_text'] == 'a'
+        assert cached['clean_captions'] == cached['cleaned_captions']
+        assert cached['failure_reason'] is None
+        assert isinstance(cached['created_at'], str)
+        assert isinstance(cached['updated_at'], str)
+
+    def test_video_analysis_cache_upsert_updates_payload(self, database):
+        first_payload = {
+            'status': 'unavailable',
+            'source': None,
+            'events': [],
+            'cleaned_captions': [],
+            'clean_captions': [],
+            'failure_reason': 'transcript_unavailable',
+        }
+        second_payload = {
+            'status': 'ready',
+            'source': 'transcript',
+            'events': [{'id': 'm2', 'start_seconds': 3.0, 'end_seconds': 4.0, 'action': 'skip'}],
+            'cleaned_captions': [{'start_seconds': 3.0, 'end_seconds': 4.0, 'text': 'b', 'clean_text': 'b'}],
+            'clean_captions': [{'start_seconds': 3.0, 'end_seconds': 4.0, 'text': 'b', 'clean_text': 'b'}],
+            'failure_reason': None,
+        }
+
+        database.save_video_analysis_cache('vid-2', 'prefs-2', first_payload)
+        database.save_video_analysis_cache('vid-2', 'prefs-2', second_payload)
+        cached = database.get_video_analysis_cache('vid-2', 'prefs-2')
+
+        assert cached is not None
+        assert cached['status'] == 'ready'
+        assert cached['events'][0]['id'] == 'm2'
+        assert cached['failure_reason'] is None

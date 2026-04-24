@@ -17,7 +17,7 @@ System connection:
 import sqlite3  # Standard library SQLite interface
 import json  # JSON serialization for preferences
 from datetime import datetime  # Timestamp handling
-from typing import Dict, Optional, Tuple  # Type annotations for clarity
+from typing import Dict, Optional  # Type annotations for clarity
 
 
 class Database:
@@ -90,6 +90,22 @@ class Database:
                 FOREIGN KEY (user_id) REFERENCES users (id)
             )
         ''')  # Create auth token table for bearer tokens
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS video_analysis_cache (
+                video_id TEXT NOT NULL,
+                preferences_fingerprint TEXT NOT NULL,
+                status TEXT,
+                source TEXT,
+                events_json TEXT NOT NULL,
+                cleaned_captions_json TEXT NOT NULL,
+                clean_captions_json TEXT NOT NULL,
+                failure_reason TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (video_id, preferences_fingerprint)
+            )
+        ''')  # Cache table for /videos/analyze responses keyed by video + preferences
 
         conn.commit()  # Persist schema changes
         conn.close()  # Close connection
@@ -291,3 +307,77 @@ class Database:
     def validate_token(self, token: str) -> Optional[int]:
         """Return user_id for a valid (non-expired) token, else None (used by require_auth)."""
         return self.get_user_by_token(token)  # Delegate validation to token lookup
+
+    def get_video_analysis_cache(self, video_id: str, preferences_fingerprint: str) -> Optional[Dict]:
+        """Return cached /videos/analyze payload for a video + preferences fingerprint."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            '''SELECT *
+               FROM video_analysis_cache
+               WHERE video_id = ? AND preferences_fingerprint = ?''',
+            (video_id, preferences_fingerprint)
+        )
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        data = dict(row)
+        return {
+            'status': data.get('status'),
+            'source': data.get('source'),
+            'events': json.loads(data.get('events_json') or '[]'),
+            'cleaned_captions': json.loads(data.get('cleaned_captions_json') or '[]'),
+            'clean_captions': json.loads(data.get('clean_captions_json') or '[]'),
+            'failure_reason': data.get('failure_reason'),
+            'created_at': data.get('created_at'),
+            'updated_at': data.get('updated_at'),
+        }
+
+    def save_video_analysis_cache(self, video_id: str, preferences_fingerprint: str, payload: Dict) -> None:
+        """Upsert cached /videos/analyze payload for a video + preferences fingerprint."""
+        events_json = json.dumps(payload.get('events', []), separators=(',', ':'), sort_keys=True)
+        cleaned_captions_json = json.dumps(payload.get('cleaned_captions', []), separators=(',', ':'), sort_keys=True)
+        clean_captions_json = json.dumps(
+            payload.get('clean_captions', payload.get('cleaned_captions', [])),
+            separators=(',', ':'),
+            sort_keys=True,
+        )
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            '''INSERT INTO video_analysis_cache (
+                   video_id,
+                   preferences_fingerprint,
+                   status,
+                   source,
+                   events_json,
+                   cleaned_captions_json,
+                   clean_captions_json,
+                   failure_reason
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(video_id, preferences_fingerprint)
+               DO UPDATE SET
+                   status = excluded.status,
+                   source = excluded.source,
+                   events_json = excluded.events_json,
+                   cleaned_captions_json = excluded.cleaned_captions_json,
+                   clean_captions_json = excluded.clean_captions_json,
+                   failure_reason = excluded.failure_reason,
+                   updated_at = CURRENT_TIMESTAMP''',
+            (
+                video_id,
+                preferences_fingerprint,
+                payload.get('status'),
+                payload.get('source'),
+                events_json,
+                cleaned_captions_json,
+                clean_captions_json,
+                payload.get('failure_reason'),
+            ),
+        )
+        conn.commit()
+        conn.close()

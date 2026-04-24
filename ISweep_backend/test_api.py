@@ -305,6 +305,7 @@ class TestAPI:
         assert data['cleaned_captions'] == []
         assert data['clean_captions'] == []
         assert data['failure_reason'] == 'transcript_unavailable'
+        assert data['cached'] is False
 
     def test_videos_analyze_ready_with_markers(self, client):
         token, _ = signup_and_get_token(client, email='video-ready@example.com')
@@ -372,3 +373,109 @@ class TestAPI:
         assert len(data['cleaned_captions'][0]['words']) == 4
         assert data['clean_captions'] == data['cleaned_captions']
         assert data['failure_reason'] is None
+        assert data['cached'] is False
+
+    def test_videos_analyze_uses_cache_on_second_call(self, client):
+        token, _ = signup_and_get_token(client, email='video-cache-hit@example.com')
+
+        class AnalyzerStub:
+            def __init__(self):
+                self.calls = 0
+
+            def analyze_video_markers(self, video_id, preferences):
+                self.calls += 1
+                return {
+                    'status': 'ready',
+                    'source': 'transcript',
+                    'events': [{'id': 'cached-1', 'start_seconds': 1.0, 'end_seconds': 2.0, 'action': 'mute', 'duration_seconds': 1.0, 'matched_category': 'language', 'reason': 'cached'}],
+                    'cleaned_captions': [{'start_seconds': 1.0, 'end_seconds': 2.0, 'text': 'a', 'clean_text': 'a'}],
+                    'clean_captions': [{'start_seconds': 1.0, 'end_seconds': 2.0, 'text': 'a', 'clean_text': 'a'}],
+                    'failure_reason': None,
+                }
+
+        stub = AnalyzerStub()
+        client.application.analyzer = stub
+
+        first = client.post('/videos/analyze', json={'video_id': 'cached-video'}, headers=auth_headers(token))
+        assert first.status_code == 200
+        first_data = json.loads(first.data)
+        assert first_data['cached'] is False
+        assert stub.calls == 1
+
+        second = client.post('/videos/analyze', json={'video_id': 'cached-video'}, headers=auth_headers(token))
+        assert second.status_code == 200
+        second_data = json.loads(second.data)
+        assert second_data['cached'] is True
+        assert second_data['events'][0]['id'] == 'cached-1'
+        assert stub.calls == 1
+
+    def test_videos_analyze_force_refresh_bypasses_cache(self, client):
+        token, _ = signup_and_get_token(client, email='video-cache-force@example.com')
+
+        class AnalyzerStub:
+            def __init__(self):
+                self.calls = 0
+
+            def analyze_video_markers(self, video_id, preferences):
+                self.calls += 1
+                return {
+                    'status': 'ready',
+                    'source': 'transcript',
+                    'events': [{'id': f'force-{self.calls}', 'start_seconds': 1.0, 'end_seconds': 2.0, 'action': 'mute', 'duration_seconds': 1.0, 'matched_category': 'language', 'reason': 'force'}],
+                    'cleaned_captions': [],
+                    'clean_captions': [],
+                    'failure_reason': None,
+                }
+
+        stub = AnalyzerStub()
+        client.application.analyzer = stub
+
+        first = client.post('/videos/analyze', json={'video_id': 'force-video'}, headers=auth_headers(token))
+        assert first.status_code == 200
+        assert json.loads(first.data)['cached'] is False
+
+        second = client.post('/videos/analyze', json={'video_id': 'force-video', 'force_refresh': True}, headers=auth_headers(token))
+        second_data = json.loads(second.data)
+        assert second.status_code == 200
+        assert second_data['cached'] is False
+        assert second_data['events'][0]['id'] == 'force-2'
+        assert stub.calls == 2
+
+    def test_videos_analyze_cache_respects_preferences_fingerprint(self, client):
+        token, user_id = signup_and_get_token(client, email='video-cache-prefs@example.com')
+
+        class AnalyzerStub:
+            def __init__(self):
+                self.calls = 0
+
+            def analyze_video_markers(self, video_id, preferences):
+                self.calls += 1
+                duration = preferences.get('categories', {}).get('language', {}).get('duration', 4)
+                return {
+                    'status': 'ready',
+                    'source': 'transcript',
+                    'events': [{'id': f'prefs-{duration}', 'start_seconds': 1.0, 'end_seconds': 2.0, 'action': 'mute', 'duration_seconds': 1.0, 'matched_category': 'language', 'reason': 'prefs'}],
+                    'cleaned_captions': [],
+                    'clean_captions': [],
+                    'failure_reason': None,
+                }
+
+        stub = AnalyzerStub()
+        client.application.analyzer = stub
+
+        first = client.post('/videos/analyze', json={'video_id': 'prefs-video'}, headers=auth_headers(token))
+        assert first.status_code == 200
+        assert json.loads(first.data)['cached'] is False
+        assert stub.calls == 1
+
+        db = client.application.database
+        prefs = db.get_user_preferences(user_id)
+        prefs['categories']['language']['duration'] = 9
+        assert db.update_user_preferences(user_id, prefs) is True
+
+        second = client.post('/videos/analyze', json={'video_id': 'prefs-video'}, headers=auth_headers(token))
+        second_data = json.loads(second.data)
+        assert second.status_code == 200
+        assert second_data['cached'] is False
+        assert second_data['events'][0]['id'] == 'prefs-9'
+        assert stub.calls == 2

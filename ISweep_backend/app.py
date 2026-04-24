@@ -16,6 +16,8 @@ Key responsibilities:
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import hashlib
+import json
 import math
 import os
 import secrets
@@ -75,6 +77,23 @@ def get_analyzer():
     if not hasattr(app, 'analyzer'):
         app.analyzer = ContentAnalyzer()
     return app.analyzer
+
+
+def build_preferences_fingerprint(preferences: dict) -> str:
+    """Build stable hash for preference payloads used by /videos/analyze cache."""
+    canonical = json.dumps(preferences or {}, sort_keys=True, separators=(',', ':'))
+    return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
+
+def as_bool(value) -> bool:
+    """Parse booleans from JSON values and common string forms."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {'1', 'true', 'yes', 'on'}
+    return False
 
 
 def issue_token(user_id: int) -> str:
@@ -425,8 +444,54 @@ def analyze_video_markers():
 
     db = get_db()
     preferences = db.get_user_preferences(request.user_id) or {}
+    preferences_fingerprint = build_preferences_fingerprint(preferences)
+    force_refresh = as_bool(data.get('force_refresh'))
+
+    if force_refresh:
+        print('[ISWEEP][CACHE] bypass force_refresh', {
+            'video_id': video_id,
+            'preferences_fingerprint': preferences_fingerprint,
+        })
+    else:
+        cached = db.get_video_analysis_cache(video_id, preferences_fingerprint)
+        if cached:
+            print('[ISWEEP][CACHE] hit', {
+                'video_id': video_id,
+                'preferences_fingerprint': preferences_fingerprint,
+            })
+            return jsonify({
+                'status': cached.get('status', 'error'),
+                'source': cached.get('source'),
+                'events': cached.get('events', []),
+                'cleaned_captions': cached.get('cleaned_captions', []),
+                'clean_captions': cached.get('clean_captions', cached.get('cleaned_captions', [])),
+                'failure_reason': cached.get('failure_reason'),
+                'cached': True,
+            }), 200
+
+        print('[ISWEEP][CACHE] miss', {
+            'video_id': video_id,
+            'preferences_fingerprint': preferences_fingerprint,
+        })
+
     analyzer = get_analyzer()
     result = analyzer.analyze_video_markers(video_id, preferences)
+
+    if result.get('status') != 'error':
+        db.save_video_analysis_cache(video_id, preferences_fingerprint, {
+            'status': result.get('status', 'error'),
+            'source': result.get('source'),
+            'events': result.get('events', []),
+            'cleaned_captions': result.get('cleaned_captions', []),
+            'clean_captions': result.get('clean_captions', result.get('cleaned_captions', [])),
+            'failure_reason': result.get('failure_reason'),
+        })
+        print('[ISWEEP][CACHE] saved', {
+            'video_id': video_id,
+            'preferences_fingerprint': preferences_fingerprint,
+            'status': result.get('status', 'error'),
+        })
+
     return jsonify({
         'status': result.get('status', 'error'),
         'source': result.get('source'),
@@ -434,6 +499,7 @@ def analyze_video_markers():
         'cleaned_captions': result.get('cleaned_captions', []),
         'clean_captions': result.get('clean_captions', result.get('cleaned_captions', [])),
         'failure_reason': result.get('failure_reason'),
+        'cached': False,
     }), 200
 
 
