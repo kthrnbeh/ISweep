@@ -107,6 +107,30 @@ class Database:
             )
         ''')  # Cache table for /videos/analyze responses keyed by video + preferences
 
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS audio_stt_chunk_cache (
+                video_id TEXT NOT NULL,
+                preferences_fingerprint TEXT NOT NULL,
+                stt_model TEXT,
+                chunk_start_seconds REAL NOT NULL,
+                chunk_end_seconds REAL NOT NULL,
+                status TEXT,
+                source TEXT,
+                events_json TEXT NOT NULL,
+                cleaned_captions_json TEXT NOT NULL,
+                failure_reason TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (
+                    video_id,
+                    preferences_fingerprint,
+                    stt_model,
+                    chunk_start_seconds,
+                    chunk_end_seconds
+                )
+            )
+        ''')  # Cache table for /audio/analyze chunk-level STT outputs
+
         conn.commit()  # Persist schema changes
         conn.close()  # Close connection
 
@@ -376,6 +400,102 @@ class Database:
                 events_json,
                 cleaned_captions_json,
                 clean_captions_json,
+                payload.get('failure_reason'),
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+    def get_audio_stt_chunk_cache(
+        self,
+        video_id: str,
+        preferences_fingerprint: str,
+        stt_model: Optional[str],
+        chunk_start_seconds: float,
+        chunk_end_seconds: float,
+    ) -> Optional[Dict]:
+        """Return cached /audio/analyze payload for a video/preferences/chunk tuple."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            '''SELECT *
+               FROM audio_stt_chunk_cache
+               WHERE video_id = ?
+                 AND preferences_fingerprint = ?
+                 AND COALESCE(stt_model, '') = COALESCE(?, '')
+                 AND chunk_start_seconds = ?
+                 AND chunk_end_seconds = ?''',
+            (video_id, preferences_fingerprint, stt_model, chunk_start_seconds, chunk_end_seconds),
+        )
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        data = dict(row)
+        return {
+            'status': data.get('status'),
+            'source': data.get('source'),
+            'events': json.loads(data.get('events_json') or '[]'),
+            'cleaned_captions': json.loads(data.get('cleaned_captions_json') or '[]'),
+            'failure_reason': data.get('failure_reason'),
+            'created_at': data.get('created_at'),
+            'updated_at': data.get('updated_at'),
+        }
+
+    def save_audio_stt_chunk_cache(
+        self,
+        video_id: str,
+        preferences_fingerprint: str,
+        stt_model: Optional[str],
+        chunk_start_seconds: float,
+        chunk_end_seconds: float,
+        payload: Dict,
+    ) -> None:
+        """Upsert /audio/analyze chunk-level cached payload."""
+        events_json = json.dumps(payload.get('events', []), separators=(',', ':'), sort_keys=True)
+        cleaned_captions_json = json.dumps(payload.get('cleaned_captions', []), separators=(',', ':'), sort_keys=True)
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            '''INSERT INTO audio_stt_chunk_cache (
+                   video_id,
+                   preferences_fingerprint,
+                   stt_model,
+                   chunk_start_seconds,
+                   chunk_end_seconds,
+                   status,
+                   source,
+                   events_json,
+                   cleaned_captions_json,
+                   failure_reason
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(
+                   video_id,
+                   preferences_fingerprint,
+                   stt_model,
+                   chunk_start_seconds,
+                   chunk_end_seconds
+               )
+               DO UPDATE SET
+                   status = excluded.status,
+                   source = excluded.source,
+                   events_json = excluded.events_json,
+                   cleaned_captions_json = excluded.cleaned_captions_json,
+                   failure_reason = excluded.failure_reason,
+                   updated_at = CURRENT_TIMESTAMP''',
+            (
+                video_id,
+                preferences_fingerprint,
+                stt_model,
+                chunk_start_seconds,
+                chunk_end_seconds,
+                payload.get('status'),
+                payload.get('source'),
+                events_json,
+                cleaned_captions_json,
                 payload.get('failure_reason'),
             ),
         )

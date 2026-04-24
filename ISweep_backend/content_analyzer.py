@@ -16,6 +16,7 @@ import re  # Imports regex utilities for pattern matching
 import hashlib  # Stable marker ids for deterministic scheduling
 import importlib
 import os
+import base64
 from io import BytesIO
 
 # Seconds to shift audio-derived mute markers earlier so the audio is
@@ -252,6 +253,32 @@ class ContentAnalyzer:
         return words
 
     def _build_segment_word_timings(self, segment: Dict, text: str, start_seconds: float, duration: float) -> List[Dict]:
+        provided_word_timings = segment.get('word_timings') if isinstance(segment.get('word_timings'), list) else None
+        if provided_word_timings:
+            normalized_provided: List[Dict] = []
+            for word in provided_word_timings:
+                if not isinstance(word, dict):
+                    continue
+                w = str(word.get('word') or '').strip()
+                if not w:
+                    continue
+                try:
+                    ws = float(word.get('start'))
+                    we = float(word.get('end'))
+                except (TypeError, ValueError):
+                    continue
+                if we < ws:
+                    continue
+                normalized_provided.append({
+                    'word': w,
+                    'start': round(ws, 3),
+                    'end': round(we, 3),
+                    'source': str(word.get('source') or 'whisper'),
+                })
+            if normalized_provided:
+                print('[ISWEEP][STT] word timestamps generated', {'count': len(normalized_provided)})
+                return normalized_provided
+
         estimated_words = self._estimate_word_timings(text, start_seconds, duration)
 
         if not self.stt_enabled:
@@ -495,12 +522,14 @@ class ContentAnalyzer:
 
         clean_resume_time = None
         first_blocked_word_start = None
+        first_blocked_word_source = None
         blocked_seen = False
         for index, is_filtered in enumerate(filtered_flags):
             if is_filtered:
                 blocked_seen = True
                 if first_blocked_word_start is None:
                     first_blocked_word_start = words[index]['start']
+                    first_blocked_word_source = str(words[index].get('source') or '')
                 continue
             if blocked_seen:
                 clean_resume_time = words[index]['start']
@@ -517,6 +546,8 @@ class ContentAnalyzer:
             entry['clean_resume_time'] = round(clean_resume_time, 3)
         if first_blocked_word_start is not None:
             entry['_first_blocked_word_start'] = round(first_blocked_word_start, 3)
+            if first_blocked_word_source:
+                entry['_first_blocked_word_source'] = first_blocked_word_source
         return entry
 
     def build_cleaned_captions(self, transcript_segments: List[Dict], preferences: Dict) -> List[Dict]:
@@ -527,6 +558,7 @@ class ContentAnalyzer:
             if not entry:
                 continue
             entry.pop('_first_blocked_word_start', None)
+            entry.pop('_first_blocked_word_source', None)
             cleaned_captions.append(entry)
 
         return cleaned_captions
@@ -755,6 +787,7 @@ class ContentAnalyzer:
                 continue
             clean_entry = dict(entry)
             clean_entry.pop('_first_blocked_word_start', None)
+            clean_entry.pop('_first_blocked_word_source', None)
             cleaned_captions.append(clean_entry)
         print(f'[ISWEEP][CLEAN_CC] cleaned captions generated video_id={video_id!r}')
         print(f'[ISWEEP][CLEAN_CC] cleaned caption count={len(cleaned_captions)} video_id={video_id!r}')
@@ -839,29 +872,95 @@ class ContentAnalyzer:
                 'status': 'error',
                 'source': 'audio_chunk',
                 'events': [],
+                'cleaned_captions': [],
                 'failure_reason': 'analyze_exception',
             }
 
-        try:
-            segments = self.audio_transcription_adapter.transcribe(
-                audio_chunk=audio_chunk,
-                mime_type=mime_type,
-                start_seconds=start_seconds,
-                end_seconds=end_seconds,
-            )
-        except RuntimeError as exc:
-            reason = str(exc)
-            normalized_reason = reason if reason in {
-                'transcription_unavailable',
-                'analyze_exception',
-            } else 'analyze_exception'
-            status = 'unavailable' if normalized_reason == 'transcription_unavailable' else 'error'
-            return {
-                'status': status,
-                'source': 'audio_chunk',
-                'events': [],
-                'failure_reason': normalized_reason,
-            }
+        print('[ISWEEP][AUDIO_STT] chunk received', {
+            'video_id': video_id,
+            'start_seconds': start_seconds,
+            'end_seconds': end_seconds,
+            'mime_type': mime_type,
+        })
+
+        duration_seconds = max(float(end_seconds) - float(start_seconds), 0.0)
+        decoded_audio = None
+        if isinstance(audio_chunk, str):
+            try:
+                decoded_audio = base64.b64decode(audio_chunk, validate=False)
+            except Exception:
+                decoded_audio = None
+
+        whisper_words: List[Dict] = []
+        if self.stt_enabled:
+            adapter = self._get_or_create_stt_adapter()
+            if adapter is not None and decoded_audio:
+                try:
+                    print('[ISWEEP][AUDIO_STT] whisper started', {
+                        'video_id': video_id,
+                        'model': self.stt_model_size,
+                    })
+                    stt_result = adapter.transcribe_with_word_timestamps(
+                        decoded_audio,
+                        text_hint='',
+                        start_seconds=float(start_seconds),
+                        duration_seconds=duration_seconds,
+                    )
+                    candidate_words = stt_result.get('words') if isinstance(stt_result, dict) else []
+                    if isinstance(candidate_words, list):
+                        whisper_words = [w for w in candidate_words if isinstance(w, dict)]
+                    if whisper_words:
+                        print('[ISWEEP][AUDIO_STT] word timestamps generated', {
+                            'video_id': video_id,
+                            'count': len(whisper_words),
+                        })
+                except RuntimeError:
+                    print('[ISWEEP][AUDIO_STT] fallback used', {
+                        'video_id': video_id,
+                        'reason': 'stt_unavailable',
+                    })
+                except Exception:
+                    print('[ISWEEP][AUDIO_STT] fallback used', {
+                        'video_id': video_id,
+                        'reason': 'stt_error',
+                    })
+
+        if whisper_words:
+            transcript_text = ' '.join(str(word.get('word') or '').strip() for word in whisper_words).strip()
+            segments = [{
+                'text': transcript_text,
+                'start': 0.0,
+                'duration': duration_seconds,
+                'word_timings': whisper_words,
+            }]
+            source_name = 'audio_stt'
+        else:
+            try:
+                segments = self.audio_transcription_adapter.transcribe(
+                    audio_chunk=audio_chunk,
+                    mime_type=mime_type,
+                    start_seconds=start_seconds,
+                    end_seconds=end_seconds,
+                )
+                source_name = 'audio_chunk'
+            except RuntimeError as exc:
+                reason = str(exc)
+                normalized_reason = reason if reason in {
+                    'transcription_unavailable',
+                    'analyze_exception',
+                } else 'analyze_exception'
+                status = 'unavailable' if normalized_reason == 'transcription_unavailable' else 'error'
+                print('[ISWEEP][AUDIO_STT] fallback used', {
+                    'video_id': video_id,
+                    'reason': normalized_reason,
+                })
+                return {
+                    'status': status,
+                    'source': 'audio_chunk',
+                    'events': [],
+                    'cleaned_captions': [],
+                    'failure_reason': normalized_reason,
+                }
 
         transcription_text = ' '.join(
             str(segment.get('text') or '').strip()
@@ -871,15 +970,38 @@ class ContentAnalyzer:
         print(f'[ISWEEP][AUDIO_AHEAD] transcription used: {transcription_text}')
 
         if not segments:
-            return {'status': 'unavailable', 'source': 'audio_chunk', 'events': [],
-                    'failure_reason': 'transcription_unavailable'}
+            return {'status': 'unavailable', 'source': source_name, 'events': [],
+                    'cleaned_captions': [], 'failure_reason': 'transcription_unavailable'}
 
-        events: List[Dict] = []
+        absolute_segments: List[Dict] = []
         for segment in segments:
-            text = segment.get('text') or ''
             rel_start = float(segment.get('start', 0) or 0)
             rel_duration = float(segment.get('duration', 0) or 0)
-            abs_start = round(start_seconds + rel_start, 3)
+            abs_start = float(start_seconds) + rel_start
+            abs_segment = {
+                'text': segment.get('text') or '',
+                'start': abs_start,
+                'duration': rel_duration,
+            }
+            if isinstance(segment.get('word_timings'), list):
+                abs_segment['word_timings'] = segment.get('word_timings')
+            absolute_segments.append(abs_segment)
+
+        cleaned_entries = [self._build_cleaned_caption_entry(segment, preferences) for segment in absolute_segments]
+        cleaned_captions: List[Dict] = []
+        for entry in cleaned_entries:
+            if not entry:
+                continue
+            clean_entry = dict(entry)
+            clean_entry.pop('_first_blocked_word_start', None)
+            cleaned_captions.append(clean_entry)
+
+        events: List[Dict] = []
+        for index, segment in enumerate(absolute_segments):
+            text = segment.get('text') or ''
+            rel_duration = float(segment.get('duration', 0) or 0)
+            abs_start = round(float(segment.get('start', 0) or 0), 3)
+            cleaned_entry = cleaned_entries[index] if index < len(cleaned_entries) else None
 
             decision = self.analyze_decision(text, preferences)
             action = decision.get('action')
@@ -895,11 +1017,25 @@ class ContentAnalyzer:
             abs_end = round(abs_start + effective_duration, 3)
             category = decision.get('matched_category') or 'language'
 
-            # Apply pre-roll to mute markers so the mute starts before the
-            # speaker reaches the flagged word.  Skip/fast_forward are not
-            # shifted because their seek/rate logic depends on exact timing.
             if action == 'mute':
-                adj_start = max(round(abs_start - AUDIO_MUTE_PREROLL_SEC, 3), 0.0)
+                if (
+                    cleaned_entry
+                    and cleaned_entry.get('_first_blocked_word_start') is not None
+                    and str(cleaned_entry.get('_first_blocked_word_source') or '') == 'whisper'
+                ):
+                    adj_start = round(float(cleaned_entry.get('_first_blocked_word_start')), 3)
+                else:
+                    adj_start = max(round(abs_start - AUDIO_MUTE_PREROLL_SEC, 3), 0.0)
+
+                if cleaned_entry and cleaned_entry.get('clean_resume_time') is not None:
+                    resume = round(float(cleaned_entry.get('clean_resume_time')), 3)
+                    if resume > adj_start:
+                        abs_end = min(abs_end, resume)
+                        effective_duration = max(abs_end - adj_start, 0.0)
+
+                if effective_duration <= 0:
+                    continue
+
                 print(
                     f'[ISWEEP][AUDIO_AHEAD] audio marker created '
                     f'video_id={video_id!r} action={action!r} '
@@ -924,7 +1060,12 @@ class ContentAnalyzer:
                 'duration_seconds': round(effective_duration, 3),
                 'matched_category': category,
                 'reason': decision.get('reason') or 'audio chunk match',
+                'source': source_name,
             })
+            if action == 'mute' and cleaned_entry and cleaned_entry.get('_first_blocked_word_start') is not None:
+                events[-1]['blocked_word_start'] = round(float(cleaned_entry.get('_first_blocked_word_start')), 3)
+            if action == 'mute' and cleaned_entry and cleaned_entry.get('clean_resume_time') is not None:
+                events[-1]['clean_resume_time'] = round(float(cleaned_entry.get('clean_resume_time')), 3)
 
         merged = self._merge_marker_events(events)
         # Re-stamp IDs after merge since boundaries may have changed.
@@ -939,9 +1080,10 @@ class ContentAnalyzer:
 
         return {
             'status': 'ready',
-            'source': 'audio_chunk',
+            'source': source_name,
             'start_seconds': start_seconds,
             'end_seconds': end_seconds,
             'events': merged,
+            'cleaned_captions': cleaned_captions,
             'failure_reason': None,
         }

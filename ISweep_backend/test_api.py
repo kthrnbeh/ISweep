@@ -504,3 +504,91 @@ class TestAPI:
         assert second_data['cached'] is False
         assert second_data['events'][0]['id'] == 'prefs-9'
         assert stub.calls == 2
+
+    def test_audio_analyze_returns_cleaned_captions_and_cached_false(self, client):
+        token, _ = signup_and_get_token(client, email='audio-ready@example.com')
+
+        class AnalyzerStub:
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id):
+                return {
+                    'status': 'ready',
+                    'source': 'audio_stt',
+                    'events': [{
+                        'id': 'a1',
+                        'start_seconds': 4.2,
+                        'end_seconds': 4.8,
+                        'action': 'mute',
+                        'duration_seconds': 0.6,
+                        'matched_category': 'language',
+                        'reason': 'test',
+                        'blocked_word_start': 4.2,
+                        'clean_resume_time': 4.8,
+                    }],
+                    'cleaned_captions': [{
+                        'start_seconds': 4.0,
+                        'end_seconds': 5.0,
+                        'text': 'what the heck',
+                        'clean_text': 'what the ____',
+                    }],
+                    'failure_reason': None,
+                }
+
+        client.application.analyzer = AnalyzerStub()
+        response = client.post(
+            '/audio/analyze',
+            json={
+                'video_id': 'audio-vid-1',
+                'audio_chunk': 'ZmFrZQ==',
+                'mime_type': 'audio/wav',
+                'chunk_start_seconds': 4.0,
+                'chunk_end_seconds': 5.0,
+            },
+            headers=auth_headers(token),
+        )
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['status'] == 'ready'
+        assert data['source'] == 'audio_stt'
+        assert data['cached'] is False
+        assert len(data['events']) == 1
+        assert len(data['cleaned_captions']) == 1
+
+    def test_audio_analyze_uses_chunk_cache_on_second_call(self, client):
+        token, _ = signup_and_get_token(client, email='audio-cache@example.com')
+
+        class AnalyzerStub:
+            def __init__(self):
+                self.calls = 0
+
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id):
+                self.calls += 1
+                return {
+                    'status': 'ready',
+                    'source': 'audio_stt',
+                    'events': [{'id': f'audio-{self.calls}', 'start_seconds': 1.0, 'end_seconds': 1.4, 'action': 'mute', 'duration_seconds': 0.4, 'matched_category': 'language', 'reason': 'cached'}],
+                    'cleaned_captions': [{'start_seconds': 1.0, 'end_seconds': 1.4, 'text': 'heck', 'clean_text': '____'}],
+                    'failure_reason': None,
+                }
+
+        stub = AnalyzerStub()
+        client.application.analyzer = stub
+
+        first = client.post(
+            '/audio/analyze',
+            json={'video_id': 'audio-cache-vid', 'audio_chunk': 'ZmFrZQ==', 'start_seconds': 1.0, 'end_seconds': 1.5},
+            headers=auth_headers(token),
+        )
+        assert first.status_code == 200
+        assert json.loads(first.data)['cached'] is False
+        assert stub.calls == 1
+
+        second = client.post(
+            '/audio/analyze',
+            json={'video_id': 'audio-cache-vid', 'audio_chunk': 'ZmFrZQ==', 'start_seconds': 1.0, 'end_seconds': 1.5},
+            headers=auth_headers(token),
+        )
+        assert second.status_code == 200
+        second_data = json.loads(second.data)
+        assert second_data['cached'] is True
+        assert second_data['events'][0]['id'] == 'audio-1'
+        assert stub.calls == 1

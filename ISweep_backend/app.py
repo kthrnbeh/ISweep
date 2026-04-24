@@ -515,14 +515,20 @@ def analyze_audio_chunk():
     audio_chunk = str(data.get('audio_chunk') or data.get('audio_b64') or '').strip()
     mime_type = str(data.get('mime_type') or 'audio/wav').strip()
     video_id = str(data.get('video_id') or '').strip()
+    force_refresh = as_bool(data.get('force_refresh'))
 
     try:
-        start_seconds = float(data.get('start_seconds') or data.get('chunk_offset_seconds') or 0)
+        start_seconds = float(
+            data.get('chunk_start_seconds')
+            or data.get('start_seconds')
+            or data.get('chunk_offset_seconds')
+            or 0
+        )
     except (TypeError, ValueError):
         start_seconds = 0.0
 
     try:
-        end_seconds = float(data.get('end_seconds') or start_seconds)
+        end_seconds = float(data.get('chunk_end_seconds') or data.get('end_seconds') or start_seconds)
     except (TypeError, ValueError):
         end_seconds = start_seconds
 
@@ -535,9 +541,66 @@ def analyze_audio_chunk():
     db = get_db()
     preferences = db.get_user_preferences(request.user_id) or {}
     analyzer = get_analyzer()
+    stt_mode = analyzer.get_stt_cache_mode() if hasattr(analyzer, 'get_stt_cache_mode') else {'enabled': False, 'model': None}
+    preferences_fingerprint = build_preferences_fingerprint(preferences, stt_mode)
+    stt_model = stt_mode.get('model') if stt_mode.get('enabled') else None
+
+    if force_refresh:
+        print('[ISWEEP][AUDIO_STT] bypass force_refresh', {
+            'video_id': video_id,
+            'start_seconds': start_seconds,
+            'end_seconds': end_seconds,
+        })
+    else:
+        cached = db.get_audio_stt_chunk_cache(
+            video_id=video_id,
+            preferences_fingerprint=preferences_fingerprint,
+            stt_model=stt_model,
+            chunk_start_seconds=start_seconds,
+            chunk_end_seconds=end_seconds,
+        )
+        if cached:
+            print('[ISWEEP][AUDIO_STT] cached hit', {
+                'video_id': video_id,
+                'start_seconds': start_seconds,
+                'end_seconds': end_seconds,
+            })
+            return jsonify({
+                'status': cached.get('status', 'error'),
+                'source': cached.get('source'),
+                'start_seconds': start_seconds,
+                'end_seconds': end_seconds,
+                'events': cached.get('events', []),
+                'cleaned_captions': cached.get('cleaned_captions', []),
+                'failure_reason': cached.get('failure_reason'),
+                'cached': True,
+            }), 200
+
     result = analyzer.analyze_audio_chunk(
         audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id
     )
+
+    if result.get('status') != 'error':
+        db.save_audio_stt_chunk_cache(
+            video_id=video_id,
+            preferences_fingerprint=preferences_fingerprint,
+            stt_model=stt_model,
+            chunk_start_seconds=start_seconds,
+            chunk_end_seconds=end_seconds,
+            payload={
+                'status': result.get('status', 'error'),
+                'source': result.get('source'),
+                'events': result.get('events', []),
+                'cleaned_captions': result.get('cleaned_captions', []),
+                'failure_reason': result.get('failure_reason'),
+            },
+        )
+        print('[ISWEEP][AUDIO_STT] cached saved', {
+            'video_id': video_id,
+            'start_seconds': start_seconds,
+            'end_seconds': end_seconds,
+            'status': result.get('status', 'error'),
+        })
 
     return jsonify({
         'status': result.get('status', 'error'),
@@ -545,7 +608,9 @@ def analyze_audio_chunk():
         'start_seconds': start_seconds,
         'end_seconds': end_seconds,
         'events': result.get('events', []),
+        'cleaned_captions': result.get('cleaned_captions', []),
         'failure_reason': result.get('failure_reason'),
+        'cached': False,
     }), 200
 
 

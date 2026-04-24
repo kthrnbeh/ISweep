@@ -463,6 +463,83 @@ class TestContentAnalyzer:
         assert result['events'][0]['blocked_word_start'] == pytest.approx(10.31)
         assert result['events'][0]['clean_resume_time'] == pytest.approx(10.71)
 
+    def test_audio_chunk_stt_generates_per_word_mute_event(self, monkeypatch):
+        """Audio STT path emits mute event bounded by blocked word and clean resume timings."""
+        monkeypatch.setenv('ISWEEP_STT_ENABLED', 'true')
+        analyzer = ContentAnalyzer()
+
+        class StubAdapter:
+            def transcribe_with_word_timestamps(self, audio_path_or_bytes, text_hint='', start_seconds=0.0, duration_seconds=0.0):
+                return {
+                    'words': [
+                        {'word': 'What', 'start': 12.3, 'end': 12.5, 'source': 'whisper'},
+                        {'word': 'heck', 'start': 12.62, 'end': 12.91, 'source': 'whisper'},
+                        {'word': 'man', 'start': 12.95, 'end': 13.12, 'source': 'whisper'},
+                    ]
+                }
+
+        analyzer.speech_to_text_adapter = StubAdapter()
+        prefs = {
+            'enabled': True,
+            'blocklist': {'enabled': True, 'items': ['heck']},
+            'categories': {'language': {'enabled': True, 'action': 'mute', 'duration': 4}},
+        }
+
+        result = analyzer.analyze_audio_chunk(
+            audio_chunk='ZmFrZQ==',
+            mime_type='audio/wav',
+            start_seconds=12.0,
+            end_seconds=13.5,
+            preferences=prefs,
+            video_id='audio-stt-video',
+        )
+
+        assert result['status'] == 'ready'
+        assert result['source'] == 'audio_stt'
+        assert len(result['events']) == 1
+        marker = result['events'][0]
+        assert marker['action'] == 'mute'
+        assert marker['blocked_word_start'] == pytest.approx(12.62)
+        assert marker['clean_resume_time'] == pytest.approx(12.95)
+        assert marker['start_seconds'] == pytest.approx(12.62)
+        assert marker['end_seconds'] == pytest.approx(12.95)
+        assert len(result['cleaned_captions']) == 1
+        assert result['cleaned_captions'][0]['words'][1]['source'] == 'whisper'
+
+    def test_audio_chunk_stt_unavailable_uses_safe_fallback(self, monkeypatch):
+        """Audio STT failures fall back to legacy audio transcription path safely."""
+        monkeypatch.setenv('ISWEEP_STT_ENABLED', 'true')
+        monkeypatch.setenv('FLASK_ENV', 'development')
+        analyzer = ContentAnalyzer()
+
+        class FailingAdapter:
+            def transcribe_with_word_timestamps(self, audio_path_or_bytes, text_hint='', start_seconds=0.0, duration_seconds=0.0):
+                raise RuntimeError('stt_unavailable')
+
+        analyzer.speech_to_text_adapter = FailingAdapter()
+        prefs = {
+            'enabled': True,
+            'categories': {
+                'language': {'enabled': True, 'action': 'mute', 'duration': 4},
+                'sexual': {'enabled': False, 'action': 'skip', 'duration': 12},
+                'violence': {'enabled': False, 'action': 'fast_forward', 'duration': 8},
+            },
+        }
+
+        result = analyzer.analyze_audio_chunk(
+            audio_chunk='ZmFrZQ==',
+            mime_type='audio/wav',
+            start_seconds=20.0,
+            end_seconds=21.0,
+            preferences=prefs,
+            video_id='audio-stt-fallback',
+        )
+
+        assert result['status'] == 'ready'
+        assert result['source'] == 'audio_chunk'
+        assert isinstance(result.get('events'), list)
+        assert isinstance(result.get('cleaned_captions'), list)
+
     def test_transcript_markers_are_non_overlapping(self, analyzer):
         """Overlapping events should be merged/trimmed to deterministic non-overlapping output."""
         events = [
