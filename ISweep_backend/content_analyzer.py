@@ -262,32 +262,91 @@ class ContentAnalyzer:
         masked = re.sub(r"[A-Za-z']+", replace_profane_word, masked)
         return masked
 
+    def _is_clean_caption_word_filtered(self, word: str, preferences: Dict) -> bool:
+        """Return true when a single word should be hidden in clean captions."""
+        normalized = re.sub(r"[^A-Za-z0-9']", '', str(word or '')).strip().lower()
+        if not normalized:
+            return False
+        if profanity.contains_profanity(normalized):
+            return True
+
+        terms = self._collect_clean_caption_terms(preferences)
+        return any(
+            ' ' not in term and normalized == re.sub(r"[^A-Za-z0-9']", '', term).strip().lower()
+            for term in terms
+        )
+
+    def _build_cleaned_caption_entry(self, segment: Dict, preferences: Dict) -> Dict | None:
+        """Build one cleaned caption entry with approximate word timing when needed."""
+        text = str(segment.get('text') or '').strip()
+        if not text:
+            return None
+
+        try:
+            start_seconds = float(segment.get('start', 0) or 0)
+            duration = float(segment.get('duration', 0) or 0)
+        except (TypeError, ValueError):
+            return None
+
+        if start_seconds < 0:
+            start_seconds = 0.0
+        if duration < 0:
+            duration = 0.0
+
+        end_seconds = start_seconds + duration
+        tokens = [match.group(0) for match in re.finditer(r"[A-Za-z0-9']+", text)]
+
+        words: List[Dict] = []
+        filtered_flags: List[bool] = []
+        if tokens:
+            step = duration / len(tokens) if duration > 0 else 0.0
+            for index, token in enumerate(tokens):
+                word_start = start_seconds + (step * index)
+                word_end = start_seconds + (step * (index + 1)) if step > 0 else start_seconds
+                if step > 0 and index == len(tokens) - 1:
+                    word_end = end_seconds
+                words.append({
+                    'word': token,
+                    'start': round(word_start, 3),
+                    'end': round(max(word_end, word_start), 3),
+                })
+                filtered_flags.append(self._is_clean_caption_word_filtered(token, preferences))
+
+        clean_resume_time = None
+        first_blocked_word_start = None
+        blocked_seen = False
+        for index, is_filtered in enumerate(filtered_flags):
+            if is_filtered:
+                blocked_seen = True
+                if first_blocked_word_start is None:
+                    first_blocked_word_start = words[index]['start']
+                continue
+            if blocked_seen:
+                clean_resume_time = words[index]['start']
+                break
+
+        entry: Dict = {
+            'start_seconds': round(start_seconds, 3),
+            'end_seconds': round(end_seconds, 3),
+            'text': text,
+            'clean_text': self._mask_clean_caption_text(text, preferences),
+            'words': words,
+        }
+        if clean_resume_time is not None:
+            entry['clean_resume_time'] = round(clean_resume_time, 3)
+        if first_blocked_word_start is not None:
+            entry['_first_blocked_word_start'] = round(first_blocked_word_start, 3)
+        return entry
+
     def build_cleaned_captions(self, transcript_segments: List[Dict], preferences: Dict) -> List[Dict]:
         """Build timed display captions for the extension clean-caption overlay."""
         cleaned_captions: List[Dict] = []
         for segment in transcript_segments or []:
-            text = str(segment.get('text') or '').strip()
-            if not text:
+            entry = self._build_cleaned_caption_entry(segment, preferences)
+            if not entry:
                 continue
-
-            try:
-                start_seconds = float(segment.get('start', 0) or 0)
-                duration = float(segment.get('duration', 0) or 0)
-            except (TypeError, ValueError):
-                continue
-
-            if start_seconds < 0:
-                start_seconds = 0.0
-            if duration < 0:
-                duration = 0.0
-
-            end_seconds = start_seconds + duration
-            cleaned_captions.append({
-                'start_seconds': round(start_seconds, 3),
-                'end_seconds': round(end_seconds, 3),
-                'text': text,
-                'clean_text': self._mask_clean_caption_text(text, preferences),
-            })
+            entry.pop('_first_blocked_word_start', None)
+            cleaned_captions.append(entry)
 
         return cleaned_captions
 
@@ -508,15 +567,23 @@ class ContentAnalyzer:
                 'failure_reason': 'transcript_unavailable',
             }
 
-        cleaned_captions = self.build_cleaned_captions(segments, preferences)
+        cleaned_entries = [self._build_cleaned_caption_entry(segment, preferences) for segment in segments]
+        cleaned_captions = []
+        for entry in cleaned_entries:
+            if not entry:
+                continue
+            clean_entry = dict(entry)
+            clean_entry.pop('_first_blocked_word_start', None)
+            cleaned_captions.append(clean_entry)
         print(f'[ISWEEP][CLEAN_CC] cleaned captions generated video_id={video_id!r}')
         print(f'[ISWEEP][CLEAN_CC] cleaned caption count={len(cleaned_captions)} video_id={video_id!r}')
 
         events: List[Dict] = []
-        for segment in segments:
+        for index, segment in enumerate(segments):
             text = segment.get('text') or ''
             start_seconds = float(segment.get('start', 0) or 0)
             transcript_duration = float(segment.get('duration', 0) or 0)
+            cleaned_entry = cleaned_entries[index] if index < len(cleaned_entries) else None
 
             decision = self.analyze_decision(text, preferences)
             action = decision.get('action')
@@ -528,10 +595,19 @@ class ContentAnalyzer:
             if effective_duration <= 0:
                 continue
 
+            if action == 'mute' and cleaned_entry and cleaned_entry.get('_first_blocked_word_start') is not None:
+                start_seconds = float(cleaned_entry.get('_first_blocked_word_start'))
+
             end_seconds = start_seconds + effective_duration
+            if action == 'mute' and cleaned_entry and cleaned_entry.get('clean_resume_time') is not None:
+                end_seconds = min(end_seconds, float(cleaned_entry.get('clean_resume_time')))
+                effective_duration = end_seconds - start_seconds
+                if effective_duration <= 0:
+                    continue
+
             category = decision.get('matched_category') or 'language'
 
-            events.append({
+            event = {
                 'id': self._stable_marker_id(video_id, start_seconds, end_seconds, action, category),
                 'start_seconds': round(start_seconds, 3),
                 'end_seconds': round(end_seconds, 3),
@@ -539,7 +615,10 @@ class ContentAnalyzer:
                 'duration_seconds': round(effective_duration, 3),
                 'matched_category': category,
                 'reason': decision.get('reason') or 'transcript match',
-            })
+            }
+            if action == 'mute' and cleaned_entry and cleaned_entry.get('clean_resume_time') is not None:
+                event['clean_resume_time'] = round(float(cleaned_entry.get('clean_resume_time')), 3)
+            events.append(event)
 
         merged_events = self._merge_marker_events(events)
         for event in merged_events:
