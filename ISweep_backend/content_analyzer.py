@@ -207,6 +207,90 @@ class ContentAnalyzer:
             count += len(re.findall(rf'\b{re.escape(word)}\b', text, re.IGNORECASE))  # Count whole-word matches for each keyword
         return count  # Return total matches for provided keywords
 
+    def _collect_clean_caption_terms(self, preferences: Dict) -> List[str]:
+        """Collect user-configured terms that should be masked in clean captions."""
+        if not isinstance(preferences, dict):
+            return []
+
+        categories = preferences.get('categories') if isinstance(preferences.get('categories'), dict) else {}
+        language = categories.get('language') if isinstance(categories.get('language'), dict) else {}
+        candidates: List[str] = []
+
+        blocklist = preferences.get('blocklist') if isinstance(preferences.get('blocklist'), dict) else {}
+        if blocklist.get('enabled', True) and isinstance(blocklist.get('items'), list):
+            candidates.extend(blocklist.get('items') or [])
+
+        if language.get('enabled', True):
+            for key in ['items', 'words', 'customWords']:
+                values = language.get(key)
+                if isinstance(values, list):
+                    candidates.extend(values)
+            if isinstance(preferences.get('customWords'), list):
+                candidates.extend(preferences.get('customWords') or [])
+
+        normalized: List[str] = []
+        seen = set()
+        for candidate in candidates:
+            term = str(candidate or '').strip()
+            if not term:
+                continue
+            lowered = term.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            normalized.append(term)
+        return sorted(normalized, key=lambda value: (-len(value), value.lower()))
+
+    def _mask_clean_caption_text(self, text: str, preferences: Dict) -> str:
+        """Return overlay-safe text without mutating the original transcript segment."""
+        if not text:
+            return ''
+
+        masked = str(text)
+        for term in self._collect_clean_caption_terms(preferences):
+            escaped = re.escape(term)
+            if re.search(r'\s', term):
+                pattern = re.compile(escaped, re.IGNORECASE)
+            else:
+                pattern = re.compile(rf'\b{escaped}\b', re.IGNORECASE)
+            masked = pattern.sub('____', masked)
+
+        def replace_profane_word(match: re.Match) -> str:
+            word = match.group(0)
+            return '____' if profanity.contains_profanity(word) else word
+
+        masked = re.sub(r"[A-Za-z']+", replace_profane_word, masked)
+        return masked
+
+    def build_cleaned_captions(self, transcript_segments: List[Dict], preferences: Dict) -> List[Dict]:
+        """Build timed display captions for the extension clean-caption overlay."""
+        cleaned_captions: List[Dict] = []
+        for segment in transcript_segments or []:
+            text = str(segment.get('text') or '').strip()
+            if not text:
+                continue
+
+            try:
+                start_seconds = float(segment.get('start', 0) or 0)
+                duration = float(segment.get('duration', 0) or 0)
+            except (TypeError, ValueError):
+                continue
+
+            if start_seconds < 0:
+                start_seconds = 0.0
+            if duration < 0:
+                duration = 0.0
+
+            end_seconds = start_seconds + duration
+            cleaned_captions.append({
+                'start_seconds': round(start_seconds, 3),
+                'end_seconds': round(end_seconds, 3),
+                'text': text,
+                'clean_text': self._mask_clean_caption_text(text, preferences),
+            })
+
+        return cleaned_captions
+
     def analyze_decision(self, text: str, preferences: Dict, confidence: float | None = None) -> Dict:
         """Return structured decision with priority: sexual > violence > language."""
 
@@ -409,6 +493,9 @@ class ContentAnalyzer:
                 'status': 'error',
                 'source': None,
                 'events': [],
+                'cleaned_captions': [],
+                'clean_captions': [],
+                'failure_reason': 'transcript_fetch_failed',
             }
 
         if not segments:
@@ -416,7 +503,14 @@ class ContentAnalyzer:
                 'status': 'unavailable',
                 'source': None,
                 'events': [],
+                'cleaned_captions': [],
+                'clean_captions': [],
+                'failure_reason': 'transcript_unavailable',
             }
+
+        cleaned_captions = self.build_cleaned_captions(segments, preferences)
+        print(f'[ISWEEP][CLEAN_CC] cleaned captions generated video_id={video_id!r}')
+        print(f'[ISWEEP][CLEAN_CC] cleaned caption count={len(cleaned_captions)} video_id={video_id!r}')
 
         events: List[Dict] = []
         for segment in segments:
@@ -461,6 +555,9 @@ class ContentAnalyzer:
             'status': 'ready',
             'source': 'transcript',
             'events': merged_events,
+            'cleaned_captions': cleaned_captions,
+            'clean_captions': cleaned_captions,
+            'failure_reason': None,
         }
 
     def analyze_audio_chunk(

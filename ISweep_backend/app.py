@@ -431,6 +431,9 @@ def analyze_video_markers():
         'status': result.get('status', 'error'),
         'source': result.get('source'),
         'events': result.get('events', []),
+        'cleaned_captions': result.get('cleaned_captions', []),
+        'clean_captions': result.get('clean_captions', result.get('cleaned_captions', [])),
+        'failure_reason': result.get('failure_reason'),
     }), 200
 
 

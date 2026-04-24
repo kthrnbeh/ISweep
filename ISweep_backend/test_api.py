@@ -286,7 +286,14 @@ class TestAPI:
 
         class AnalyzerStub:
             def analyze_video_markers(self, video_id, preferences):
-                return {'status': 'unavailable', 'source': None, 'events': []}
+                return {
+                    'status': 'unavailable',
+                    'source': None,
+                    'events': [],
+                    'cleaned_captions': [],
+                    'clean_captions': [],
+                    'failure_reason': 'transcript_unavailable',
+                }
 
         client.application.analyzer = AnalyzerStub()
         response = client.post('/videos/analyze', json={'video_id': 'no-transcript-video'}, headers=auth_headers(token))
@@ -295,6 +302,9 @@ class TestAPI:
         assert data['status'] == 'unavailable'
         assert data['source'] is None
         assert data['events'] == []
+        assert data['cleaned_captions'] == []
+        assert data['clean_captions'] == []
+        assert data['failure_reason'] == 'transcript_unavailable'
 
     def test_videos_analyze_ready_with_markers(self, client):
         token, _ = signup_and_get_token(client, email='video-ready@example.com')
@@ -315,6 +325,23 @@ class TestAPI:
                             'reason': 'test marker',
                         }
                     ],
+                    'cleaned_captions': [
+                        {
+                            'start_seconds': 12.3,
+                            'end_seconds': 13.6,
+                            'text': 'What the heck is going on?',
+                            'clean_text': 'What the ____ is going on?',
+                        }
+                    ],
+                    'clean_captions': [
+                        {
+                            'start_seconds': 12.3,
+                            'end_seconds': 13.6,
+                            'text': 'What the heck is going on?',
+                            'clean_text': 'What the ____ is going on?',
+                        }
+                    ],
+                    'failure_reason': None,
                 }
 
         client.application.analyzer = AnalyzerStub()
@@ -325,3 +352,7 @@ class TestAPI:
         assert data['source'] == 'transcript'
         assert len(data['events']) == 1
         assert data['events'][0]['id'] == 'm1'
+        assert len(data['cleaned_captions']) == 1
+        assert data['cleaned_captions'][0]['clean_text'] == 'What the ____ is going on?'
+        assert data['clean_captions'] == data['cleaned_captions']
+        assert data['failure_reason'] is None

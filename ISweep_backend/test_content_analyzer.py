@@ -180,6 +180,49 @@ class TestContentAnalyzer:
         assert marker['end_seconds'] == pytest.approx(18.3)
         assert isinstance(marker['id'], str) and marker['id']
 
+    def test_build_cleaned_captions_masks_blocked_words(self, analyzer):
+        """Cleaned captions mask configured blocklist/profanity terms for overlay display."""
+        prefs = {
+            'enabled': True,
+            'blocklist': {'enabled': True, 'items': ['heck']},
+            'categories': {
+                'language': {'enabled': True, 'action': 'mute', 'duration': 4},
+                'sexual': {'enabled': False, 'action': 'skip', 'duration': 12},
+                'violence': {'enabled': False, 'action': 'fast_forward', 'duration': 8},
+            },
+        }
+
+        cleaned = analyzer.build_cleaned_captions([
+            {'text': 'What the heck and shit is going on?', 'start': 12.3, 'duration': 1.8}
+        ], prefs)
+
+        assert len(cleaned) == 1
+        assert 'heck' not in cleaned[0]['clean_text'].lower()
+        assert 'shit' not in cleaned[0]['clean_text'].lower()
+        assert cleaned[0]['clean_text'].count('____') >= 2
+
+    def test_build_cleaned_captions_preserves_original_text_and_timing(self, analyzer):
+        """Cleaned captions preserve transcript text while exposing rounded start/end timing."""
+        prefs = {
+            'enabled': True,
+            'categories': {
+                'language': {'enabled': True, 'action': 'mute', 'duration': 4},
+                'sexual': {'enabled': False, 'action': 'skip', 'duration': 12},
+                'violence': {'enabled': False, 'action': 'fast_forward', 'duration': 8},
+            },
+        }
+
+        cleaned = analyzer.build_cleaned_captions([
+            {'text': 'Original transcript line', 'start': 5.25, 'duration': 1.55}
+        ], prefs)
+
+        assert cleaned == [{
+            'start_seconds': pytest.approx(5.25),
+            'end_seconds': pytest.approx(6.8),
+            'text': 'Original transcript line',
+            'clean_text': 'Original transcript line',
+        }]
+
     def test_transcript_generates_skip_marker(self, analyzer):
         """Transcript segment with sexual content should generate skip marker."""
         prefs = {
@@ -205,6 +248,31 @@ class TestContentAnalyzer:
         assert marker['start_seconds'] == pytest.approx(30.0)
         assert marker['duration_seconds'] == pytest.approx(10.0)
         assert marker['end_seconds'] == pytest.approx(40.0)
+
+    def test_analyze_video_markers_returns_cleaned_captions_with_events(self, analyzer):
+        """Video marker analysis returns cleaned captions separately from action markers."""
+        prefs = {
+            'enabled': True,
+            'blocklist': {'enabled': True, 'items': ['heck']},
+            'categories': {
+                'language': {'enabled': True, 'action': 'mute', 'duration': 4},
+                'sexual': {'enabled': False, 'action': 'skip', 'duration': 12},
+                'violence': {'enabled': False, 'action': 'fast_forward', 'duration': 8},
+            },
+        }
+
+        analyzer._fetch_transcript_segments = lambda _: [
+            {'text': 'What the heck', 'start': 7.5, 'duration': 1.0}
+        ]
+
+        result = analyzer.analyze_video_markers('clean-cc-video', prefs)
+
+        assert result['status'] == 'ready'
+        assert result['failure_reason'] is None
+        assert len(result['events']) == 1
+        assert result['cleaned_captions'] == result['clean_captions']
+        assert result['cleaned_captions'][0]['text'] == 'What the heck'
+        assert result['cleaned_captions'][0]['clean_text'] == 'What the ____'
 
     def test_transcript_markers_are_non_overlapping(self, analyzer):
         """Overlapping events should be merged/trimmed to deterministic non-overlapping output."""
