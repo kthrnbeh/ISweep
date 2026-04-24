@@ -595,15 +595,7 @@ class ContentAnalyzer:
             if effective_duration <= 0:
                 continue
 
-            if action == 'mute' and cleaned_entry and cleaned_entry.get('_first_blocked_word_start') is not None:
-                start_seconds = float(cleaned_entry.get('_first_blocked_word_start'))
-
             end_seconds = start_seconds + effective_duration
-            if action == 'mute' and cleaned_entry and cleaned_entry.get('clean_resume_time') is not None:
-                end_seconds = min(end_seconds, float(cleaned_entry.get('clean_resume_time')))
-                effective_duration = end_seconds - start_seconds
-                if effective_duration <= 0:
-                    continue
 
             category = decision.get('matched_category') or 'language'
 
@@ -618,6 +610,8 @@ class ContentAnalyzer:
             }
             if action == 'mute' and cleaned_entry and cleaned_entry.get('clean_resume_time') is not None:
                 event['clean_resume_time'] = round(float(cleaned_entry.get('clean_resume_time')), 3)
+            if action == 'mute' and cleaned_entry and cleaned_entry.get('_first_blocked_word_start') is not None:
+                event['blocked_word_start'] = round(float(cleaned_entry.get('_first_blocked_word_start')), 3)
             events.append(event)
 
         merged_events = self._merge_marker_events(events)

@@ -200,6 +200,11 @@ class TestContentAnalyzer:
         assert 'heck' not in cleaned[0]['clean_text'].lower()
         assert 'shit' not in cleaned[0]['clean_text'].lower()
         assert cleaned[0]['clean_text'].count('____') >= 2
+        assert len(cleaned[0]['words']) == 8
+        assert cleaned[0]['words'][0]['word'] == 'What'
+        assert cleaned[0]['words'][0]['start'] == pytest.approx(12.3)
+        assert cleaned[0]['words'][-1]['end'] == pytest.approx(14.1)
+        assert cleaned[0]['clean_resume_time'] == pytest.approx(cleaned[0]['words'][3]['start'])
 
     def test_build_cleaned_captions_preserves_original_text_and_timing(self, analyzer):
         """Cleaned captions preserve transcript text while exposing rounded start/end timing."""
@@ -216,12 +221,15 @@ class TestContentAnalyzer:
             {'text': 'Original transcript line', 'start': 5.25, 'duration': 1.55}
         ], prefs)
 
-        assert cleaned == [{
-            'start_seconds': pytest.approx(5.25),
-            'end_seconds': pytest.approx(6.8),
-            'text': 'Original transcript line',
-            'clean_text': 'Original transcript line',
-        }]
+        assert len(cleaned) == 1
+        assert cleaned[0]['start_seconds'] == pytest.approx(5.25)
+        assert cleaned[0]['end_seconds'] == pytest.approx(6.8)
+        assert cleaned[0]['text'] == 'Original transcript line'
+        assert cleaned[0]['clean_text'] == 'Original transcript line'
+        assert len(cleaned[0]['words']) == 3
+        assert cleaned[0]['words'][0]['start'] == pytest.approx(5.25)
+        assert cleaned[0]['words'][-1]['end'] == pytest.approx(6.8)
+        assert 'clean_resume_time' not in cleaned[0]
 
     def test_transcript_generates_skip_marker(self, analyzer):
         """Transcript segment with sexual content should generate skip marker."""
@@ -273,6 +281,70 @@ class TestContentAnalyzer:
         assert result['cleaned_captions'] == result['clean_captions']
         assert result['cleaned_captions'][0]['text'] == 'What the heck'
         assert result['cleaned_captions'][0]['clean_text'] == 'What the ____'
+        assert len(result['cleaned_captions'][0]['words']) == 3
+        assert 'clean_resume_time' not in result['cleaned_captions'][0]
+        assert result['events'][0]['start_seconds'] == pytest.approx(7.5)
+        assert result['events'][0]['blocked_word_start'] == pytest.approx(8.167, abs=0.001)
+
+    def test_mute_marker_ends_at_clean_resume_time_when_clean_word_exists(self, analyzer):
+        """Mute marker exposes clean_resume_time metadata without changing base duration."""
+        prefs = {
+            'enabled': True,
+            'blocklist': {'enabled': True, 'items': ['heck']},
+            'categories': {
+                'language': {'enabled': True, 'action': 'mute', 'duration': 4},
+                'sexual': {'enabled': False, 'action': 'skip', 'duration': 12},
+                'violence': {'enabled': False, 'action': 'fast_forward', 'duration': 8},
+            },
+        }
+
+        analyzer._fetch_transcript_segments = lambda _: [
+            {'text': 'croc of heck man', 'start': 10.0, 'duration': 2.0}
+        ]
+
+        result = analyzer.analyze_video_markers('clean-anchor-video', prefs)
+        assert result['status'] == 'ready'
+        assert len(result['events']) == 1
+        assert result['cleaned_captions'][0]['clean_resume_time'] == pytest.approx(11.5, abs=0.001)
+        assert result['events'][0]['start_seconds'] == pytest.approx(10.0)
+        assert result['events'][0]['blocked_word_start'] == pytest.approx(11.0, abs=0.001)
+        assert result['events'][0]['end_seconds'] == pytest.approx(14.0, abs=0.001)
+        assert result['events'][0]['clean_resume_time'] == pytest.approx(11.5, abs=0.001)
+
+    def test_clean_resume_time_anchors_to_first_clean_word_after_filtered_run(self, analyzer):
+        """clean_resume_time points to the first clean word after blocked words."""
+        prefs = {
+            'enabled': True,
+            'blocklist': {'enabled': True, 'items': ['heck']},
+            'categories': {
+                'language': {'enabled': True, 'action': 'mute', 'duration': 4},
+                'sexual': {'enabled': False, 'action': 'skip', 'duration': 12},
+                'violence': {'enabled': False, 'action': 'fast_forward', 'duration': 8},
+            },
+        }
+
+        cleaned = analyzer.build_cleaned_captions([
+            {'text': 'croc of heck man', 'start': 10.0, 'duration': 2.0}
+        ], prefs)
+
+        assert len(cleaned) == 1
+        assert cleaned[0]['words'][0]['word'] == 'croc'
+        assert cleaned[0]['words'][2]['word'] == 'heck'
+        assert cleaned[0]['words'][3]['word'] == 'man'
+        assert cleaned[0]['clean_resume_time'] == pytest.approx(cleaned[0]['words'][3]['start'])
+
+    def test_cleaned_captions_fallback_when_word_timing_unavailable(self, analyzer):
+        """Segments with no lexical words still return safe cleaned caption entries."""
+        prefs = {'enabled': True, 'categories': {'language': {'enabled': True}}}
+        cleaned = analyzer.build_cleaned_captions([
+            {'text': '...', 'start': 4.0, 'duration': 1.2}
+        ], prefs)
+
+        assert len(cleaned) == 1
+        assert cleaned[0]['text'] == '...'
+        assert cleaned[0]['clean_text'] == '...'
+        assert cleaned[0]['words'] == []
+        assert 'clean_resume_time' not in cleaned[0]
 
     def test_transcript_markers_are_non_overlapping(self, analyzer):
         """Overlapping events should be merged/trimmed to deterministic non-overlapping output."""

@@ -331,6 +331,13 @@ class TestAPI:
                             'end_seconds': 13.6,
                             'text': 'What the heck is going on?',
                             'clean_text': 'What the ____ is going on?',
+                            'clean_resume_time': 13.1,
+                            'words': [
+                                {'word': 'What', 'start': 12.3, 'end': 12.5},
+                                {'word': 'the', 'start': 12.5, 'end': 12.6},
+                                {'word': 'heck', 'start': 12.6, 'end': 12.9},
+                                {'word': 'is', 'start': 12.9, 'end': 13.0},
+                            ],
                         }
                     ],
                     'clean_captions': [
@@ -339,6 +346,13 @@ class TestAPI:
                             'end_seconds': 13.6,
                             'text': 'What the heck is going on?',
                             'clean_text': 'What the ____ is going on?',
+                            'clean_resume_time': 13.1,
+                            'words': [
+                                {'word': 'What', 'start': 12.3, 'end': 12.5},
+                                {'word': 'the', 'start': 12.5, 'end': 12.6},
+                                {'word': 'heck', 'start': 12.6, 'end': 12.9},
+                                {'word': 'is', 'start': 12.9, 'end': 13.0},
+                            ],
                         }
                     ],
                     'failure_reason': None,
@@ -354,5 +368,7 @@ class TestAPI:
         assert data['events'][0]['id'] == 'm1'
         assert len(data['cleaned_captions']) == 1
         assert data['cleaned_captions'][0]['clean_text'] == 'What the ____ is going on?'
+        assert data['cleaned_captions'][0]['clean_resume_time'] == 13.1
+        assert len(data['cleaned_captions'][0]['words']) == 4
         assert data['clean_captions'] == data['cleaned_captions']
         assert data['failure_reason'] is None
