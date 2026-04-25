@@ -540,6 +540,40 @@ class TestContentAnalyzer:
         assert isinstance(result.get('events'), list)
         assert isinstance(result.get('cleaned_captions'), list)
 
+    def test_audio_chunk_invalid_payload_returns_audio_decode_failed(self, analyzer, audio_language_preferences):
+        result = analyzer.analyze_audio_chunk(
+            audio_chunk='!!!not-valid-base64!!!',
+            mime_type='audio/wav',
+            start_seconds=2.0,
+            end_seconds=2.5,
+            preferences=audio_language_preferences,
+            video_id='bad-audio',
+        )
+
+        assert result['status'] == 'error'
+        assert result['failure_reason'] == 'audio_decode_failed'
+        assert result['events'] == []
+        assert result['cleaned_captions'] == []
+
+    def test_audio_chunk_accepts_browser_webm_mime(self, analyzer, monkeypatch, audio_language_preferences):
+        monkeypatch.delenv('ISWEEP_AUDIO_AHEAD_STUB_TEXT', raising=False)
+        monkeypatch.delenv('ISWEEP_AUDIO_AHEAD_PROVIDER', raising=False)
+        monkeypatch.setenv('FLASK_ENV', 'development')
+
+        result = analyzer.analyze_audio_chunk(
+            audio_chunk='ZmFrZQ==',
+            mime_type='audio/webm;codecs=opus',
+            start_seconds=8.0,
+            end_seconds=8.5,
+            preferences=audio_language_preferences,
+            video_id='webm-audio',
+        )
+
+        assert result['status'] == 'ready'
+        assert result['failure_reason'] is None
+        assert isinstance(result['cleaned_captions'], list)
+        assert len(result['cleaned_captions']) == 1
+
     def test_transcript_markers_are_non_overlapping(self, analyzer):
         """Overlapping events should be merged/trimmed to deterministic non-overlapping output."""
         events = [

@@ -565,14 +565,19 @@ def analyze_audio_chunk():
                 'start_seconds': start_seconds,
                 'end_seconds': end_seconds,
             })
+            cached_cleaned = cached.get('cleaned_captions', [])
+            fallback_text = cached_cleaned[0].get('text') if cached_cleaned else None
+            fallback_clean_text = cached_cleaned[0].get('clean_text') if cached_cleaned else None
             return jsonify({
                 'status': cached.get('status', 'error'),
                 'source': cached.get('source'),
                 'start_seconds': start_seconds,
                 'end_seconds': end_seconds,
                 'events': cached.get('events', []),
-                'cleaned_captions': cached.get('cleaned_captions', []),
-                'clean_captions': cached.get('cleaned_captions', []),
+                'cleaned_captions': cached_cleaned,
+                'clean_captions': cached.get('clean_captions', cached_cleaned),
+                'text': cached.get('text', fallback_text),
+                'clean_text': cached.get('clean_text', fallback_clean_text),
                 'failure_reason': cached.get('failure_reason'),
                 'cached': True,
             }), 200
@@ -593,6 +598,9 @@ def analyze_audio_chunk():
                 'source': result.get('source'),
                 'events': result.get('events', []),
                 'cleaned_captions': result.get('cleaned_captions', []),
+                'clean_captions': result.get('cleaned_captions', []),
+                'text': result.get('text'),
+                'clean_text': result.get('clean_text'),
                 'failure_reason': result.get('failure_reason'),
             },
         )
@@ -611,6 +619,8 @@ def analyze_audio_chunk():
         'events': result.get('events', []),
         'cleaned_captions': result.get('cleaned_captions', []),
         'clean_captions': result.get('cleaned_captions', []),
+        'text': result.get('text'),
+        'clean_text': result.get('clean_text'),
         'failure_reason': result.get('failure_reason'),
         'cached': False,
     }), 200

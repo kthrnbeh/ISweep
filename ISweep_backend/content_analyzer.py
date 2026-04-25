@@ -17,6 +17,7 @@ import hashlib  # Stable marker ids for deterministic scheduling
 import importlib
 import os
 import base64
+import tempfile
 from io import BytesIO
 
 # Seconds to shift audio-derived mute markers earlier so the audio is
@@ -136,7 +137,8 @@ class Phase1AudioTranscriptionAdapter:
         start_seconds: float,
         end_seconds: float,
     ) -> List[Dict]:
-        if 'wav' not in (mime_type or '').lower():
+        mime = (mime_type or '').lower()
+        if not any(kind in mime for kind in ('wav', 'webm', 'ogg', 'mp4', 'mpeg', 'mp3')):
             raise RuntimeError('transcription_unavailable')
 
         if not audio_chunk:
@@ -345,6 +347,44 @@ class ContentAnalyzer:
 
         print('[ISWEEP][STT] word timestamps generated', {'count': len(normalized_words)})
         return normalized_words
+
+    def _decode_audio_chunk(self, audio_chunk: str) -> bytes:
+        if not isinstance(audio_chunk, str):
+            raise RuntimeError('audio_decode_failed')
+        payload = audio_chunk.strip()
+        if not payload:
+            raise RuntimeError('audio_decode_failed')
+        if payload.startswith('data:') and ',' in payload:
+            payload = payload.split(',', 1)[1]
+        try:
+            decoded = base64.b64decode(payload, validate=False)
+        except Exception as exc:
+            raise RuntimeError('audio_decode_failed') from exc
+        if not decoded:
+            raise RuntimeError('audio_decode_failed')
+        return decoded
+
+    def _infer_audio_extension(self, mime_type: str) -> str:
+        mime = (mime_type or '').lower()
+        if 'webm' in mime:
+            return '.webm'
+        if 'ogg' in mime:
+            return '.ogg'
+        if 'mp4' in mime or 'aac' in mime:
+            return '.m4a'
+        if 'mpeg' in mime or 'mp3' in mime:
+            return '.mp3'
+        return '.wav'
+
+    def _persist_audio_for_stt(self, decoded_audio: bytes, mime_type: str) -> str:
+        suffix = self._infer_audio_extension(mime_type)
+        temp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        try:
+            temp.write(decoded_audio)
+            temp.flush()
+            return temp.name
+        finally:
+            temp.close()
 
     def analyze(self, text: str, user_preferences: Dict) -> str:
         """
@@ -884,14 +924,20 @@ class ContentAnalyzer:
         })
 
         duration_seconds = max(float(end_seconds) - float(start_seconds), 0.0)
-        decoded_audio = None
-        if isinstance(audio_chunk, str):
-            try:
-                decoded_audio = base64.b64decode(audio_chunk, validate=False)
-            except Exception:
-                decoded_audio = None
+        try:
+            decoded_audio = self._decode_audio_chunk(audio_chunk)
+        except RuntimeError as exc:
+            return {
+                'status': 'error',
+                'source': 'audio_chunk',
+                'events': [],
+                'cleaned_captions': [],
+                'failure_reason': str(exc) or 'audio_decode_failed',
+            }
 
         whisper_words: List[Dict] = []
+        stt_failure_reason: str | None = None
+        stt_audio_path: str | None = None
         if self.stt_enabled:
             adapter = self._get_or_create_stt_adapter()
             if adapter is not None and decoded_audio:
@@ -900,8 +946,9 @@ class ContentAnalyzer:
                         'video_id': video_id,
                         'model': self.stt_model_size,
                     })
+                    stt_audio_path = self._persist_audio_for_stt(decoded_audio, mime_type)
                     stt_result = adapter.transcribe_with_word_timestamps(
-                        decoded_audio,
+                        stt_audio_path,
                         text_hint='',
                         start_seconds=float(start_seconds),
                         duration_seconds=duration_seconds,
@@ -915,15 +962,23 @@ class ContentAnalyzer:
                             'count': len(whisper_words),
                         })
                 except RuntimeError:
+                    stt_failure_reason = 'stt_unavailable'
                     print('[ISWEEP][AUDIO_STT] fallback used', {
                         'video_id': video_id,
-                        'reason': 'stt_unavailable',
+                        'reason': stt_failure_reason,
                     })
                 except Exception:
+                    stt_failure_reason = 'transcription_failed'
                     print('[ISWEEP][AUDIO_STT] fallback used', {
                         'video_id': video_id,
-                        'reason': 'stt_error',
+                        'reason': stt_failure_reason,
                     })
+                finally:
+                    if stt_audio_path:
+                        try:
+                            os.unlink(stt_audio_path)
+                        except OSError:
+                            pass
 
         if whisper_words:
             transcript_text = ' '.join(str(word.get('word') or '').strip() for word in whisper_words).strip()
@@ -948,12 +1003,16 @@ class ContentAnalyzer:
                 normalized_reason = reason if reason in {
                     'transcription_unavailable',
                     'analyze_exception',
+                    'audio_decode_failed',
                 } else 'analyze_exception'
                 status = 'unavailable' if normalized_reason == 'transcription_unavailable' else 'error'
                 print('[ISWEEP][AUDIO_STT] fallback used', {
                     'video_id': video_id,
                     'reason': normalized_reason,
                 })
+                if stt_failure_reason in {'stt_unavailable', 'transcription_failed'}:
+                    normalized_reason = stt_failure_reason
+                    status = 'error'
                 return {
                     'status': status,
                     'source': 'audio_chunk',
@@ -1085,5 +1144,7 @@ class ContentAnalyzer:
             'end_seconds': end_seconds,
             'events': merged,
             'cleaned_captions': cleaned_captions,
+            'text': transcription_text,
+            'clean_text': cleaned_captions[0].get('clean_text') if cleaned_captions else '',
             'failure_reason': None,
         }

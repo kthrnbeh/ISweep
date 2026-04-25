@@ -530,6 +530,8 @@ class TestAPI:
                         'text': 'what the heck',
                         'clean_text': 'what the ____',
                     }],
+                    'text': 'what the heck',
+                    'clean_text': 'what the ____',
                     'failure_reason': None,
                 }
 
@@ -553,6 +555,29 @@ class TestAPI:
         assert len(data['events']) == 1
         assert len(data['cleaned_captions']) == 1
         assert data['clean_captions'] == data['cleaned_captions']
+        assert data['text'] == 'what the heck'
+        assert data['clean_text'] == 'what the ____'
+
+    def test_audio_analyze_invalid_base64_returns_audio_decode_failed(self, client):
+        token, _ = signup_and_get_token(client, email='audio-invalid@example.com')
+
+        response = client.post(
+            '/audio/analyze',
+            json={
+                'video_id': 'audio-invalid-1',
+                'audio_chunk': '!!!not-valid-base64!!!',
+                'mime_type': 'audio/wav',
+                'chunk_start_seconds': 4.0,
+                'chunk_end_seconds': 5.0,
+            },
+            headers=auth_headers(token),
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['status'] == 'error'
+        assert data['failure_reason'] == 'audio_decode_failed'
+        assert data['cached'] is False
 
     def test_audio_analyze_uses_chunk_cache_on_second_call(self, client):
         token, _ = signup_and_get_token(client, email='audio-cache@example.com')
