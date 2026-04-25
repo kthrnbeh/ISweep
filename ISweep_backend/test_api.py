@@ -552,6 +552,7 @@ class TestAPI:
         assert data['cached'] is False
         assert len(data['events']) == 1
         assert len(data['cleaned_captions']) == 1
+        assert data['clean_captions'] == data['cleaned_captions']
 
     def test_audio_analyze_uses_chunk_cache_on_second_call(self, client):
         token, _ = signup_and_get_token(client, email='audio-cache@example.com')
@@ -591,6 +592,7 @@ class TestAPI:
         second_data = json.loads(second.data)
         assert second_data['cached'] is True
         assert second_data['events'][0]['id'] == 'audio-1'
+        assert second_data['clean_captions'] == second_data['cleaned_captions']
         assert stub.calls == 1
 
     def test_audio_analyze_cache_respects_preferences_fingerprint(self, client):

@@ -703,3 +703,6 @@ class TestContentAnalyzer:
         assert result['status'] == 'ready'
         assert result['events'] == []
         assert result['failure_reason'] is None
+        assert isinstance(result.get('cleaned_captions'), list)
+        assert len(result['cleaned_captions']) == 1
+        assert result['cleaned_captions'][0]['text'] == 'hello there friend'

@@ -572,6 +572,7 @@ def analyze_audio_chunk():
                 'end_seconds': end_seconds,
                 'events': cached.get('events', []),
                 'cleaned_captions': cached.get('cleaned_captions', []),
+                'clean_captions': cached.get('cleaned_captions', []),
                 'failure_reason': cached.get('failure_reason'),
                 'cached': True,
             }), 200
@@ -609,6 +610,7 @@ def analyze_audio_chunk():
         'end_seconds': end_seconds,
         'events': result.get('events', []),
         'cleaned_captions': result.get('cleaned_captions', []),
+        'clean_captions': result.get('cleaned_captions', []),
         'failure_reason': result.get('failure_reason'),
         'cached': False,
     }), 200
