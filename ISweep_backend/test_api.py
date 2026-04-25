@@ -592,3 +592,137 @@ class TestAPI:
         assert second_data['cached'] is True
         assert second_data['events'][0]['id'] == 'audio-1'
         assert stub.calls == 1
+
+    def test_audio_analyze_cache_respects_preferences_fingerprint(self, client):
+        token, user_id = signup_and_get_token(client, email='audio-cache-prefs@example.com')
+
+        class AnalyzerStub:
+            def __init__(self):
+                self.calls = 0
+
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id):
+                self.calls += 1
+                duration = preferences.get('categories', {}).get('language', {}).get('duration', 4)
+                return {
+                    'status': 'ready',
+                    'source': 'audio_stt',
+                    'events': [{'id': f'audio-prefs-{duration}', 'start_seconds': 2.0, 'end_seconds': 2.4, 'action': 'mute', 'duration_seconds': 0.4, 'matched_category': 'language', 'reason': 'prefs'}],
+                    'cleaned_captions': [],
+                    'failure_reason': None,
+                }
+
+        stub = AnalyzerStub()
+        client.application.analyzer = stub
+
+        first = client.post(
+            '/audio/analyze',
+            json={'video_id': 'audio-prefs-video', 'audio_chunk': 'ZmFrZQ==', 'start_seconds': 2.0, 'end_seconds': 2.5},
+            headers=auth_headers(token),
+        )
+        assert first.status_code == 200
+        assert json.loads(first.data)['cached'] is False
+        assert stub.calls == 1
+
+        db = client.application.database
+        prefs = db.get_user_preferences(user_id)
+        prefs['categories']['language']['duration'] = 9
+        assert db.update_user_preferences(user_id, prefs) is True
+
+        second = client.post(
+            '/audio/analyze',
+            json={'video_id': 'audio-prefs-video', 'audio_chunk': 'ZmFrZQ==', 'start_seconds': 2.0, 'end_seconds': 2.5},
+            headers=auth_headers(token),
+        )
+        assert second.status_code == 200
+        second_data = json.loads(second.data)
+        assert second_data['cached'] is False
+        assert second_data['events'][0]['id'] == 'audio-prefs-9'
+        assert stub.calls == 2
+
+    def test_audio_analyze_cache_respects_stt_model(self, client):
+        token, _ = signup_and_get_token(client, email='audio-cache-stt@example.com')
+
+        class AnalyzerStub:
+            def __init__(self):
+                self.calls = 0
+                self.stt_model = 'base'
+
+            def get_stt_cache_mode(self):
+                return {'enabled': True, 'model': self.stt_model}
+
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id):
+                self.calls += 1
+                return {
+                    'status': 'ready',
+                    'source': 'audio_stt',
+                    'events': [{'id': f'audio-stt-{self.stt_model}-{self.calls}', 'start_seconds': 3.0, 'end_seconds': 3.4, 'action': 'mute', 'duration_seconds': 0.4, 'matched_category': 'language', 'reason': 'stt-model'}],
+                    'cleaned_captions': [],
+                    'failure_reason': None,
+                }
+
+        stub = AnalyzerStub()
+        client.application.analyzer = stub
+
+        first = client.post(
+            '/audio/analyze',
+            json={'video_id': 'audio-stt-video', 'audio_chunk': 'ZmFrZQ==', 'start_seconds': 3.0, 'end_seconds': 3.5},
+            headers=auth_headers(token),
+        )
+        assert first.status_code == 200
+        assert json.loads(first.data)['cached'] is False
+        assert stub.calls == 1
+
+        stub.stt_model = 'small'
+
+        second = client.post(
+            '/audio/analyze',
+            json={'video_id': 'audio-stt-video', 'audio_chunk': 'ZmFrZQ==', 'start_seconds': 3.0, 'end_seconds': 3.5},
+            headers=auth_headers(token),
+        )
+        assert second.status_code == 200
+        second_data = json.loads(second.data)
+        assert second_data['cached'] is False
+        assert second_data['events'][0]['id'] == 'audio-stt-small-2'
+        assert stub.calls == 2
+
+    def test_audio_analyze_error_results_are_not_cached(self, client):
+        token, _ = signup_and_get_token(client, email='audio-cache-error@example.com')
+
+        class AnalyzerStub:
+            def __init__(self):
+                self.calls = 0
+
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id):
+                self.calls += 1
+                return {
+                    'status': 'error',
+                    'source': 'audio_chunk',
+                    'events': [],
+                    'cleaned_captions': [],
+                    'failure_reason': 'analyze_exception',
+                }
+
+        stub = AnalyzerStub()
+        client.application.analyzer = stub
+
+        first = client.post(
+            '/audio/analyze',
+            json={'video_id': 'audio-error-video', 'audio_chunk': 'ZmFrZQ==', 'start_seconds': 4.0, 'end_seconds': 4.5},
+            headers=auth_headers(token),
+        )
+        assert first.status_code == 200
+        first_data = json.loads(first.data)
+        assert first_data['status'] == 'error'
+        assert first_data['cached'] is False
+        assert stub.calls == 1
+
+        second = client.post(
+            '/audio/analyze',
+            json={'video_id': 'audio-error-video', 'audio_chunk': 'ZmFrZQ==', 'start_seconds': 4.0, 'end_seconds': 4.5},
+            headers=auth_headers(token),
+        )
+        assert second.status_code == 200
+        second_data = json.loads(second.data)
+        assert second_data['status'] == 'error'
+        assert second_data['cached'] is False
+        assert stub.calls == 2
