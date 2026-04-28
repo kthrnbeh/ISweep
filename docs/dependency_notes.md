@@ -20,6 +20,12 @@ ISweep only:
 - faster-whisper (MIT, optional): local speech-to-text plus word timestamps for audio chunks.
   - Optional dependency only; backend must run without it.
   - Commercial distribution impact: generally permissive (MIT), but model files and runtime packaging should still be reviewed separately.
+- soundfile: audio file/chunk decoding support for local processing.
+- numpy: numerical array handling for audio processing/transforms.
+- pydub: convenience audio format handling (conversion helpers).
+- ffmpeg-python: Python wrapper for FFmpeg command composition.
+- rapidfuzz: optional fuzzy matching utility for future misheard-word handling.
+- pytest: automated backend reliability tests.
 
 ### Browser/extension built-ins
 - MediaStream/captureStream, AudioContext, AudioWorkletNode, fetch, chrome.runtime messaging.
@@ -49,6 +55,7 @@ ISweep only:
 - Do not redistribute full copyrighted transcripts.
 - Cache only local analysis data needed for playback control.
 - Keep user preferences separate from third-party source material.
+- ISweep must not edit, modify, save, redistribute, or alter original video/audio.
 
 ## What remains custom by design
 - Extension-side chunking, WAV encoding, and playback marker scheduler remain custom to preserve strict control over mute/skip behavior and to avoid over-coupling to heavy media frameworks.
