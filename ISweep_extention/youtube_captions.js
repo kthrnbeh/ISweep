@@ -1050,10 +1050,12 @@
       hasVideo: Boolean(video),
       audioAheadActive,
       audioAheadFailed,
+      audioFilteringEnabled,
       readyState: video?.readyState ?? null,
       paused: video?.paused ?? null,
       currentTime: video?.currentTime ?? null,
     });
+    if (!audioFilteringEnabled) return;
     if (!video || audioAheadActive || audioAheadFailed) return;
 
     const minReadyState = typeof HTMLMediaElement !== 'undefined'
