@@ -1149,3 +1149,98 @@ class ContentAnalyzer:
             'clean_text': cleaned_captions[0].get('clean_text') if cleaned_captions else '',
             'failure_reason': None,
         }
+
+    def analyze_transcribed_words(self, words: List[Dict], preferences: Dict, video_id: str = 'audio') -> List[Dict]:
+        """Return mute/skip/fast_forward markers from a pre-transcribed word list.
+
+        Parameters
+        ----------
+        words :
+            Absolute-timed word list: [{word, start, end}, ...].
+        preferences :
+            User filter preferences (same shape as analyze_audio_chunk).
+        video_id :
+            Used for stable marker ID generation.
+
+        Returns
+        -------
+        List of marker dicts with ``start_seconds``, ``end_seconds``,
+        ``action``, ``matched_category``, ``reason``, and optionally
+        ``blocked_word_start`` / ``clean_resume_time``.
+        """
+        if not isinstance(words, list) or not words:
+            return []
+
+        valid_words = [
+            w for w in words
+            if isinstance(w, dict)
+            and str(w.get('word') or '').strip()
+            and Number_is_finite(w.get('start'))
+            and Number_is_finite(w.get('end'))
+        ]
+            if not valid_words: 
+                return [] 
+
+        abs_start = float(valid_words[0]['start'])
+        abs_end = float(valid_words[-1]['end'])
+        duration = max(abs_end - abs_start, 0.0)
+        transcript_text = ' '.join(str(w['word']).strip() for w in valid_words)
+
+        segment = {
+            'text': transcript_text,
+            'start': abs_start,
+            'duration': duration,
+            'word_timings': valid_words,
+        }
+
+        cleaned_entry = self._build_cleaned_caption_entry(segment, preferences)
+        decision = self.analyze_decision(transcript_text, preferences)
+        action = decision.get('action')
+        if action not in {'mute', 'skip', 'fast_forward'}:
+            return []
+
+        decision_duration = float(decision.get('duration_seconds') or 0)
+        effective_duration = decision_duration if decision_duration > 0 else duration
+        if effective_duration <= 0:
+            return []
+
+        adj_start = abs_start
+        marker_end = round(abs_start + effective_duration, 3)
+        category = decision.get('matched_category') or 'language'
+
+        if action == 'mute':
+            if (
+                cleaned_entry
+                and cleaned_entry.get('_first_blocked_word_start') is not None
+                and str(cleaned_entry.get('_first_blocked_word_source') or '') == 'whisper'
+            ):
+                adj_start = round(float(cleaned_entry['_first_blocked_word_start']), 3)
+            else:
+                adj_start = max(round(abs_start - AUDIO_MUTE_PREROLL_SEC, 3), 0.0)
+
+            if cleaned_entry and cleaned_entry.get('clean_resume_time') is not None:
+                resume = round(float(cleaned_entry['clean_resume_time']), 3)
+                if resume > adj_start:
+                    marker_end = min(marker_end, resume)
+                    effective_duration = max(marker_end - adj_start, 0.0)
+
+            if effective_duration <= 0:
+                return []
+
+        marker: Dict = {
+            'id': self._stable_marker_id(video_id, adj_start, marker_end, action, category),
+            'start_seconds': adj_start,
+            'end_seconds': marker_end,
+            'action': action,
+            'duration_seconds': round(effective_duration, 3),
+            'matched_category': category,
+            'reason': decision.get('reason') or 'word match',
+            'source': 'audio_stt',
+        }
+        if action == 'mute' and cleaned_entry:
+            if cleaned_entry.get('_first_blocked_word_start') is not None:
+                marker['blocked_word_start'] = round(float(cleaned_entry['_first_blocked_word_start']), 3)
+            if cleaned_entry.get('clean_resume_time') is not None:
+                marker['clean_resume_time'] = round(float(cleaned_entry['clean_resume_time']), 3)
+
+        return self._merge_marker_events([marker])
