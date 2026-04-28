@@ -1,4 +1,5 @@
 import json  # Standard library JSON handling for request/response bodies
+from pathlib import Path
 import pytest  # Testing framework used for assertions and fixtures
 
 
@@ -16,6 +17,14 @@ def auth_headers(token):
 
 class TestAPI:
     """Test the REST API endpoints."""
+
+    def test_dependency_notes_file_exists(self):
+        notes_path = Path(__file__).resolve().parents[1] / 'docs' / 'dependency_notes.md'
+        assert notes_path.exists()
+        notes = notes_path.read_text(encoding='utf-8')
+        assert 'faster-whisper' in notes
+        assert 'must never edit or redistribute video/audio' in notes.lower()
+        assert 'Do not copy YouTube captions' in notes
 
     def test_health_check(self, client):
         response = client.get('/api/health')  # Hit health check endpoint
