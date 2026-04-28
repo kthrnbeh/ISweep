@@ -1,4 +1,4 @@
-"""
+﻿"""
 ISWEEP COMPONENT: Content Analyzer
 # Explains this file belongs to the ISWEEP content analyzer module
 
@@ -1175,11 +1175,11 @@ class ContentAnalyzer:
             w for w in words
             if isinstance(w, dict)
             and str(w.get('word') or '').strip()
-            and Number_is_finite(w.get('start'))
-            and Number_is_finite(w.get('end'))
+            and isinstance(w.get('start'), (int, float))
+            and isinstance(w.get('end'), (int, float))
         ]
-            if not valid_words: 
-                return [] 
+        if not valid_words:
+            return []
 
         abs_start = float(valid_words[0]['start'])
         abs_end = float(valid_words[-1]['end'])

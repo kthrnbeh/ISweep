@@ -740,3 +740,40 @@ class TestContentAnalyzer:
         assert isinstance(result.get('cleaned_captions'), list)
         assert len(result['cleaned_captions']) == 1
         assert result['cleaned_captions'][0]['text'] == 'hello there friend'
+
+    def test_analyze_transcribed_words_detects_blocked_word(self, analyzer, audio_language_preferences):
+        """analyze_transcribed_words returns a mute marker for a blocked word with correct timing."""
+        words = [
+            {'word': 'hello', 'start': 10.0, 'end': 10.3, 'source': 'whisper'},
+            {'word': 'fuck', 'start': 10.5, 'end': 10.7, 'source': 'whisper'},
+            {'word': 'world', 'start': 10.9, 'end': 11.2, 'source': 'whisper'},
+        ]
+        markers = analyzer.analyze_transcribed_words(words, audio_language_preferences, video_id='test-vid')
+
+        assert len(markers) == 1
+        marker = markers[0]
+        assert marker['action'] == 'mute'
+        assert marker['matched_category'] == 'language'
+        assert marker['source'] == 'audio_stt'
+        assert 'start_seconds' in marker
+        assert 'end_seconds' in marker
+        # whisper source: start_seconds == blocked_word_start (exact word start;
+        # the scheduler applies the PROFANITY_MARKER_FIRE_EARLY_SEC lead in the extension)
+        assert marker['start_seconds'] == pytest.approx(10.5)
+        assert marker['blocked_word_start'] == pytest.approx(10.5)
+        assert marker['clean_resume_time'] == pytest.approx(10.9)
+
+    def test_analyze_transcribed_words_clean_returns_empty(self, analyzer, audio_language_preferences):
+        """analyze_transcribed_words returns an empty list when no words are blocked."""
+        words = [
+            {'word': 'hello', 'start': 5.0, 'end': 5.3, 'source': 'whisper'},
+            {'word': 'world', 'start': 5.5, 'end': 5.8, 'source': 'whisper'},
+        ]
+        markers = analyzer.analyze_transcribed_words(words, audio_language_preferences, video_id='clean-vid')
+
+        assert markers == []
+
+    def test_analyze_transcribed_words_empty_input_returns_empty(self, analyzer, audio_language_preferences):
+        """analyze_transcribed_words returns an empty list for empty or invalid input."""
+        assert analyzer.analyze_transcribed_words([], audio_language_preferences) == []
+        assert analyzer.analyze_transcribed_words(None, audio_language_preferences) == []
