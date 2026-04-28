@@ -26,6 +26,8 @@ from io import BytesIO
 # of ~220 ms total lead when combined with the content-script mute fire lead.
 AUDIO_MUTE_PREROLL_SEC: float = 0.10
 DEFAULT_AUDIO_AHEAD_FALLBACK_TEXT = 'test profanity fuck'
+CHUNK_DURATION_SEC: float = float(os.getenv('ISWEEP_AUDIO_CHUNK_SEC', '2') or '2')
+CHUNK_OVERLAP_SEC: float = 0.5
 from typing import Dict, List  # Imports type annotations for dictionaries and lists
 from better_profanity import profanity  # Imports third-party profanity checker
 
@@ -1148,6 +1150,111 @@ class ContentAnalyzer:
             'cleaned_captions': cleaned_captions,
             'text': transcription_text,
             'clean_text': cleaned_captions[0].get('clean_text') if cleaned_captions else '',
+            'failure_reason': None,
+        }
+
+    def analyze_audio_chunk_bytes(
+        self,
+        audio_bytes: bytes,
+        start_time: float,
+        preferences: Dict,
+        video_id: str = '',
+        chunk_duration_sec: float | None = None,
+    ) -> Dict:
+        """Analyze raw audio bytes and emit live marker events for rolling chunks."""
+        print('[ISWEEP][AUDIO] chunk received', {
+            'video_id': video_id,
+            'start_time': start_time,
+            'bytes': len(audio_bytes or b''),
+        })
+
+        if not _env_flag('ISWEEP_AUDIO_ENABLED'):
+            return {
+                'events': [],
+                'cleaned_text': '',
+                'words': [],
+                'source': 'audio',
+                'failure_reason': 'audio_pipeline_disabled',
+            }
+
+        if not self.stt_enabled:
+            return {
+                'events': [],
+                'cleaned_text': '',
+                'words': [],
+                'source': 'audio',
+                'failure_reason': 'stt_disabled',
+            }
+
+        if not audio_bytes:
+            return {
+                'events': [],
+                'cleaned_text': '',
+                'words': [],
+                'source': 'audio',
+                'failure_reason': 'audio_decode_failed',
+            }
+
+        adapter = self._get_or_create_stt_adapter()
+        if adapter is None:
+            return {
+                'events': [],
+                'cleaned_text': '',
+                'words': [],
+                'source': 'audio',
+                'failure_reason': 'stt_unavailable',
+            }
+
+        duration = float(chunk_duration_sec if chunk_duration_sec is not None else CHUNK_DURATION_SEC)
+        duration = max(duration, 0.0)
+        try:
+            stt_result = adapter.transcribe_with_word_timestamps(
+                audio_bytes,
+                text_hint='',
+                start_seconds=float(start_time),
+                duration_seconds=duration,
+            )
+            words = stt_result.get('words') if isinstance(stt_result, dict) else []
+            words = [w for w in words if isinstance(w, dict)] if isinstance(words, list) else []
+        except Exception:
+            return {
+                'events': [],
+                'cleaned_text': '',
+                'words': [],
+                'source': 'audio',
+                'failure_reason': 'transcription_failed',
+            }
+
+        print('[ISWEEP][AUDIO] transcription complete', {
+            'video_id': video_id,
+            'start_time': start_time,
+            'words': len(words),
+        })
+
+        text = ' '.join(str(word.get('word') or '').strip() for word in words).strip()
+        events = self.analyze_transcribed_words(words, preferences or {}, video_id=video_id or 'audio')
+        for event in events:
+            event['source'] = 'audio'
+
+        cleaned_text = ''
+        if text:
+            clean_entry = self._build_cleaned_caption_entry({
+                'text': text,
+                'start': float(start_time),
+                'duration': duration,
+                'word_timings': words,
+            }, preferences or {})
+            cleaned_text = (clean_entry or {}).get('clean_text') or ''
+
+        print('[ISWEEP][AUDIO] events generated', {
+            'video_id': video_id,
+            'count': len(events),
+        })
+        return {
+            'events': events,
+            'cleaned_text': cleaned_text,
+            'words': words,
+            'source': 'audio',
             'failure_reason': None,
         }
 

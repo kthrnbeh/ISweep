@@ -588,6 +588,76 @@ class TestAPI:
         assert data['failure_reason'] == 'audio_decode_failed'
         assert data['cached'] is False
 
+    def test_audio_analyze_chunk_returns_live_events(self, client):
+        token, _ = signup_and_get_token(client, email='audio-live-chunk@example.com')
+
+        class AnalyzerStub:
+            def analyze_audio_chunk_bytes(self, audio_bytes, start_time, preferences, video_id='', chunk_duration_sec=None):
+                return {
+                    'events': [{
+                        'start_seconds': 123.62,
+                        'end_seconds': 124.10,
+                        'action': 'mute',
+                        'duration_seconds': 0.48,
+                        'matched_category': 'language',
+                        'reason': 'audio chunk match',
+                        'source': 'audio',
+                        'blocked_word_start': 123.62,
+                        'clean_resume_time': 124.10,
+                    }],
+                    'cleaned_text': 'What the ____ is going on',
+                    'words': [{'word': 'What', 'start': 123.5, 'end': 123.6}],
+                    'source': 'audio',
+                    'failure_reason': None,
+                }
+
+        client.application.analyzer = AnalyzerStub()
+
+        response = client.post(
+            '/audio/analyze_chunk',
+            json={
+                'video_id': 'vid-live-1',
+                'audio_base64': 'ZmFrZQ==',
+                'start_time': 123.45,
+            },
+            headers=auth_headers(token),
+        )
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['source'] == 'audio'
+        assert data['failure_reason'] is None
+        assert isinstance(data['events'], list) and len(data['events']) == 1
+        assert data['events'][0]['start_seconds'] == pytest.approx(123.62)
+        assert data['cleaned_text'] == 'What the ____ is going on'
+
+    def test_audio_analyze_chunk_stt_disabled_returns_empty_events(self, client):
+        token, _ = signup_and_get_token(client, email='audio-live-disabled@example.com')
+
+        class AnalyzerStub:
+            def analyze_audio_chunk_bytes(self, audio_bytes, start_time, preferences, video_id='', chunk_duration_sec=None):
+                return {
+                    'events': [],
+                    'cleaned_text': '',
+                    'words': [],
+                    'source': 'audio',
+                    'failure_reason': 'stt_disabled',
+                }
+
+        client.application.analyzer = AnalyzerStub()
+        response = client.post(
+            '/audio/analyze_chunk',
+            json={
+                'video_id': 'vid-live-2',
+                'audio_base64': 'ZmFrZQ==',
+                'start_time': 55.0,
+            },
+            headers=auth_headers(token),
+        )
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['events'] == []
+        assert data['failure_reason'] == 'stt_disabled'
+
     def test_audio_analyze_uses_chunk_cache_on_second_call(self, client):
         token, _ = signup_and_get_token(client, email='audio-cache@example.com')
 

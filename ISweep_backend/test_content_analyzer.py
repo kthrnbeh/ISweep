@@ -777,3 +777,53 @@ class TestContentAnalyzer:
         """analyze_transcribed_words returns an empty list for empty or invalid input."""
         assert analyzer.analyze_transcribed_words([], audio_language_preferences) == []
         assert analyzer.analyze_transcribed_words(None, audio_language_preferences) == []
+
+    def test_analyze_audio_chunk_bytes_offsets_timing_and_emits_clean_resume(self, monkeypatch, audio_language_preferences):
+        monkeypatch.setenv('ISWEEP_AUDIO_ENABLED', 'true')
+        monkeypatch.setenv('ISWEEP_STT_ENABLED', 'true')
+
+        class StubAdapter:
+            def transcribe_with_word_timestamps(self, audio_path_or_bytes, text_hint='', start_seconds=0.0, duration_seconds=0.0):
+                return {
+                    'words': [
+                        {'word': 'what', 'start': round(start_seconds + 0.20, 3), 'end': round(start_seconds + 0.32, 3), 'source': 'whisper'},
+                        {'word': 'fuck', 'start': round(start_seconds + 0.35, 3), 'end': round(start_seconds + 0.52, 3), 'source': 'whisper'},
+                        {'word': 'man', 'start': round(start_seconds + 0.55, 3), 'end': round(start_seconds + 0.70, 3), 'source': 'whisper'},
+                    ]
+                }
+
+        analyzer = ContentAnalyzer(speech_to_text_adapter=StubAdapter())
+        result = analyzer.analyze_audio_chunk_bytes(
+            audio_bytes=b'fake-bytes',
+            start_time=100.0,
+            preferences=audio_language_preferences,
+            video_id='audio-live',
+            chunk_duration_sec=2.0,
+        )
+
+        assert result['source'] == 'audio'
+        assert result['failure_reason'] is None
+        assert isinstance(result['events'], list) and len(result['events']) == 1
+        marker = result['events'][0]
+        assert marker['source'] == 'audio'
+        assert marker['blocked_word_start'] == pytest.approx(100.35)
+        assert marker['clean_resume_time'] == pytest.approx(100.55)
+        assert marker['start_seconds'] == pytest.approx(100.35)
+        assert marker['end_seconds'] == pytest.approx(100.55)
+
+    def test_analyze_audio_chunk_bytes_stt_disabled_returns_safe_empty(self, monkeypatch, audio_language_preferences):
+        monkeypatch.setenv('ISWEEP_AUDIO_ENABLED', 'true')
+        monkeypatch.setenv('ISWEEP_STT_ENABLED', 'false')
+        analyzer = ContentAnalyzer()
+
+        result = analyzer.analyze_audio_chunk_bytes(
+            audio_bytes=b'fake-bytes',
+            start_time=12.0,
+            preferences=audio_language_preferences,
+            video_id='audio-live-disabled',
+            chunk_duration_sec=2.0,
+        )
+
+        assert result['events'] == []
+        assert result['source'] == 'audio'
+        assert result['failure_reason'] == 'stt_disabled'

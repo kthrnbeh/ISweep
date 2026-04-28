@@ -21,6 +21,7 @@ import json
 import math
 import os
 import secrets
+import base64
 from datetime import datetime, timedelta
 from functools import wraps
 from dotenv import load_dotenv
@@ -582,12 +583,11 @@ def analyze_audio_chunk():
                 'cached': True,
             }), 200
 
-    import base64 as _base64
     try:
         _raw = audio_chunk
         if ',' in _raw:
             _raw = _raw.split(',', 1)[1]
-        _audio_bytes = _base64.b64decode(_raw + '==')
+        _audio_bytes = base64.b64decode(_raw + '==')
         print("[ISWEEP][AUDIO_DEBUG] Received audio bytes:", len(_audio_bytes))
     except Exception as err:
         print("[ISWEEP][AUDIO_DEBUG] Audio decode failed:", str(err))
@@ -633,6 +633,55 @@ def analyze_audio_chunk():
         'clean_text': result.get('clean_text'),
         'failure_reason': result.get('failure_reason'),
         'cached': False,
+    }), 200
+
+
+@app.route('/audio/analyze_chunk', methods=['POST'])
+@require_auth
+def analyze_audio_chunk_live():
+    """Live rolling-audio endpoint that emits marker events for scheduler injection."""
+    data = request.get_json() or {}
+    audio_base64 = str(data.get('audio_base64') or data.get('audio_chunk') or '').strip()
+    video_id = str(data.get('video_id') or '').strip()
+    try:
+        start_time = float(data.get('start_time') or data.get('start_seconds') or 0)
+    except (TypeError, ValueError):
+        start_time = 0.0
+
+    if not audio_base64:
+        return jsonify({'error': 'audio_base64 is required'}), 400
+
+    try:
+        raw = audio_base64.split(',', 1)[1] if ',' in audio_base64 else audio_base64
+        audio_bytes = base64.b64decode(raw + '==')
+    except Exception:
+        return jsonify({
+            'events': [],
+            'cleaned_text': '',
+            'words': [],
+            'source': 'audio',
+            'failure_reason': 'audio_decode_failed',
+        }), 200
+
+    db = get_db()
+    stored_preferences = db.get_user_preferences(request.user_id) or {}
+    request_preferences = data.get('preferences') if isinstance(data.get('preferences'), dict) else None
+    preferences = request_preferences or stored_preferences
+
+    analyzer = get_analyzer()
+    result = analyzer.analyze_audio_chunk_bytes(
+        audio_bytes=audio_bytes,
+        start_time=start_time,
+        preferences=preferences,
+        video_id=video_id,
+    )
+
+    return jsonify({
+        'events': result.get('events', []),
+        'cleaned_text': result.get('cleaned_text', ''),
+        'words': result.get('words', []),
+        'source': result.get('source', 'audio'),
+        'failure_reason': result.get('failure_reason'),
     }), 200
 
 
