@@ -926,6 +926,7 @@ class ContentAnalyzer:
         duration_seconds = max(float(end_seconds) - float(start_seconds), 0.0)
         try:
             decoded_audio = self._decode_audio_chunk(audio_chunk)
+            print("Received audio bytes:", len(decoded_audio))
         except RuntimeError as exc:
             return {
                 'status': 'error',
