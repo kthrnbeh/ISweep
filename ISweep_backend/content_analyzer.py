@@ -926,14 +926,15 @@ class ContentAnalyzer:
         duration_seconds = max(float(end_seconds) - float(start_seconds), 0.0)
         try:
             decoded_audio = self._decode_audio_chunk(audio_chunk)
-            print("Received audio bytes:", len(decoded_audio))
-        except RuntimeError as exc:
+            print("[ISWEEP][AUDIO_DEBUG] Received audio bytes:", len(decoded_audio))
+        except RuntimeError as err:
+            print("[ISWEEP][AUDIO_DEBUG] Audio decode failed:", str(err))
             return {
                 'status': 'error',
                 'source': 'audio_chunk',
                 'events': [],
                 'cleaned_captions': [],
-                'failure_reason': str(exc) or 'audio_decode_failed',
+                'failure_reason': str(err) or 'audio_decode_failed',
             }
 
         whisper_words: List[Dict] = []

@@ -588,9 +588,9 @@ def analyze_audio_chunk():
         if ',' in _raw:
             _raw = _raw.split(',', 1)[1]
         _audio_bytes = _base64.b64decode(_raw + '==')
-        print("Received audio bytes:", len(_audio_bytes))
-    except Exception:
-        print("Received audio bytes: <decode failed>")
+        print("[ISWEEP][AUDIO_DEBUG] Received audio bytes:", len(_audio_bytes))
+    except Exception as err:
+        print("[ISWEEP][AUDIO_DEBUG] Audio decode failed:", str(err))
 
     result = analyzer.analyze_audio_chunk(
         audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id
