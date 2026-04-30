@@ -586,7 +586,7 @@ def analyze_audio_chunk():
     try:
         audio_chunk_debug = audio_chunk.split(',', 1)[1] if ',' in audio_chunk else audio_chunk
         audio_bytes = base64.b64decode(audio_chunk_debug, validate=False)
-        print("[ISWEEP][AUDIO_DEBUG] Received audio bytes:", len(audio_bytes))
+        print("[ISWEEP][AUDIO_DEBUG] received audio bytes:", len(audio_bytes))
     except Exception as err:
         print("[ISWEEP][AUDIO_DEBUG] Audio decode failed:", str(err))
 
