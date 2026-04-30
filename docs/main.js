@@ -905,127 +905,17 @@ async function loadPreferencesUiState() {
 
 document.addEventListener("DOMContentLoaded", async () => {
   // Grab forms (will be null on non-settings pages)
-  const contentFiltersForm = document.getElementById("contentFiltersForm");
-  const filterActionsForm = document.getElementById("filterActionsForm");
-  const sensitivityForm = document.getElementById("sensitivityForm");
   const notificationsForm = document.getElementById("notificationsForm");
   const parentalForm = document.getElementById("parentalForm");
 
-  if (
-    !contentFiltersForm &&
-    !filterActionsForm &&
-    !sensitivityForm &&
-    !notificationsForm &&
-    !parentalForm
-  ) {
+  if (!notificationsForm && !parentalForm) {
     return;
   }
 
-  console.log('[ISWEEP][FE] loading preferences...');
-  let saved = await loadPreferencesUiState();
+  console.log('[ISWEEP][SETTINGS] filter controls moved to Filters page');
+  let saved = loadSettingsFromStorage();
   if (!saved || !Object.keys(saved).length) {
     saved = loadSettingsFromStorage();
-  }
-
-  // --- PREFILL: Content Filters checkboxes ---
-  if (contentFiltersForm) {
-    contentFiltersForm.elements["filter-profanity"].checked =
-      saved.filter_profanity ?? true;
-    contentFiltersForm.elements["filter-sexual"].checked =
-      saved.filter_sexual ?? true;
-    contentFiltersForm.elements["filter-violence"].checked =
-      saved.filter_violence ?? false;
-    contentFiltersForm.elements["filter-horror"].checked =
-      saved.filter_horror ?? false;
-    contentFiltersForm.elements["filter-crude"].checked =
-      saved.filter_crude ?? false;
-
-    contentFiltersForm.addEventListener("submit", async (e) => {
-      e.preventDefault();
-
-      saved.filter_profanity =
-        contentFiltersForm.elements["filter-profanity"].checked;
-      saved.filter_sexual = contentFiltersForm.elements["filter-sexual"].checked;
-      saved.filter_violence =
-        contentFiltersForm.elements["filter-violence"].checked;
-      saved.filter_horror = contentFiltersForm.elements["filter-horror"].checked;
-      saved.filter_crude = contentFiltersForm.elements["filter-crude"].checked;
-
-      saveSettingsToStorage(saved);
-
-      try {
-        const prefsPayload = uiToPreferences(saved);
-        await persistPreferences(prefsPayload);
-        alert("Content filter categories saved and sent to ISweep.");
-      } catch (err) {
-        console.error('[ISWEEP][FE] Failed to save content filters', err);
-        alert(
-          "Filters saved locally, but backend update failed. Is the API running?"
-        );
-      }
-    });
-  }
-
-  // --- PREFILL: Filter Actions selects ---
-  if (filterActionsForm) {
-    if (saved.action_profanity) {
-      filterActionsForm.elements["action-profanity"].value =
-        saved.action_profanity;
-    }
-
-    if (saved.action_sexual) {
-      filterActionsForm.elements["action-sexual"].value = saved.action_sexual;
-    }
-
-    if (saved.action_violence) {
-      filterActionsForm.elements["action-violence"].value =
-        saved.action_violence;
-    }
-
-    filterActionsForm.addEventListener("submit", async (e) => {
-      e.preventDefault();
-
-      saved.action_profanity =
-        filterActionsForm.elements["action-profanity"].value;
-      saved.action_sexual = filterActionsForm.elements["action-sexual"].value;
-      saved.action_violence =
-        filterActionsForm.elements["action-violence"].value;
-
-      saveSettingsToStorage(saved);
-
-      try {
-        const prefsPayload = uiToPreferences(saved);
-        await persistPreferences(prefsPayload);
-        alert("Filter actions saved and sent to ISweep.");
-      } catch (err) {
-        console.error('[ISWEEP][FE] Failed to save filter actions', err);
-        alert(
-          "Actions saved locally, but backend update failed. Is the API running?"
-        );
-      }
-    });
-  }
-
-  // --- PREFILL: Sensitivity slider ---
-  if (sensitivityForm) {
-    const sensitivityInput = sensitivityForm.elements["sensitivity"];
-    if (saved.sensitivity) {
-      sensitivityInput.value = saved.sensitivity;
-    }
-
-    sensitivityForm.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      saved.sensitivity = sensitivityInput.value;
-      saveSettingsToStorage(saved);
-      try {
-        const prefsPayload = uiToPreferences(saved);
-        await persistPreferences(prefsPayload);
-        alert("Sensitivity saved.");
-      } catch (err) {
-        console.error('[ISWEEP][FE] Failed to save sensitivity', err);
-        alert("Sensitivity saved locally, but backend update failed.");
-      }
-    });
   }
 
   // --- PREFILL: Notifications (local only) ---
