@@ -621,7 +621,7 @@ class TestContentAnalyzer:
         assert segments[0]['duration'] == pytest.approx(1.0)
 
     def test_audio_mute_marker_applies_preroll(self, analyzer, monkeypatch, audio_language_preferences):
-        """Audio-ahead mute markers are shifted earlier by the configured preroll."""
+        """Audio-ahead mute markers start slightly before the blocked word boundary."""
         monkeypatch.delenv('ISWEEP_AUDIO_AHEAD_STUB_TEXT', raising=False)
         monkeypatch.delenv('ISWEEP_AUDIO_AHEAD_PROVIDER', raising=False)
         monkeypatch.setenv('FLASK_ENV', 'development')
@@ -641,11 +641,12 @@ class TestContentAnalyzer:
         marker = result['events'][0]
         assert marker['action'] == 'mute'
         assert marker['matched_category'] == 'language'
-        assert marker['start_seconds'] == pytest.approx(20.0 - AUDIO_MUTE_PREROLL_SEC)
+        assert marker['blocked_word_start'] > 20.0
+        assert marker['start_seconds'] == pytest.approx(marker['blocked_word_start'] - AUDIO_MUTE_PREROLL_SEC)
         assert marker['end_seconds'] == pytest.approx(24.0)
 
     def test_audio_marker_start_never_below_zero(self, analyzer, monkeypatch, audio_language_preferences):
-        """Audio mute marker preroll clamps at zero for near-start chunks."""
+        """Audio mute marker preroll still stays non-negative for near-start chunks."""
         monkeypatch.delenv('ISWEEP_AUDIO_AHEAD_STUB_TEXT', raising=False)
         monkeypatch.delenv('ISWEEP_AUDIO_AHEAD_PROVIDER', raising=False)
         monkeypatch.setenv('FLASK_ENV', 'development')
@@ -661,7 +662,8 @@ class TestContentAnalyzer:
 
         assert result['status'] == 'ready'
         assert len(result['events']) == 1
-        assert result['events'][0]['start_seconds'] == pytest.approx(0.0)
+    assert result['events'][0]['start_seconds'] >= 0.0
+    assert result['events'][0]['start_seconds'] < result['events'][0]['blocked_word_start']
 
     def test_audio_marker_ids_are_deterministic(self, analyzer, monkeypatch, audio_language_preferences):
         """Repeated audio chunk analysis with the same inputs yields the same marker id."""
