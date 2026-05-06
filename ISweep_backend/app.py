@@ -160,7 +160,11 @@ def health_check():
 
 @app.route('/health', methods=['GET'])
 def health_check_root():
-    return jsonify({'status': 'ok'}), 200
+    analyzer = get_analyzer()
+    return jsonify({
+        'status': 'ok',
+        'stt_enabled': getattr(analyzer, 'stt_enabled', False) is True,
+    }), 200
 
 
 @app.route('/auth/signup', methods=['POST'])

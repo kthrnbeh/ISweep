@@ -52,7 +52,8 @@ class TestAPI:
         response = client.get('/health')  # Hit root health endpoint
         assert response.status_code == 200  # Expect OK
         data = json.loads(response.data)  # Parse JSON
-        assert data == {'status': 'ok'}  # Validate payload
+        assert data['status'] == 'ok'  # Validate payload
+        assert 'stt_enabled' in data
 
     def test_create_user(self, client):
         response = client.post('/api/users', json={'username': 'testuser'})  # Create user without auth
