@@ -662,8 +662,8 @@ class TestContentAnalyzer:
 
         assert result['status'] == 'ready'
         assert len(result['events']) == 1
-    assert result['events'][0]['start_seconds'] >= 0.0
-    assert result['events'][0]['start_seconds'] < result['events'][0]['blocked_word_start']
+        assert result['events'][0]['start_seconds'] >= 0.0
+        assert result['events'][0]['start_seconds'] < result['events'][0]['blocked_word_start']
 
     def test_audio_marker_ids_are_deterministic(self, analyzer, monkeypatch, audio_language_preferences):
         """Repeated audio chunk analysis with the same inputs yields the same marker id."""
