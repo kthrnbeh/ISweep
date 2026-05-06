@@ -516,11 +516,11 @@ class ContentAnalyzer:
                 pattern = re.compile(escaped, re.IGNORECASE)
             else:
                 pattern = re.compile(rf'\b{escaped}\b', re.IGNORECASE)
-                masked = pattern.sub('___', masked)
+            masked = pattern.sub('___', masked)
 
         def replace_profane_word(match: re.Match) -> str:
             word = match.group(0)
-                return '___' if profanity.contains_profanity(word) else word
+            return '___' if profanity.contains_profanity(word) else word
 
         masked = re.sub(r"[A-Za-z']+", replace_profane_word, masked)
         return masked

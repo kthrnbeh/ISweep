@@ -658,6 +658,40 @@ class TestAPI:
         assert data['events'] == []
         assert data['failure_reason'] == 'stt_disabled'
 
+    def test_captions_transcribe_disabled_returns_safe_response(self, client):
+        token, _ = signup_and_get_token(client, email='captions-transcribe-disabled@example.com')
+
+        class AnalyzerStub:
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id):
+                return {
+                    'status': 'unavailable',
+                    'source': 'audio_chunk',
+                    'events': [],
+                    'cleaned_captions': [],
+                    'failure_reason': 'stt_disabled',
+                }
+
+        client.application.analyzer = AnalyzerStub()
+        response = client.post(
+            '/captions/transcribe',
+            json={
+                'video_id': 'captions-vid-1',
+                'audio_chunk': 'ZmFrZQ==',
+                'mime_type': 'audio/wav',
+                'chunk_start_seconds': 1.0,
+                'chunk_end_seconds': 2.0,
+            },
+            headers=auth_headers(token),
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['text'] == ''
+        assert data['source'] == 'audio_stt_disabled'
+        assert data['confidence'] == 0.0
+        assert data['reason'] == 'Speech-to-text is not enabled'
+        assert data['failure_reason'] == 'stt_disabled'
+
     def test_audio_analyze_uses_chunk_cache_on_second_call(self, client):
         token, _ = signup_and_get_token(client, email='audio-cache@example.com')
 

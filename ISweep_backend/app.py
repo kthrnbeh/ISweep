@@ -87,6 +87,24 @@ def build_preferences_fingerprint(preferences: dict, stt_mode: dict | None = Non
         'stt_mode': stt_mode or {'enabled': False, 'model': None},
     }, sort_keys=True, separators=(',', ':'))
     return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+    
+def _extract_transcribe_text(result: dict) -> str:
+    """Choose the cleanest caption text available for the owned caption overlay."""
+    if not isinstance(result, dict):
+        return ''
+    for key in ('clean_text', 'cleaned_text', 'caption_text', 'text'):
+        value = result.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    cleaned_captions = result.get('cleaned_captions') if isinstance(result.get('cleaned_captions'), list) else []
+    for entry in cleaned_captions:
+        if not isinstance(entry, dict):
+            continue
+        for key in ('clean_text', 'cleaned_text', 'caption_text', 'text'):
+            value = entry.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return ''
 
 
 def as_bool(value) -> bool:
@@ -681,6 +699,82 @@ def analyze_audio_chunk_live():
         'source': result.get('source', 'audio'),
         'failure_reason': result.get('failure_reason'),
     }), 200
+
+
+@app.route('/captions/transcribe', methods=['POST'])
+@require_auth
+def transcribe_caption_audio():
+    """Owned caption STT endpoint for the extension overlay.
+
+    This route stays safe when STT is disabled: it returns a disabled/unavailable
+    response instead of requiring faster-whisper to be installed.
+    """
+    data = request.get_json() or {}
+    audio_chunk = str(data.get('audio_chunk') or data.get('audio_base64') or data.get('audio_b64') or '').strip()
+    mime_type = str(data.get('mime_type') or 'audio/wav').strip()
+    video_id = str(data.get('video_id') or '').strip()
+
+    try:
+        start_seconds = float(
+            data.get('chunk_start_seconds')
+            or data.get('start_seconds')
+            or data.get('start_time')
+            or data.get('chunk_offset_seconds')
+            or 0
+        )
+    except (TypeError, ValueError):
+        start_seconds = 0.0
+
+    try:
+        end_seconds = float(data.get('chunk_end_seconds') or data.get('end_seconds') or start_seconds)
+    except (TypeError, ValueError):
+        end_seconds = start_seconds
+
+    if end_seconds < start_seconds:
+        end_seconds = start_seconds
+
+    if not audio_chunk:
+        return jsonify({'error': 'audio_chunk is required'}), 400
+
+    db = get_db()
+    preferences = db.get_user_preferences(request.user_id) or {}
+    analyzer = get_analyzer()
+    result = analyzer.analyze_audio_chunk(
+        audio_chunk,
+        mime_type,
+        start_seconds,
+        end_seconds,
+        preferences,
+        video_id,
+    )
+
+    text = _extract_transcribe_text(result)
+    failure_reason = result.get('failure_reason')
+    disabled_reasons = {'stt_disabled', 'stt_unavailable', 'transcription_unavailable', 'audio_pipeline_disabled'}
+    source = result.get('source') or 'audio_stt'
+    if failure_reason in disabled_reasons:
+        source = 'audio_stt_disabled'
+    elif text:
+        source = 'audio_stt'
+
+    response = {
+        'text': text,
+        'source': source,
+        'confidence': 0.0,
+        'status': result.get('status', 'error'),
+        'reason': 'Speech-to-text is not enabled' if source == 'audio_stt_disabled' else (failure_reason or ''),
+        'failure_reason': failure_reason,
+        'events': result.get('events', []),
+        'cleaned_captions': result.get('cleaned_captions', []),
+        'clean_captions': result.get('cleaned_captions', []),
+        'clean_text': result.get('clean_text') or text,
+        'cleaned_text': result.get('cleaned_text') or result.get('clean_text') or text,
+        'words': result.get('words', []),
+        'start_seconds': start_seconds,
+        'end_seconds': end_seconds,
+        'cached': False,
+    }
+    return jsonify(response), 200
 
 
 @app.errorhandler(404)
