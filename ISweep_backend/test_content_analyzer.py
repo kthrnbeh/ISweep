@@ -199,7 +199,7 @@ class TestContentAnalyzer:
         assert len(cleaned) == 1
         assert 'heck' not in cleaned[0]['clean_text'].lower()
         assert 'shit' not in cleaned[0]['clean_text'].lower()
-            assert cleaned[0]['clean_text'].count('___') >= 2
+        assert cleaned[0]['clean_text'].count('___') >= 2
         assert len(cleaned[0]['words']) == 8
         assert cleaned[0]['words'][0]['word'] == 'What'
         assert cleaned[0]['words'][0]['start'] == pytest.approx(12.3)
