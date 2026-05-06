@@ -199,7 +199,7 @@ class TestContentAnalyzer:
         assert len(cleaned) == 1
         assert 'heck' not in cleaned[0]['clean_text'].lower()
         assert 'shit' not in cleaned[0]['clean_text'].lower()
-        assert cleaned[0]['clean_text'].count('____') >= 2
+            assert cleaned[0]['clean_text'].count('___') >= 2
         assert len(cleaned[0]['words']) == 8
         assert cleaned[0]['words'][0]['word'] == 'What'
         assert cleaned[0]['words'][0]['start'] == pytest.approx(12.3)
@@ -280,7 +280,7 @@ class TestContentAnalyzer:
         assert len(result['events']) == 1
         assert result['cleaned_captions'] == result['clean_captions']
         assert result['cleaned_captions'][0]['text'] == 'What the heck'
-        assert result['cleaned_captions'][0]['clean_text'] == 'What the ____'
+        assert result['cleaned_captions'][0]['clean_text'] == 'What the ___'
         assert len(result['cleaned_captions'][0]['words']) == 3
         assert 'clean_resume_time' not in result['cleaned_captions'][0]
         assert result['events'][0]['start_seconds'] == pytest.approx(7.5)
