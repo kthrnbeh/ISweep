@@ -22,6 +22,10 @@ import math
 import os
 import secrets
 import base64
+import wave
+from io import BytesIO
+import numpy as np
+from typing import cast
 from datetime import datetime, timedelta
 from functools import wraps
 from dotenv import load_dotenv
@@ -116,6 +120,37 @@ def as_bool(value) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {'1', 'true', 'yes', 'on'}
     return False
+
+
+def _float_audio_payload_to_base64_wav(sample_rate: int, channels: int, samples) -> str:
+    """Convert Float32 sample arrays into base64 WAV so existing analyzer path can reuse decode/transcribe logic."""
+    if not isinstance(samples, list) or not samples:
+        raise ValueError('audio sample array is required')
+
+    rate = int(sample_rate) if isinstance(sample_rate, (int, float)) else 16000
+    if rate <= 0:
+        rate = 16000
+
+    ch = int(channels) if isinstance(channels, (int, float)) else 1
+    if ch <= 0:
+        ch = 1
+
+    audio = np.asarray(samples, dtype=np.float32)
+    if audio.ndim != 1:
+        audio = audio.reshape(-1)
+    if audio.size == 0:
+        raise ValueError('audio sample array is empty')
+
+    pcm = np.clip(audio, -1.0, 1.0)
+    pcm16 = (pcm * 32767.0).astype(np.int16)
+
+    with BytesIO() as wav_buffer:
+        with cast(wave.Wave_write, wave.open(wav_buffer, 'wb')) as wav_file:
+            wav_file.setnchannels(ch)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(rate)
+            wav_file.writeframes(pcm16.tobytes())
+        return base64.b64encode(wav_buffer.getvalue()).decode('ascii')
 
 
 def issue_token(user_id: int) -> str:
@@ -715,6 +750,9 @@ def transcribe_caption_audio():
     """
     data = request.get_json() or {}
     audio_chunk = str(data.get('audio_chunk') or data.get('audio_base64') or data.get('audio_b64') or '').strip()
+    sample_rate = data.get('sampleRate') if data.get('sampleRate') is not None else data.get('sample_rate')
+    channels = data.get('channels')
+    float_samples = data.get('audio')
     mime_type = str(data.get('mime_type') or 'audio/wav').strip()
     video_id = str(data.get('video_id') or '').strip()
 
@@ -737,6 +775,13 @@ def transcribe_caption_audio():
     if end_seconds < start_seconds:
         end_seconds = start_seconds
 
+    if not audio_chunk and isinstance(float_samples, list):
+        try:
+            audio_chunk = _float_audio_payload_to_base64_wav(sample_rate or 16000, channels or 1, float_samples)
+            mime_type = 'audio/wav'
+        except Exception:
+            return jsonify({'error': 'invalid audio sample payload'}), 400
+
     if not audio_chunk:
         return jsonify({'error': 'audio_chunk is required'}), 400
 
@@ -754,19 +799,26 @@ def transcribe_caption_audio():
 
     text = _extract_transcribe_text(result)
     failure_reason = result.get('failure_reason')
-    disabled_reasons = {'stt_disabled', 'stt_unavailable', 'transcription_unavailable', 'audio_pipeline_disabled'}
+    disabled_reasons = {'stt_disabled', 'audio_pipeline_disabled'}
+    unavailable_reasons = {'stt_unavailable', 'transcription_unavailable'}
     source = result.get('source') or 'audio_stt'
     if failure_reason in disabled_reasons:
         source = 'audio_stt_disabled'
+    elif failure_reason in unavailable_reasons:
+        source = 'audio_stt_unavailable'
     elif text:
         source = 'audio_stt'
 
     response = {
         'text': text,
         'source': source,
-        'confidence': 0.0,
+        'confidence': float(result.get('confidence') or 0.0),
         'status': result.get('status', 'error'),
-        'reason': 'Speech-to-text is not enabled' if source == 'audio_stt_disabled' else (failure_reason or ''),
+        'reason': (
+            'Speech-to-text is not enabled'
+            if source == 'audio_stt_disabled'
+            else ('Speech-to-text is unavailable' if source == 'audio_stt_unavailable' else (failure_reason or ''))
+        ),
         'failure_reason': failure_reason,
         'events': result.get('events', []),
         'cleaned_captions': result.get('cleaned_captions', []),

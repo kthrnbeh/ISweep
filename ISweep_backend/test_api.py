@@ -693,6 +693,81 @@ class TestAPI:
         assert data['reason'] == 'Speech-to-text is not enabled'
         assert data['failure_reason'] == 'stt_disabled'
 
+    def test_captions_transcribe_unavailable_returns_unavailable_source(self, client):
+        token, _ = signup_and_get_token(client, email='captions-transcribe-unavailable@example.com')
+
+        class AnalyzerStub:
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id):
+                return {
+                    'status': 'error',
+                    'source': 'audio_chunk',
+                    'events': [],
+                    'cleaned_captions': [],
+                    'failure_reason': 'stt_unavailable',
+                }
+
+        client.application.analyzer = AnalyzerStub()
+        response = client.post(
+            '/captions/transcribe',
+            json={
+                'video_id': 'captions-vid-2',
+                'audio_chunk': 'ZmFrZQ==',
+                'mime_type': 'audio/wav',
+                'chunk_start_seconds': 5.0,
+                'chunk_end_seconds': 6.0,
+            },
+            headers=auth_headers(token),
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['source'] == 'audio_stt_unavailable'
+        assert data['reason'] == 'Speech-to-text is unavailable'
+        assert data['failure_reason'] == 'stt_unavailable'
+
+    def test_captions_transcribe_accepts_float_audio_payload(self, client):
+        token, _ = signup_and_get_token(client, email='captions-transcribe-float-audio@example.com')
+
+        class AnalyzerStub:
+            def __init__(self):
+                self.last_chunk = None
+                self.last_mime = None
+
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id):
+                self.last_chunk = audio_chunk
+                self.last_mime = mime_type
+                return {
+                    'status': 'ready',
+                    'source': 'audio_stt',
+                    'events': [],
+                    'cleaned_captions': [],
+                    'text': 'hello world',
+                    'failure_reason': None,
+                }
+
+        stub = AnalyzerStub()
+        client.application.analyzer = stub
+        response = client.post(
+            '/captions/transcribe',
+            json={
+                'video_id': 'captions-vid-3',
+                'sampleRate': 16000,
+                'channels': 1,
+                'audio': [0.0, 0.1, -0.1, 0.2, -0.2],
+                'chunk_start_seconds': 2.0,
+                'chunk_end_seconds': 2.2,
+            },
+            headers=auth_headers(token),
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['source'] == 'audio_stt'
+        assert data['text'] == 'hello world'
+        assert isinstance(stub.last_chunk, str)
+        assert len(stub.last_chunk) > 0
+        assert stub.last_mime == 'audio/wav'
+
     def test_audio_analyze_uses_chunk_cache_on_second_call(self, client):
         token, _ = signup_and_get_token(client, email='audio-cache@example.com')
 
