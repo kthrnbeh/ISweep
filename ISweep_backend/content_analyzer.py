@@ -565,6 +565,7 @@ class ContentAnalyzer:
         clean_resume_time = None
         first_blocked_word_start = None
         first_blocked_word_source = None
+        last_blocked_word_end = None
         blocked_seen = False
         for index, is_filtered in enumerate(filtered_flags):
             if is_filtered:
@@ -572,6 +573,7 @@ class ContentAnalyzer:
                 if first_blocked_word_start is None:
                     first_blocked_word_start = words[index]['start']
                     first_blocked_word_source = str(words[index].get('source') or '')
+                last_blocked_word_end = words[index]['end']
                 continue
             if blocked_seen:
                 clean_resume_time = words[index]['start']
@@ -590,6 +592,8 @@ class ContentAnalyzer:
             entry['_first_blocked_word_start'] = round(first_blocked_word_start, 3)
             if first_blocked_word_source:
                 entry['_first_blocked_word_source'] = first_blocked_word_source
+        if last_blocked_word_end is not None:
+            entry['_last_blocked_word_end'] = round(last_blocked_word_end, 3)
         return entry
 
     def build_cleaned_captions(self, transcript_segments: List[Dict], preferences: Dict) -> List[Dict]:
@@ -601,6 +605,7 @@ class ContentAnalyzer:
                 continue
             entry.pop('_first_blocked_word_start', None)
             entry.pop('_first_blocked_word_source', None)
+            entry.pop('_last_blocked_word_end', None)
             cleaned_captions.append(entry)
 
         return cleaned_captions
@@ -785,6 +790,21 @@ class ContentAnalyzer:
             ):
                 previous['end_seconds'] = max(previous['end_seconds'], current['end_seconds'])
                 previous['duration_seconds'] = round(previous['end_seconds'] - previous['start_seconds'], 3)
+                if current.get('blocked_word_start') is not None:
+                    if previous.get('blocked_word_start') is None:
+                        previous['blocked_word_start'] = current['blocked_word_start']
+                    else:
+                        previous['blocked_word_start'] = min(previous['blocked_word_start'], current['blocked_word_start'])
+                if current.get('blocked_word_end') is not None:
+                    if previous.get('blocked_word_end') is None:
+                        previous['blocked_word_end'] = current['blocked_word_end']
+                    else:
+                        previous['blocked_word_end'] = max(previous['blocked_word_end'], current['blocked_word_end'])
+                if current.get('clean_resume_time') is not None:
+                    if previous.get('clean_resume_time') is None:
+                        previous['clean_resume_time'] = current['clean_resume_time']
+                    else:
+                        previous['clean_resume_time'] = max(previous['clean_resume_time'], current['clean_resume_time'])
                 continue
 
             # Conflicting overlap: trim current start to keep non-overlapping markers.
@@ -830,6 +850,7 @@ class ContentAnalyzer:
             clean_entry = dict(entry)
             clean_entry.pop('_first_blocked_word_start', None)
             clean_entry.pop('_first_blocked_word_source', None)
+            clean_entry.pop('_last_blocked_word_end', None)
             cleaned_captions.append(clean_entry)
         print(f'[ISWEEP][CLEAN_CC] cleaned captions generated video_id={video_id!r}')
         print(f'[ISWEEP][CLEAN_CC] cleaned caption count={len(cleaned_captions)} video_id={video_id!r}')
@@ -868,6 +889,8 @@ class ContentAnalyzer:
                 event['clean_resume_time'] = round(float(cleaned_entry.get('clean_resume_time')), 3)
             if action == 'mute' and cleaned_entry and cleaned_entry.get('_first_blocked_word_start') is not None:
                 event['blocked_word_start'] = round(float(cleaned_entry.get('_first_blocked_word_start')), 3)
+            if action == 'mute' and cleaned_entry and cleaned_entry.get('_last_blocked_word_end') is not None:
+                event['blocked_word_end'] = round(float(cleaned_entry.get('_last_blocked_word_end')), 3)
             events.append(event)
 
         merged_events = self._merge_marker_events(events)
@@ -1081,14 +1104,17 @@ class ContentAnalyzer:
             category = decision.get('matched_category') or 'language'
 
             if action == 'mute':
-                if (
-                    cleaned_entry
-                    and cleaned_entry.get('_first_blocked_word_start') is not None
-                    and str(cleaned_entry.get('_first_blocked_word_source') or '') == 'whisper'
-                ):
-                    adj_start = round(float(cleaned_entry.get('_first_blocked_word_start')), 3)
+                if cleaned_entry and cleaned_entry.get('_first_blocked_word_start') is not None:
+                    adj_start = max(
+                        round(float(cleaned_entry.get('_first_blocked_word_start')) - AUDIO_MUTE_PREROLL_SEC, 3),
+                        0.0,
+                    )
                 else:
                     adj_start = max(round(abs_start - AUDIO_MUTE_PREROLL_SEC, 3), 0.0)
+
+                if cleaned_entry and cleaned_entry.get('_last_blocked_word_end') is not None:
+                    abs_end = max(abs_end, round(float(cleaned_entry.get('_last_blocked_word_end')), 3))
+                    effective_duration = max(abs_end - adj_start, 0.0)
 
                 if cleaned_entry and cleaned_entry.get('clean_resume_time') is not None:
                     resume = round(float(cleaned_entry.get('clean_resume_time')), 3)
@@ -1127,6 +1153,8 @@ class ContentAnalyzer:
             })
             if action == 'mute' and cleaned_entry and cleaned_entry.get('_first_blocked_word_start') is not None:
                 events[-1]['blocked_word_start'] = round(float(cleaned_entry.get('_first_blocked_word_start')), 3)
+            if action == 'mute' and cleaned_entry and cleaned_entry.get('_last_blocked_word_end') is not None:
+                events[-1]['blocked_word_end'] = round(float(cleaned_entry.get('_last_blocked_word_end')), 3)
             if action == 'mute' and cleaned_entry and cleaned_entry.get('clean_resume_time') is not None:
                 events[-1]['clean_resume_time'] = round(float(cleaned_entry.get('clean_resume_time')), 3)
 
@@ -1317,14 +1345,17 @@ class ContentAnalyzer:
         category = decision.get('matched_category') or 'language'
 
         if action == 'mute':
-            if (
-                cleaned_entry
-                and cleaned_entry.get('_first_blocked_word_start') is not None
-                and str(cleaned_entry.get('_first_blocked_word_source') or '') == 'whisper'
-            ):
-                adj_start = round(float(cleaned_entry['_first_blocked_word_start']), 3)
+            if cleaned_entry and cleaned_entry.get('_first_blocked_word_start') is not None:
+                adj_start = max(
+                    round(float(cleaned_entry['_first_blocked_word_start']) - AUDIO_MUTE_PREROLL_SEC, 3),
+                    0.0,
+                )
             else:
                 adj_start = max(round(abs_start - AUDIO_MUTE_PREROLL_SEC, 3), 0.0)
+
+            if cleaned_entry and cleaned_entry.get('_last_blocked_word_end') is not None:
+                marker_end = max(marker_end, round(float(cleaned_entry['_last_blocked_word_end']), 3))
+                effective_duration = max(marker_end - adj_start, 0.0)
 
             if cleaned_entry and cleaned_entry.get('clean_resume_time') is not None:
                 resume = round(float(cleaned_entry['clean_resume_time']), 3)
@@ -1348,6 +1379,8 @@ class ContentAnalyzer:
         if action == 'mute' and cleaned_entry:
             if cleaned_entry.get('_first_blocked_word_start') is not None:
                 marker['blocked_word_start'] = round(float(cleaned_entry['_first_blocked_word_start']), 3)
+            if cleaned_entry.get('_last_blocked_word_end') is not None:
+                marker['blocked_word_end'] = round(float(cleaned_entry['_last_blocked_word_end']), 3)
             if cleaned_entry.get('clean_resume_time') is not None:
                 marker['clean_resume_time'] = round(float(cleaned_entry['clean_resume_time']), 3)
 

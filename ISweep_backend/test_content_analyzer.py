@@ -500,8 +500,9 @@ class TestContentAnalyzer:
         marker = result['events'][0]
         assert marker['action'] == 'mute'
         assert marker['blocked_word_start'] == pytest.approx(12.62)
+        assert marker['blocked_word_end'] == pytest.approx(12.91)
         assert marker['clean_resume_time'] == pytest.approx(12.95)
-        assert marker['start_seconds'] == pytest.approx(12.62)
+        assert marker['start_seconds'] == pytest.approx(12.52)
         assert marker['end_seconds'] == pytest.approx(12.95)
         assert len(result['cleaned_captions']) == 1
         assert result['cleaned_captions'][0]['words'][1]['source'] == 'whisper'
@@ -757,11 +758,29 @@ class TestContentAnalyzer:
         assert marker['source'] == 'audio_stt'
         assert 'start_seconds' in marker
         assert 'end_seconds' in marker
-        # whisper source: start_seconds == blocked_word_start (exact word start;
-        # the scheduler applies the PROFANITY_MARKER_FIRE_EARLY_SEC lead in the extension)
-        assert marker['start_seconds'] == pytest.approx(10.5)
+        assert marker['start_seconds'] == pytest.approx(10.4)
         assert marker['blocked_word_start'] == pytest.approx(10.5)
+        assert marker['blocked_word_end'] == pytest.approx(10.7)
         assert marker['clean_resume_time'] == pytest.approx(10.9)
+
+    def test_analyze_transcribed_words_merges_adjacent_blocked_words_until_clean_resume(self, analyzer, audio_language_preferences):
+        """Adjacent blocked words share one mute window that ends at the first clean word."""
+        words = [
+            {'word': 'hello', 'start': 10.0, 'end': 10.2, 'source': 'whisper'},
+            {'word': 'fuck', 'start': 10.5, 'end': 10.7, 'source': 'whisper'},
+            {'word': 'shit', 'start': 10.71, 'end': 10.95, 'source': 'whisper'},
+            {'word': 'world', 'start': 11.0, 'end': 11.2, 'source': 'whisper'},
+        ]
+
+        markers = analyzer.analyze_transcribed_words(words, audio_language_preferences, video_id='adjacent-vid')
+
+        assert len(markers) == 1
+        marker = markers[0]
+        assert marker['start_seconds'] == pytest.approx(10.4)
+        assert marker['blocked_word_start'] == pytest.approx(10.5)
+        assert marker['blocked_word_end'] == pytest.approx(10.95)
+        assert marker['clean_resume_time'] == pytest.approx(11.0)
+        assert marker['end_seconds'] == pytest.approx(11.0)
 
     def test_analyze_transcribed_words_clean_returns_empty(self, analyzer, audio_language_preferences):
         """analyze_transcribed_words returns an empty list when no words are blocked."""
@@ -807,8 +826,9 @@ class TestContentAnalyzer:
         marker = result['events'][0]
         assert marker['source'] == 'audio'
         assert marker['blocked_word_start'] == pytest.approx(100.35)
+        assert marker['blocked_word_end'] == pytest.approx(100.52)
         assert marker['clean_resume_time'] == pytest.approx(100.55)
-        assert marker['start_seconds'] == pytest.approx(100.35)
+        assert marker['start_seconds'] == pytest.approx(100.25)
         assert marker['end_seconds'] == pytest.approx(100.55)
 
     def test_analyze_audio_chunk_bytes_stt_disabled_returns_safe_empty(self, monkeypatch, audio_language_preferences):
