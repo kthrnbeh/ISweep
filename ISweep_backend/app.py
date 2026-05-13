@@ -775,6 +775,13 @@ def transcribe_caption_audio():
     if end_seconds < start_seconds:
         end_seconds = start_seconds
 
+    print('[ISWEEP][CAPTIONS_TRANSCRIBE] request received', {
+        'video_id': video_id,
+        'start_seconds': start_seconds,
+        'end_seconds': end_seconds,
+        'mime_type': mime_type,
+    })
+
     if not audio_chunk and isinstance(float_samples, list):
         try:
             audio_chunk = _float_audio_payload_to_base64_wav(sample_rate or 16000, channels or 1, float_samples)
@@ -799,9 +806,12 @@ def transcribe_caption_audio():
 
     text = _extract_transcribe_text(result)
     failure_reason = result.get('failure_reason')
+    if not text and not failure_reason:
+        source = 'silence'
+    else:
+        source = result.get('source') or 'audio_stt'
     disabled_reasons = {'stt_disabled', 'audio_pipeline_disabled'}
     unavailable_reasons = {'stt_unavailable', 'transcription_unavailable'}
-    source = result.get('source') or 'audio_stt'
     if failure_reason in disabled_reasons:
         source = 'audio_stt_disabled'
     elif failure_reason in unavailable_reasons:
@@ -830,6 +840,24 @@ def transcribe_caption_audio():
         'end_seconds': end_seconds,
         'cached': False,
     }
+    try:
+        audio_debug = audio_chunk.split(',', 1)[1] if ',' in audio_chunk else audio_chunk
+        audio_bytes = base64.b64decode(audio_debug, validate=False)
+        print('[ISWEEP][CAPTIONS_TRANSCRIBE] audio bytes received', {
+            'video_id': video_id,
+            'bytes': len(audio_bytes),
+        })
+    except Exception:
+        print('[ISWEEP][CAPTIONS_TRANSCRIBE] audio bytes received', {
+            'video_id': video_id,
+            'bytes': 0,
+        })
+    print('[ISWEEP][CAPTIONS_TRANSCRIBE] text returned', {
+        'video_id': video_id,
+        'source': response['source'],
+        'text': response['text'],
+        'confidence': response['confidence'],
+    })
     return jsonify(response), 200
 
 

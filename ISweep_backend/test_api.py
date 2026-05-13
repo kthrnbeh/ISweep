@@ -725,6 +725,40 @@ class TestAPI:
         assert data['reason'] == 'Speech-to-text is unavailable'
         assert data['failure_reason'] == 'stt_unavailable'
 
+    def test_captions_transcribe_empty_text_returns_silence_source(self, client):
+        token, _ = signup_and_get_token(client, email='captions-transcribe-silence@example.com')
+
+        class AnalyzerStub:
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id):
+                return {
+                    'status': 'ready',
+                    'source': 'audio_stt',
+                    'events': [],
+                    'cleaned_captions': [],
+                    'text': '',
+                    'clean_text': '',
+                    'failure_reason': None,
+                }
+
+        client.application.analyzer = AnalyzerStub()
+        response = client.post(
+            '/captions/transcribe',
+            json={
+                'video_id': 'captions-vid-silence',
+                'audio_chunk': 'ZmFrZQ==',
+                'mime_type': 'audio/wav',
+                'chunk_start_seconds': 7.0,
+                'chunk_end_seconds': 8.0,
+            },
+            headers=auth_headers(token),
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['text'] == ''
+        assert data['source'] == 'silence'
+        assert data['confidence'] == 0.0
+
     def test_captions_transcribe_accepts_float_audio_payload(self, client):
         token, _ = signup_and_get_token(client, email='captions-transcribe-float-audio@example.com')
 
