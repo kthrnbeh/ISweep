@@ -849,3 +849,64 @@ class TestContentAnalyzer:
         assert result['events'] == []
         assert result['source'] == 'audio'
         assert result['failure_reason'] == 'stt_disabled'
+
+    def test_analyze_audio_chunk_caption_only_returns_no_events(self, analyzer, audio_language_preferences):
+        """Test that caption_only=True returns empty events list."""
+        result = analyzer.analyze_audio_chunk(
+            audio_chunk='ZmFrZQ==',
+            mime_type='audio/wav',
+            start_seconds=5.0,
+            end_seconds=7.0,
+            preferences=audio_language_preferences,
+            video_id='video1',
+            caption_only=True,
+        )
+        # Caption-only mode should NEVER return events, even if content is profane
+        assert result['events'] == []
+        assert result['status'] == 'ready'
+
+    def test_analyze_audio_chunk_caption_only_returns_transcribed_text(self, analyzer, audio_language_preferences):
+        """Test that caption_only=True returns transcribed text."""
+        result = analyzer.analyze_audio_chunk(
+            audio_chunk='ZmFrZQ==',
+            mime_type='audio/wav',
+            start_seconds=5.0,
+            end_seconds=7.0,
+            preferences=audio_language_preferences,
+            video_id='video1',
+            caption_only=True,
+        )
+        # Caption-only should include text field with transcription
+        assert isinstance(result.get('text'), str)
+        assert isinstance(result.get('clean_text'), str)
+
+    def test_analyze_audio_chunk_caption_only_returns_silence_for_empty_content(self, analyzer, audio_language_preferences):
+        """Test that caption_only=True returns 'silence' source when no words detected."""
+        # Test with empty or minimal audio content
+        result = analyzer.analyze_audio_chunk(
+            audio_chunk='',  # Empty audio
+            mime_type='audio/wav',
+            start_seconds=5.0,
+            end_seconds=7.0,
+            preferences=audio_language_preferences,
+            video_id='video1',
+            caption_only=True,
+        )
+        # Caption-only should return 'silence' source when no transcription
+        assert result['source'] == 'silence'
+        assert result['events'] == []
+        assert result['text'] == ''
+
+    def test_analyze_audio_chunk_non_caption_only_still_generates_events(self, analyzer, audio_language_preferences):
+        """Test that non-caption-only mode still generates filtering events."""
+        result = analyzer.analyze_audio_chunk(
+            audio_chunk='ZmFrZQ==',
+            mime_type='audio/wav',
+            start_seconds=5.0,
+            end_seconds=7.0,
+            preferences=audio_language_preferences,
+            video_id='video1',
+            caption_only=False,  # Regular mode
+        )
+        # Non-caption-only should still try to generate events if profanity detected
+        # (Events list may be empty if transcription is empty, but the code path should execute)

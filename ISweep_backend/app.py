@@ -802,6 +802,7 @@ def transcribe_caption_audio():
         end_seconds,
         preferences,
         video_id,
+        caption_only=True,  # Caption-only mode: no event generation or filtering
     )
 
     text = _extract_transcribe_text(result)

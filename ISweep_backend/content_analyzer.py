@@ -920,6 +920,7 @@ class ContentAnalyzer:
         end_seconds: float,
         preferences: Dict,
         video_id: str = '',
+        caption_only: bool = False,
     ) -> Dict:
         """Transcribe an audio chunk and return time-offset marker events.
 
@@ -931,6 +932,7 @@ class ContentAnalyzer:
         end_seconds : absolute video time when this chunk ended
         preferences : user filter preferences
         video_id : YouTube video ID used for stable marker IDs
+        caption_only : bool - when True, skip filtering and return transcription only
         """
         if not audio_chunk:
             return {
@@ -1016,6 +1018,20 @@ class ContentAnalyzer:
                 'word_timings': whisper_words,
             }]
             source_name = 'audio_stt'
+        elif caption_only:
+            # Caption-only mode: no fallback to Phase1 adapter, return silence when Whisper finds nothing
+            return {
+                'status': 'ready',
+                'source': 'silence',
+                'events': [],
+                'cleaned_captions': [],
+                'clean_captions': [],
+                'failure_reason': None,
+                'words': [],
+                'text': '',
+                'clean_text': '',
+                'cleaned_text': '',
+            }
         else:
             try:
                 segments = self.audio_transcription_adapter.transcribe(
@@ -1081,6 +1097,26 @@ class ContentAnalyzer:
             clean_entry = dict(entry)
             clean_entry.pop('_first_blocked_word_start', None)
             cleaned_captions.append(clean_entry)
+
+        # Caption-only mode: skip all event generation for muting/filtering
+        if caption_only:
+            transcription_text = ' '.join(
+                str(segment.get('text') or '').strip()
+                for segment in absolute_segments
+                if str(segment.get('text') or '').strip()
+            )
+            return {
+                'status': 'ready',
+                'source': source_name,
+                'events': [],
+                'cleaned_captions': [],
+                'clean_captions': [],
+                'failure_reason': None,
+                'words': [],
+                'text': transcription_text,
+                'clean_text': transcription_text,
+                'cleaned_text': transcription_text,
+            }
 
         events: List[Dict] = []
         for index, segment in enumerate(absolute_segments):

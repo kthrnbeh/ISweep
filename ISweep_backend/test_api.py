@@ -976,3 +976,68 @@ class TestAPI:
         assert second_data['status'] == 'error'
         assert second_data['cached'] is False
         assert stub.calls == 2
+
+
+def test_captions_transcribe_never_returns_events(client, token):
+    """Test that /captions/transcribe always returns events array as empty."""
+    response = client.post(
+        '/captions/transcribe',
+        json={
+            'video_id': 'test-video',
+            'audio_chunk': 'ZmFrZQ==',
+            'mime_type': 'audio/wav',
+            'start_seconds': 10.0,
+            'end_seconds': 12.0,
+        },
+        headers=auth_headers(token),
+    )
+    assert response.status_code == 200
+    data = json.loads(response.data)
+    # CRITICAL: /captions/transcribe must NEVER return events
+    assert 'events' in data
+    assert isinstance(data['events'], list)
+    assert len(data['events']) == 0
+
+
+def test_captions_transcribe_returns_caption_text(client, token):
+    """Test that /captions/transcribe returns caption text."""
+    response = client.post(
+        '/captions/transcribe',
+        json={
+            'video_id': 'test-video',
+            'audio_chunk': 'ZmFrZQ==',
+            'mime_type': 'audio/wav',
+            'start_seconds': 10.0,
+            'end_seconds': 12.0,
+        },
+        headers=auth_headers(token),
+    )
+    assert response.status_code == 200
+    data = json.loads(response.data)
+    # Should have text fields
+    assert 'text' in data or 'clean_text' in data or 'cleaned_text' in data
+    assert 'status' in data
+
+
+def test_captions_transcribe_returns_no_mute_or_filtering_events(client, token):
+    """Test that /captions/transcribe does not create mute/skip/fast_forward events even for bad content."""
+    # This test ensures caption-only mode never triggers filtering
+    response = client.post(
+        '/captions/transcribe',
+        json={
+            'video_id': 'test-video-profanity',
+            'audio_chunk': 'ZmFrZQ==',  # Fake audio
+            'mime_type': 'audio/wav',
+            'start_seconds': 0.0,
+            'end_seconds': 2.0,
+        },
+        headers=auth_headers(token),
+    )
+    assert response.status_code == 200
+    data = json.loads(response.data)
+    # Verify no filtering events
+    assert 'events' in data
+    assert isinstance(data['events'], list)
+    for event in data['events']:
+        # Should never have mute/skip/fast_forward actions
+        assert event.get('action') not in ['mute', 'skip', 'fast_forward']
