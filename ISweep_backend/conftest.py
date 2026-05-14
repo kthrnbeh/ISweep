@@ -43,6 +43,16 @@ def client(app):
 
 
 @pytest.fixture
+def token(client):
+    """Create a test user and return authentication token."""
+    import json  # JSON parsing for response
+    response = client.post('/auth/signup', json={'email': 'test@example.com', 'password': 'password123'})  # Create test user
+    assert response.status_code in (200, 201)  # Verify signup succeeded
+    data = json.loads(response.data)  # Parse response
+    return data['token']  # Return token for auth headers
+
+
+@pytest.fixture
 def database():
     """Create a test database."""
     from database import Database  # Import Database within fixture to limit scope

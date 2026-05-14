@@ -935,6 +935,19 @@ class ContentAnalyzer:
         caption_only : bool - when True, skip filtering and return transcription only
         """
         if not audio_chunk:
+            # Caption-only mode: return silence instead of error when audio_chunk is empty
+            if caption_only:
+                return {
+                    'status': 'ready',
+                    'source': 'silence',
+                    'events': [],
+                    'cleaned_captions': [],
+                    'failure_reason': None,
+                    'words': [],
+                    'text': '',
+                    'clean_text': '',
+                    'cleaned_text': '',
+                }
             return {
                 'status': 'error',
                 'source': 'audio_chunk',
@@ -956,6 +969,19 @@ class ContentAnalyzer:
             print("[ISWEEP][AUDIO_DEBUG] received audio bytes:", len(decoded_audio))
         except RuntimeError as err:
             print("[ISWEEP][AUDIO_DEBUG] Audio decode failed:", str(err))
+            # Caption-only mode: return silence instead of error when audio decode fails
+            if caption_only:
+                return {
+                    'status': 'ready',
+                    'source': 'silence',
+                    'events': [],
+                    'cleaned_captions': [],
+                    'failure_reason': None,
+                    'words': [],
+                    'text': '',
+                    'clean_text': '',
+                    'cleaned_text': '',
+                }
             return {
                 'status': 'error',
                 'source': 'audio_chunk',

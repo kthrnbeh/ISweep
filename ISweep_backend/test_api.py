@@ -519,7 +519,7 @@ class TestAPI:
         token, _ = signup_and_get_token(client, email='audio-ready@example.com')
 
         class AnalyzerStub:
-            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id):
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id, caption_only=False):
                 return {
                     'status': 'ready',
                     'source': 'audio_stt',
@@ -663,7 +663,7 @@ class TestAPI:
         token, _ = signup_and_get_token(client, email='captions-transcribe-disabled@example.com')
 
         class AnalyzerStub:
-            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id):
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id, caption_only=False):
                 return {
                     'status': 'unavailable',
                     'source': 'audio_chunk',
@@ -697,7 +697,7 @@ class TestAPI:
         token, _ = signup_and_get_token(client, email='captions-transcribe-unavailable@example.com')
 
         class AnalyzerStub:
-            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id):
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id, caption_only=False):
                 return {
                     'status': 'error',
                     'source': 'audio_chunk',
@@ -729,7 +729,7 @@ class TestAPI:
         token, _ = signup_and_get_token(client, email='captions-transcribe-silence@example.com')
 
         class AnalyzerStub:
-            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id):
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id, caption_only=False):
                 return {
                     'status': 'ready',
                     'source': 'audio_stt',
@@ -767,7 +767,7 @@ class TestAPI:
                 self.last_chunk = None
                 self.last_mime = None
 
-            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id):
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id, caption_only=False):
                 self.last_chunk = audio_chunk
                 self.last_mime = mime_type
                 return {
@@ -809,7 +809,7 @@ class TestAPI:
             def __init__(self):
                 self.calls = 0
 
-            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id):
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id, caption_only=False):
                 self.calls += 1
                 return {
                     'status': 'ready',
@@ -850,7 +850,7 @@ class TestAPI:
             def __init__(self):
                 self.calls = 0
 
-            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id):
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id, caption_only=False):
                 self.calls += 1
                 duration = preferences.get('categories', {}).get('language', {}).get('duration', 4)
                 return {
@@ -900,7 +900,7 @@ class TestAPI:
             def get_stt_cache_mode(self):
                 return {'enabled': True, 'model': self.stt_model}
 
-            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id):
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id, caption_only=False):
                 self.calls += 1
                 return {
                     'status': 'ready',
@@ -942,7 +942,7 @@ class TestAPI:
             def __init__(self):
                 self.calls = 0
 
-            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id):
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id, caption_only=False):
                 self.calls += 1
                 return {
                     'status': 'error',
