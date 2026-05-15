@@ -25,6 +25,7 @@ import base64
 import wave
 from io import BytesIO
 import numpy as np
+import pathlib
 from typing import cast
 from datetime import datetime, timedelta
 from functools import wraps
@@ -34,8 +35,9 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from database import Database
 from content_analyzer import ContentAnalyzer
 
-# Load environment variables
-load_dotenv()
+# Load environment variables using an explicit path so Flask's debug reloader
+# doesn't lose the .env when it restarts from a different working directory
+load_dotenv(pathlib.Path(__file__).parent / '.env')
 
 # Initialize Flask app
 app = Flask(__name__)
