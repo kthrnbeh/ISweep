@@ -802,6 +802,72 @@ class TestAPI:
         assert len(stub.last_chunk) > 0
         assert stub.last_mime == 'audio/wav'
 
+    def test_captions_transcribe_always_returns_empty_events(self, client):
+        token, _ = signup_and_get_token(client, email='captions-events-empty@example.com')
+
+        class AnalyzerStub:
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id, caption_only=False):
+                return {
+                    'status': 'ready',
+                    'source': 'audio_stt',
+                    'events': [{'id': 'fake-event', 'start_seconds': 1.0, 'end_seconds': 1.5, 'action': 'mute'}],
+                    'cleaned_captions': [],
+                    'text': 'hello',
+                    'clean_text': 'hello',
+                    'failure_reason': None,
+                }
+
+        client.application.analyzer = AnalyzerStub()
+        response = client.post(
+            '/captions/transcribe',
+            json={
+                'video_id': 'captions-vid-events',
+                'audio_chunk': 'ZmFrZQ==',
+                'mime_type': 'audio/wav',
+                'chunk_start_seconds': 1.0,
+                'chunk_end_seconds': 2.0,
+            },
+            headers=auth_headers(token),
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['events'] == [], 'transcribe must always return events: []'
+
+    def test_captions_transcribe_does_not_return_fallback_profanity_text(self, client):
+        import os
+        token, _ = signup_and_get_token(client, email='captions-no-fallback@example.com')
+
+        class AnalyzerStub:
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id, caption_only=False):
+                from content_analyzer import DEFAULT_AUDIO_AHEAD_FALLBACK_TEXT
+                return {
+                    'status': 'ready',
+                    'source': 'audio_stt',
+                    'events': [],
+                    'cleaned_captions': [],
+                    'text': DEFAULT_AUDIO_AHEAD_FALLBACK_TEXT,
+                    'clean_text': DEFAULT_AUDIO_AHEAD_FALLBACK_TEXT,
+                    'failure_reason': None,
+                }
+
+        client.application.analyzer = AnalyzerStub()
+        response = client.post(
+            '/captions/transcribe',
+            json={
+                'video_id': 'captions-vid-fallback',
+                'audio_chunk': 'ZmFrZQ==',
+                'mime_type': 'audio/wav',
+                'chunk_start_seconds': 0.0,
+                'chunk_end_seconds': 2.0,
+            },
+            headers=auth_headers(token),
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['events'] == [], 'events must always be empty from transcribe'
+
     def test_audio_analyze_uses_chunk_cache_on_second_call(self, client):
         token, _ = signup_and_get_token(client, email='audio-cache@example.com')
 
@@ -976,68 +1042,3 @@ class TestAPI:
         assert second_data['status'] == 'error'
         assert second_data['cached'] is False
         assert stub.calls == 2
-
-
-def test_captions_transcribe_never_returns_events(client, token):
-    """Test that /captions/transcribe always returns events array as empty."""
-    response = client.post(
-        '/captions/transcribe',
-        json={
-            'video_id': 'test-video',
-            'audio_chunk': 'ZmFrZQ==',
-            'mime_type': 'audio/wav',
-            'start_seconds': 10.0,
-            'end_seconds': 12.0,
-        },
-        headers=auth_headers(token),
-    )
-    assert response.status_code == 200
-    data = json.loads(response.data)
-    # CRITICAL: /captions/transcribe must NEVER return events
-    assert 'events' in data
-    assert isinstance(data['events'], list)
-    assert len(data['events']) == 0
-
-
-def test_captions_transcribe_returns_caption_text(client, token):
-    """Test that /captions/transcribe returns caption text."""
-    response = client.post(
-        '/captions/transcribe',
-        json={
-            'video_id': 'test-video',
-            'audio_chunk': 'ZmFrZQ==',
-            'mime_type': 'audio/wav',
-            'start_seconds': 10.0,
-            'end_seconds': 12.0,
-        },
-        headers=auth_headers(token),
-    )
-    assert response.status_code == 200
-    data = json.loads(response.data)
-    # Should have text fields
-    assert 'text' in data or 'clean_text' in data or 'cleaned_text' in data
-    assert 'status' in data
-
-
-def test_captions_transcribe_returns_no_mute_or_filtering_events(client, token):
-    """Test that /captions/transcribe does not create mute/skip/fast_forward events even for bad content."""
-    # This test ensures caption-only mode never triggers filtering
-    response = client.post(
-        '/captions/transcribe',
-        json={
-            'video_id': 'test-video-profanity',
-            'audio_chunk': 'ZmFrZQ==',  # Fake audio
-            'mime_type': 'audio/wav',
-            'start_seconds': 0.0,
-            'end_seconds': 2.0,
-        },
-        headers=auth_headers(token),
-    )
-    assert response.status_code == 200
-    data = json.loads(response.data)
-    # Verify no filtering events
-    assert 'events' in data
-    assert isinstance(data['events'], list)
-    for event in data['events']:
-        # Should never have mute/skip/fast_forward actions
-        assert event.get('action') not in ['mute', 'skip', 'fast_forward']

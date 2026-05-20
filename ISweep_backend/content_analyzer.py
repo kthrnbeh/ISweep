@@ -932,22 +932,8 @@ class ContentAnalyzer:
         end_seconds : absolute video time when this chunk ended
         preferences : user filter preferences
         video_id : YouTube video ID used for stable marker IDs
-        caption_only : bool - when True, skip filtering and return transcription only
         """
         if not audio_chunk:
-            # Caption-only mode: return silence instead of error when audio_chunk is empty
-            if caption_only:
-                return {
-                    'status': 'ready',
-                    'source': 'silence',
-                    'events': [],
-                    'cleaned_captions': [],
-                    'failure_reason': None,
-                    'words': [],
-                    'text': '',
-                    'clean_text': '',
-                    'cleaned_text': '',
-                }
             return {
                 'status': 'error',
                 'source': 'audio_chunk',
@@ -969,19 +955,6 @@ class ContentAnalyzer:
             print("[ISWEEP][AUDIO_DEBUG] received audio bytes:", len(decoded_audio))
         except RuntimeError as err:
             print("[ISWEEP][AUDIO_DEBUG] Audio decode failed:", str(err))
-            # Caption-only mode: return silence instead of error when audio decode fails
-            if caption_only:
-                return {
-                    'status': 'ready',
-                    'source': 'silence',
-                    'events': [],
-                    'cleaned_captions': [],
-                    'failure_reason': None,
-                    'words': [],
-                    'text': '',
-                    'clean_text': '',
-                    'cleaned_text': '',
-                }
             return {
                 'status': 'error',
                 'source': 'audio_chunk',
@@ -1044,20 +1017,6 @@ class ContentAnalyzer:
                 'word_timings': whisper_words,
             }]
             source_name = 'audio_stt'
-        elif caption_only:
-            # Caption-only mode: no fallback to Phase1 adapter, return silence when Whisper finds nothing
-            return {
-                'status': 'ready',
-                'source': 'silence',
-                'events': [],
-                'cleaned_captions': [],
-                'clean_captions': [],
-                'failure_reason': None,
-                'words': [],
-                'text': '',
-                'clean_text': '',
-                'cleaned_text': '',
-            }
         else:
             try:
                 segments = self.audio_transcription_adapter.transcribe(
@@ -1124,24 +1083,17 @@ class ContentAnalyzer:
             clean_entry.pop('_first_blocked_word_start', None)
             cleaned_captions.append(clean_entry)
 
-        # Caption-only mode: skip all event generation for muting/filtering
         if caption_only:
-            transcription_text = ' '.join(
-                str(segment.get('text') or '').strip()
-                for segment in absolute_segments
-                if str(segment.get('text') or '').strip()
-            )
             return {
                 'status': 'ready',
                 'source': source_name,
+                'start_seconds': start_seconds,
+                'end_seconds': end_seconds,
                 'events': [],
-                'cleaned_captions': [],
-                'clean_captions': [],
-                'failure_reason': None,
-                'words': [],
+                'cleaned_captions': cleaned_captions,
                 'text': transcription_text,
-                'clean_text': transcription_text,
-                'cleaned_text': transcription_text,
+                'clean_text': cleaned_captions[0].get('clean_text') if cleaned_captions else '',
+                'failure_reason': None,
             }
 
         events: List[Dict] = []

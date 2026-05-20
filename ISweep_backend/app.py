@@ -25,19 +25,18 @@ import base64
 import wave
 from io import BytesIO
 import numpy as np
-import pathlib
 from typing import cast
 from datetime import datetime, timedelta
 from functools import wraps
+from pathlib import Path
 from dotenv import load_dotenv
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from database import Database
 from content_analyzer import ContentAnalyzer
 
-# Load environment variables using an explicit path so Flask's debug reloader
-# doesn't lose the .env when it restarts from a different working directory
-load_dotenv(pathlib.Path(__file__).parent / '.env')
+# Load environment variables
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -804,7 +803,7 @@ def transcribe_caption_audio():
         end_seconds,
         preferences,
         video_id,
-        caption_only=True,  # Caption-only mode: no event generation or filtering
+        caption_only=True,
     )
 
     text = _extract_transcribe_text(result)
@@ -833,7 +832,7 @@ def transcribe_caption_audio():
             else ('Speech-to-text is unavailable' if source == 'audio_stt_unavailable' else (failure_reason or ''))
         ),
         'failure_reason': failure_reason,
-        'events': result.get('events', []),
+        'events': [],
         'cleaned_captions': result.get('cleaned_captions', []),
         'clean_captions': result.get('cleaned_captions', []),
         'clean_text': result.get('clean_text') or text,
