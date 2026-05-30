@@ -74,7 +74,12 @@ def handle_options():
 def get_db():
     """Get or create the shared Database instance for user data and tokens."""
     if not hasattr(app, 'database'):
-        db_path = os.getenv('DATABASE_PATH', 'isweep.db')
+        configured_path = os.getenv('DATABASE_PATH', 'isweep.db')
+        if os.path.isabs(configured_path):
+            db_path = configured_path
+        else:
+            # Keep DB location stable regardless of the shell working directory.
+            db_path = os.path.join(os.path.dirname(__file__), configured_path)
         app.database = Database(db_path)
     return app.database
 
