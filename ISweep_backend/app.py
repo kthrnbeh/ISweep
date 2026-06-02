@@ -90,6 +90,20 @@ def get_analyzer():
     return app.analyzer
 
 
+# In-memory diagnostic counters for the /captions/transcribe pipeline.
+# Never persisted; reset on server restart. Exposed via GET /captions/debug.
+captions_debug: dict = {
+    'transcribe_requests': 0,
+    'last_audio_bytes': 0,
+    'last_sample_rate': None,
+    'last_duration_seconds': 0.0,
+    'last_source': None,
+    'last_text_length': 0,
+    'last_text_preview': '',
+    'last_error': None,
+}
+
+
 def build_preferences_fingerprint(preferences: dict, stt_mode: dict | None = None) -> str:
     """Build stable hash for preference payloads used by /videos/analyze cache."""
     canonical = json.dumps({

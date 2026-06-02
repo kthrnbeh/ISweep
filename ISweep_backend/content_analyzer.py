@@ -1230,46 +1230,63 @@ class ContentAnalyzer:
                 'failure_reason': 'stt_disabled',
             }
 
-        if not audio_bytes:
-            return {
-                'events': [],
-                'cleaned_text': '',
-                'words': [],
-                'source': 'audio',
-                'failure_reason': 'audio_decode_failed',
-            }
-
-        adapter = self._get_or_create_stt_adapter()
-        if adapter is None:
-            return {
-                'events': [],
-                'cleaned_text': '',
-                'words': [],
-                'source': 'audio',
-                'failure_reason': 'stt_unavailable',
-            }
-
-        duration = float(chunk_duration_sec if chunk_duration_sec is not None else CHUNK_DURATION_SEC)
-        duration = max(duration, 0.0)
-        try:
-            stt_result = adapter.transcribe_with_word_timestamps(
-                audio_bytes,
-                text_hint='',
-                start_seconds=float(start_time),
-                duration_seconds=duration,
-            )
-            words = stt_result.get('words') if isinstance(stt_result, dict) else []
-            words = [w for w in words if isinstance(w, dict)] if isinstance(words, list) else []
-        except Exception:
-            return {
-                'events': [],
-                'cleaned_text': '',
-                'words': [],
-                'source': 'audio',
-                'failure_reason': 'transcription_failed',
-            }
-
-        print('[ISWEEP][AUDIO] transcription complete', {
+        if whisper_words:
+            transcript_text = ' '.join(str(word.get('word') or '').strip() for word in whisper_words).strip()
+            segments = [{
+                'text': transcript_text,
+                'start': 0.0,
+                'duration': duration_seconds,
+                'word_timings': whisper_words,
+            }]
+            source_name = 'audio_stt'
+        else:
+            # caption_only mode: never use the dev-fallback stub text.
+            # If Whisper returns nothing (silence, noise, short chunk) return
+            # an empty-text silence response so the overlay keeps "Listening"
+            # without injecting hardcoded profanity text into captions.
+            if caption_only:
+                print('[ISWEEP][AUDIO_STT] silence detected in caption_only mode', {
+                    'video_id': video_id,
+                    'stt_failure_reason': stt_failure_reason,
+                })
+                return {
+                    'status': 'ready',
+                    'source': 'silence',
+                    'text': '',
+                    'events': [],
+                    'cleaned_captions': [],
+                    'failure_reason': None,
+                }
+            try:
+                segments = self.audio_transcription_adapter.transcribe(
+                    audio_chunk=audio_chunk,
+                    mime_type=mime_type,
+                    start_seconds=start_seconds,
+                    end_seconds=end_seconds,
+                )
+                source_name = 'audio_chunk'
+            except RuntimeError as exc:
+                reason = str(exc)
+                normalized_reason = reason if reason in {
+                    'transcription_unavailable',
+                    'analyze_exception',
+                    'audio_decode_failed',
+                } else 'analyze_exception'
+                status = 'unavailable' if normalized_reason == 'transcription_unavailable' else 'error'
+                print('[ISWEEP][AUDIO_STT] fallback used', {
+                    'video_id': video_id,
+                    'reason': normalized_reason,
+                })
+                if stt_failure_reason in {'stt_unavailable', 'transcription_failed'}:
+                    normalized_reason = stt_failure_reason
+                    status = 'error'
+                return {
+                    'status': status,
+                    'source': 'audio_chunk',
+                    'events': [],
+                    'cleaned_captions': [],
+                    'failure_reason': normalized_reason,
+                }
             'video_id': video_id,
             'start_time': start_time,
             'words': len(words),
