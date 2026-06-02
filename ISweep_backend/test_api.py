@@ -904,6 +904,50 @@ class TestAPI:
         data = json.loads(response.data)
         assert data['events'] == [], 'events must always be empty from transcribe'
 
+    def test_captions_debug_route_exposes_transcribe_request_counter(self, client):
+        token, _ = signup_and_get_token(client, email='captions-debug-route@example.com')
+
+        class AnalyzerStub:
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id, caption_only=False):
+                return {
+                    'status': 'ready',
+                    'source': 'audio_stt',
+                    'events': [],
+                    'cleaned_captions': [],
+                    'text': 'hello diagnostics',
+                    'clean_text': 'hello diagnostics',
+                    'failure_reason': None,
+                }
+
+        client.application.analyzer = AnalyzerStub()
+
+        before_resp = client.get('/captions/debug')
+        assert before_resp.status_code == 200
+        before = json.loads(before_resp.data)
+        assert 'transcribe_requests' in before
+        before_count = int(before['transcribe_requests'])
+
+        transcribe_resp = client.post(
+            '/captions/transcribe',
+            json={
+                'video_id': 'captions-debug-vid-1',
+                'audio_chunk': 'ZmFrZQ==',
+                'mime_type': 'audio/wav',
+                'chunk_start_seconds': 1.0,
+                'chunk_end_seconds': 2.0,
+            },
+            headers=auth_headers(token),
+        )
+        assert transcribe_resp.status_code == 200
+
+        after_resp = client.get('/captions/debug')
+        assert after_resp.status_code == 200
+        after = json.loads(after_resp.data)
+
+        assert after['transcribe_requests'] >= before_count + 1
+        assert isinstance(after.get('last_audio_bytes'), int)
+        assert isinstance(after.get('last_text_length'), int)
+
     def test_audio_analyze_uses_chunk_cache_on_second_call(self, client):
         token, _ = signup_and_get_token(client, email='audio-cache@example.com')
 
