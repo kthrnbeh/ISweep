@@ -796,6 +796,10 @@ def transcribe_caption_audio():
     if end_seconds < start_seconds:
         end_seconds = start_seconds
 
+    captions_debug['transcribe_requests'] += 1
+    captions_debug['last_duration_seconds'] = round(max(end_seconds - start_seconds, 0.0), 3)
+    captions_debug['last_sample_rate'] = sample_rate
+    captions_debug['last_error'] = None
     print('[ISWEEP][CAPTIONS_TRANSCRIBE] request received', {
         'video_id': video_id,
         'start_seconds': start_seconds,
@@ -874,6 +878,9 @@ def transcribe_caption_audio():
             'video_id': video_id,
             'bytes': 0,
         })
+    captions_debug['last_source'] = response['source']
+    captions_debug['last_text_length'] = len(response['text'] or '')
+    captions_debug['last_text_preview'] = (response['text'] or '')[:60]
     print('[ISWEEP][CAPTIONS_TRANSCRIBE] text returned', {
         'video_id': video_id,
         'source': response['source'],
@@ -881,6 +888,15 @@ def transcribe_caption_audio():
         'confidence': response['confidence'],
     })
     return jsonify(response), 200
+
+
+@app.route('/captions/debug', methods=['GET'])
+def get_captions_debug():
+    """Return in-memory diagnostic counters for the /captions/transcribe pipeline.
+
+    No auth required — local-dev diagnostic only. Does not expose user data.
+    """
+    return jsonify(dict(captions_debug)), 200
 
 
 @app.errorhandler(404)
