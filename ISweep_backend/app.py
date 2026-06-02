@@ -877,18 +877,20 @@ def transcribe_caption_audio():
         print('[ISWEEP][CAPTIONS_TRANSCRIBE] audio bytes received', {
             'video_id': video_id,
             'bytes': 0,
-        })
-    captions_debug['last_source'] = response['source']
-    captions_debug['last_text_length'] = len(response['text'] or '')
-    captions_debug['last_text_preview'] = (response['text'] or '')[:60]
-    print('[ISWEEP][CAPTIONS_TRANSCRIBE] text returned', {
-        'video_id': video_id,
-        'source': response['source'],
-        'text': response['text'],
-        'confidence': response['confidence'],
-    })
-    return jsonify(response), 200
-
+        try:
+            audio_debug = audio_chunk.split(',', 1)[1] if ',' in audio_chunk else audio_chunk
+            audio_bytes = base64.b64decode(audio_debug, validate=False)
+            captions_debug['last_audio_bytes'] = len(audio_bytes)
+            print('[ISWEEP][CAPTIONS_TRANSCRIBE] audio bytes received', {
+                'video_id': video_id,
+                'bytes': len(audio_bytes),
+            })
+        except Exception:
+            captions_debug['last_audio_bytes'] = 0
+            print('[ISWEEP][CAPTIONS_TRANSCRIBE] audio bytes received', {
+                'video_id': video_id,
+                'bytes': 0,
+            })
 
 @app.route('/captions/debug', methods=['GET'])
 def get_captions_debug():
