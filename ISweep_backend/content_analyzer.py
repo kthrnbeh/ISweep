@@ -82,10 +82,12 @@ class FasterWhisperSpeechToTextAdapter(SpeechToTextAdapter):
         model = self._ensure_model()
         audio_input = BytesIO(audio_path_or_bytes) if isinstance(audio_path_or_bytes, (bytes, bytearray)) else audio_path_or_bytes
 
+        # vad_filter is disabled: it is too aggressive for short chunks (~0.75 s)
+        # and silently discards real speech, causing Whisper to return no words.
         segments, _ = model.transcribe(
             audio_input,
             word_timestamps=True,
-            vad_filter=True,
+            vad_filter=False,
             language='en',
         )
 
