@@ -55,6 +55,42 @@ class TestAPI:
         assert data['status'] == 'ok'  # Validate payload
         assert 'stt_enabled' in data
 
+    def test_auth_register_alias_creates_account_and_returns_token(self, client):
+        response = client.post('/auth/register', json={'email': 'register-alias@example.com', 'password': 'Password123!'})
+        assert response.status_code in (200, 201)
+        data = json.loads(response.data)
+        assert isinstance(data.get('token'), str) and data['token']
+        assert isinstance(data.get('user_id'), int)
+
+    def test_auth_login_success_returns_token(self, client):
+        client.post('/auth/signup', json={'email': 'login-success@example.com', 'password': 'Password123!'})
+        response = client.post('/auth/login', json={'email': 'login-success@example.com', 'password': 'Password123!'})
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert isinstance(data.get('token'), str) and data['token']
+        assert isinstance(data.get('user_id'), int)
+
+    def test_auth_login_invalid_credentials_returns_clear_401_json(self, client):
+        client.post('/auth/signup', json={'email': 'login-fail@example.com', 'password': 'Password123!'})
+        response = client.post('/auth/login', json={'email': 'login-fail@example.com', 'password': 'WrongPass123!'})
+        assert response.status_code == 401
+        data = json.loads(response.data)
+        assert data.get('error') == 'Invalid credentials'
+
+    def test_auth_user_record_persists_in_local_sqlite(self, client):
+        email = 'persist-user@example.com'
+        password = 'Password123!'
+        signup = client.post('/auth/signup', json={'email': email, 'password': password})
+        assert signup.status_code in (200, 201)
+
+        db = client.application.database
+        user = db.get_user_by_email(email)
+        assert user is not None
+        assert user.get('email') == email
+
+        login = client.post('/auth/login', json={'email': email, 'password': password})
+        assert login.status_code == 200
+
     def test_create_user(self, client):
         response = client.post('/api/users', json={'username': 'testuser'})  # Create user without auth
         assert response.status_code == 201  # Expect created

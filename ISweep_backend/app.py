@@ -209,6 +209,7 @@ def health_check_root():
 
 
 @app.route('/auth/signup', methods=['POST'])
+@app.route('/auth/register', methods=['POST'])
 def signup():
     """Handle user registration and return an auth token for immediate use."""
     data = request.get_json() or {}
