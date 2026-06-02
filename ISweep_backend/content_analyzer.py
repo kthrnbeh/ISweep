@@ -89,10 +89,17 @@ class FasterWhisperSpeechToTextAdapter(SpeechToTextAdapter):
             word_timestamps=True,
             vad_filter=False,
             language='en',
+            beam_size=1,
+            best_of=1,
+            condition_on_previous_text=False,
         )
 
         words: List[Dict] = []
+        text_parts: List[str] = []
         for segment in segments:
+            seg_text = str(getattr(segment, 'text', '') or '').strip()
+            if seg_text:
+                text_parts.append(seg_text)
             for word in (getattr(segment, 'words', None) or []):
                 word_text = str(getattr(word, 'word', '') or '').strip()
                 word_start = getattr(word, 'start', None)
@@ -108,7 +115,7 @@ class FasterWhisperSpeechToTextAdapter(SpeechToTextAdapter):
                     'source': 'whisper',
                 })
 
-        return {'words': words}
+        return {'words': words, 'text': ' '.join(text_parts).strip()}
 
 
 class Phase1AudioTranscriptionAdapter:
@@ -966,6 +973,7 @@ class ContentAnalyzer:
             }
 
         whisper_words: List[Dict] = []
+        whisper_text: str = ''
         stt_failure_reason: str | None = None
         stt_audio_path: str | None = None
         if self.stt_enabled:
@@ -984,6 +992,7 @@ class ContentAnalyzer:
                         duration_seconds=duration_seconds,
                     )
                     candidate_words = stt_result.get('words') if isinstance(stt_result, dict) else []
+                    whisper_text = str((stt_result or {}).get('text') or '').strip() if isinstance(stt_result, dict) else ''
                     if isinstance(candidate_words, list):
                         whisper_words = [w for w in candidate_words if isinstance(w, dict)]
                     if whisper_words:
@@ -1010,13 +1019,13 @@ class ContentAnalyzer:
                         except OSError:
                             pass
 
-        if whisper_words:
-            transcript_text = ' '.join(str(word.get('word') or '').strip() for word in whisper_words).strip()
+        if whisper_words or whisper_text:
+            transcript_text = whisper_text or ' '.join(str(word.get('word') or '').strip() for word in whisper_words).strip()
             segments = [{
                 'text': transcript_text,
                 'start': 0.0,
                 'duration': duration_seconds,
-                'word_timings': whisper_words,
+                'word_timings': whisper_words if whisper_words else [],
             }]
             source_name = 'audio_stt'
         else:

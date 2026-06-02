@@ -22,6 +22,7 @@ import math
 import os
 import secrets
 import base64
+import time
 import wave
 from io import BytesIO
 import numpy as np
@@ -101,6 +102,13 @@ captions_debug: dict = {
     'last_text_length': 0,
     'last_text_preview': '',
     'last_error': None,
+    'chunkStartedAt': None,
+    'chunkFlushedAt': None,
+    'transcribeStartedAt': None,
+    'transcribeFinishedAt': None,
+    'relaySentAt': None,
+    'overlayRenderedAt': None,
+    'totalLatencyMs': None,
 }
 
 
@@ -770,6 +778,7 @@ def transcribe_caption_audio():
     response instead of requiring faster-whisper to be installed.
     """
     data = request.get_json() or {}
+    transcribe_started_at = int(time.time() * 1000)
     audio_chunk = str(data.get('audio_chunk') or data.get('audio_base64') or data.get('audio_b64') or '').strip()
     sample_rate = data.get('sampleRate') if data.get('sampleRate') is not None else data.get('sample_rate')
     channels = data.get('channels')
@@ -800,6 +809,9 @@ def transcribe_caption_audio():
     captions_debug['last_duration_seconds'] = round(max(end_seconds - start_seconds, 0.0), 3)
     captions_debug['last_sample_rate'] = sample_rate
     captions_debug['last_error'] = None
+    captions_debug['chunkStartedAt'] = data.get('chunk_started_at')
+    captions_debug['chunkFlushedAt'] = data.get('chunk_flushed_at')
+    captions_debug['transcribeStartedAt'] = transcribe_started_at
     print('[ISWEEP][CAPTIONS_TRANSCRIBE] request received', {
         'video_id': video_id,
         'start_seconds': start_seconds,
@@ -884,6 +896,12 @@ def transcribe_caption_audio():
     captions_debug['last_source'] = response['source']
     captions_debug['last_text_length'] = len(response['text'] or '')
     captions_debug['last_text_preview'] = (response['text'] or '')[:60]
+    captions_debug['transcribeFinishedAt'] = int(time.time() * 1000)
+    if captions_debug['chunkStartedAt'] is not None:
+        try:
+            captions_debug['totalLatencyMs'] = max(int(captions_debug['transcribeFinishedAt']) - int(captions_debug['chunkStartedAt']), 0)
+        except (TypeError, ValueError):
+            captions_debug['totalLatencyMs'] = None
     print('[ISWEEP][CAPTIONS_TRANSCRIBE] text returned', {
         'video_id': video_id,
         'source': response['source'],
