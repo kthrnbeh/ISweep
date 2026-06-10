@@ -190,6 +190,22 @@ def issue_token(user_id: int) -> str:
     return token
 
 
+@app.route('/', methods=['GET'])
+def root():
+    """Root endpoint - returns basic service info."""
+    return jsonify({
+        'service': 'ISweep Backend',
+        'version': '1.0.0',
+        'status': 'running',
+        'endpoints': {
+            'health': '/health',
+            'captions_debug': '/captions/debug',
+            'captions_transcribe': '/captions/transcribe',
+            'videos_analyze': '/videos/analyze',
+        }
+    }), 200
+
+
 def require_auth(fn):
     """Decorator that enforces bearer auth and attaches user_id to request."""
     @wraps(fn)
