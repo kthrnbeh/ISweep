@@ -1105,6 +1105,11 @@ class ContentAnalyzer:
             cleaned_captions.append(clean_entry)
 
         if caption_only:
+            merged_words: List[Dict] = []
+            for cleaned_entry in cleaned_captions:
+                words = cleaned_entry.get('words') if isinstance(cleaned_entry, dict) else []
+                if isinstance(words, list):
+                    merged_words.extend([word for word in words if isinstance(word, dict)])
             return {
                 'status': 'ready',
                 'source': source_name,
@@ -1114,6 +1119,7 @@ class ContentAnalyzer:
                 'cleaned_captions': cleaned_captions,
                 'text': transcription_text,
                 'clean_text': cleaned_captions[0].get('clean_text') if cleaned_captions else '',
+                'words': merged_words,
                 'failure_reason': None,
             }
 

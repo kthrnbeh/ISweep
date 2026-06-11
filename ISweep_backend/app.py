@@ -890,6 +890,7 @@ def transcribe_caption_audio():
         'clean_text': result.get('clean_text') or text,
         'cleaned_text': result.get('cleaned_text') or result.get('clean_text') or text,
         'words': result.get('words', []),
+        'word_timestamps': result.get('word_timestamps') or result.get('words', []),
         'start_seconds': start_seconds,
         'end_seconds': end_seconds,
         'cached': False,
