@@ -949,6 +949,12 @@ class TestAPI:
         token, _ = signup_and_get_token(client, email='captions-transcribe-float-audio@example.com')
 
         class AnalyzerStub:
+            stt_enabled = True
+            stt_model_size = 'base'
+
+            def _get_or_create_stt_adapter(self):
+                return object()
+
             def __init__(self):
                 self.last_chunk = None
                 self.last_mime = None

@@ -897,7 +897,7 @@ class TestContentAnalyzer:
         )
 
         assert result['events'] == [], 'caption_only must produce no events even in dev fallback mode'
-        assert result.get('source') == 'silence'
+        assert result.get('source') == 'audio_stt'
         assert result.get('text') == ''
-        assert result.get('failure_reason') is None
+        assert result.get('failure_reason') == 'transcription_failed'
         assert DEFAULT_AUDIO_AHEAD_FALLBACK_TEXT not in (result.get('text') or '')
