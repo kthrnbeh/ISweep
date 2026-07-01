@@ -45,6 +45,9 @@ class SpeechToTextAdapter:
         text_hint: str = '',
         start_seconds: float = 0.0,
         duration_seconds: float = 0.0,
+        language: str | None = None,
+        hotword_hints: List[str] | None = None,
+        vad_filter: bool | None = None,
     ) -> Dict:
         raise NotImplementedError()
 
@@ -52,22 +55,35 @@ class SpeechToTextAdapter:
 class FasterWhisperSpeechToTextAdapter(SpeechToTextAdapter):
     """Optional faster-whisper adapter loaded only when STT is enabled."""
 
-    def __init__(self, model_size: str = 'base', device: str = 'cpu', compute_type: str = 'int8'):
+    def __init__(self, model_size: str = 'base', device: str = 'cpu', compute_type: str = 'int8', fallback_model_size: str | None = None):
         self.model_size = model_size
+        self.fallback_model_size = fallback_model_size
         self.device = device
         self.compute_type = compute_type
         self._model = None
+        self._loaded_model_size = None
 
     def _ensure_model(self):
         if self._model is not None:
             return self._model
-        try:
-            fw_module = importlib.import_module('faster_whisper')
-            WhisperModel = getattr(fw_module, 'WhisperModel')
-            self._model = WhisperModel(self.model_size, device=self.device, compute_type=self.compute_type)
-            return self._model
-        except Exception as exc:  # pragma: no cover - environment dependent import/runtime
-            raise RuntimeError('stt_unavailable') from exc
+        fw_module = importlib.import_module('faster_whisper')
+        WhisperModel = getattr(fw_module, 'WhisperModel')
+        attempted = [self.model_size]
+        if self.fallback_model_size and self.fallback_model_size not in attempted:
+            attempted.append(self.fallback_model_size)
+        for candidate in attempted:
+            try:
+                self._model = WhisperModel(candidate, device=self.device, compute_type=self.compute_type)
+                self._loaded_model_size = candidate
+                if candidate != self.model_size:
+                    print('[ISWEEP][STT] fallback model loaded', {
+                        'requested': self.model_size,
+                        'loaded': candidate,
+                    })
+                return self._model
+            except Exception:
+                continue
+        raise RuntimeError('stt_unavailable')
 
     def transcribe_with_word_timestamps(
         self,
@@ -75,6 +91,9 @@ class FasterWhisperSpeechToTextAdapter(SpeechToTextAdapter):
         text_hint: str = '',
         start_seconds: float = 0.0,
         duration_seconds: float = 0.0,
+        language: str | None = None,
+        hotword_hints: List[str] | None = None,
+        vad_filter: bool | None = None,
     ) -> Dict:
         if audio_path_or_bytes is None:
             raise RuntimeError('stt_unavailable')
@@ -82,17 +101,25 @@ class FasterWhisperSpeechToTextAdapter(SpeechToTextAdapter):
         model = self._ensure_model()
         audio_input = BytesIO(audio_path_or_bytes) if isinstance(audio_path_or_bytes, (bytes, bytearray)) else audio_path_or_bytes
 
-        # vad_filter is disabled: it is too aggressive for short chunks (~0.75 s)
-        # and silently discards real speech, causing Whisper to return no words.
-        segments, _ = model.transcribe(
-            audio_input,
-            word_timestamps=True,
-            vad_filter=False,
-            language='en',
-            beam_size=1,
-            best_of=1,
-            condition_on_previous_text=False,
-        )
+        effective_language = str(language or '').strip() or 'en'
+        effective_vad_filter = bool(vad_filter) if isinstance(vad_filter, bool) else True
+        hints = [str(word or '').strip() for word in (hotword_hints or []) if str(word or '').strip()]
+        transcribe_kwargs = {
+            'word_timestamps': True,
+            'vad_filter': effective_vad_filter,
+            'language': effective_language,
+            'beam_size': 1,
+            'best_of': 1,
+            'condition_on_previous_text': False,
+        }
+        if hints:
+            transcribe_kwargs['hotwords'] = ','.join(hints[:32])
+
+        try:
+            segments, _ = model.transcribe(audio_input, **transcribe_kwargs)
+        except TypeError:
+            transcribe_kwargs.pop('hotwords', None)
+            segments, _ = model.transcribe(audio_input, **transcribe_kwargs)
 
         words: List[Dict] = []
         text_parts: List[str] = []
@@ -214,12 +241,18 @@ class ContentAnalyzer:
         self.audio_transcription_adapter = Phase1AudioTranscriptionAdapter()
         self.stt_enabled = _env_flag('ISWEEP_STT_ENABLED')
         self.stt_model_size = str(os.getenv('ISWEEP_STT_MODEL_SIZE', 'base') or 'base').strip() or 'base'
+        self.stt_fallback_model_size = str(os.getenv('ISWEEP_STT_FALLBACK_MODEL_SIZE', 'base') or 'base').strip() or 'base'
+        self.stt_language = str(os.getenv('ISWEEP_STT_LANGUAGE', 'en') or 'en').strip() or 'en'
         self.stt_device = str(os.getenv('ISWEEP_STT_DEVICE', 'cpu') or 'cpu').strip() or 'cpu'
         self.stt_compute_type = str(os.getenv('ISWEEP_STT_COMPUTE_TYPE', 'int8') or 'int8').strip() or 'int8'
+        self.stt_vad_filter = str(os.getenv('ISWEEP_STT_VAD_FILTER', '1') or '1').strip().lower() in {'1', 'true', 'yes', 'on'}
         self.speech_to_text_adapter = speech_to_text_adapter
         if self.stt_enabled:
             print('[ISWEEP][STT] whisper enabled', {
                 'model': self.stt_model_size,
+                'fallback_model': self.stt_fallback_model_size,
+                'language': self.stt_language,
+                'vad_filter': self.stt_vad_filter,
                 'device': self.stt_device,
                 'compute_type': self.stt_compute_type,
             })
@@ -239,10 +272,38 @@ class ContentAnalyzer:
             return None
         self.speech_to_text_adapter = FasterWhisperSpeechToTextAdapter(
             model_size=self.stt_model_size,
+            fallback_model_size=self.stt_fallback_model_size,
             device=self.stt_device,
             compute_type=self.stt_compute_type,
         )
         return self.speech_to_text_adapter
+
+    def _extract_stt_hotword_hints(self, preferences: Dict) -> List[str]:
+        if not isinstance(preferences, dict):
+            return []
+        categories = preferences.get('categories') if isinstance(preferences.get('categories'), dict) else {}
+        language = categories.get('language') if isinstance(categories.get('language'), dict) else {}
+        candidates: List[str] = []
+        blocklist = preferences.get('blocklist') if isinstance(preferences.get('blocklist'), dict) else {}
+        for key in ('items', 'words', 'customWords'):
+            values = blocklist.get(key)
+            if isinstance(values, list):
+                candidates.extend(values)
+            values = language.get(key)
+            if isinstance(values, list):
+                candidates.extend(values)
+        custom_words = preferences.get('customWords')
+        if isinstance(custom_words, list):
+            candidates.extend(custom_words)
+
+        normalized = []
+        for entry in candidates:
+            value = str(entry or '').strip().lower()
+            if not value:
+                continue
+            if value not in normalized:
+                normalized.append(value)
+        return normalized[:32]
 
     def _estimate_word_timings(self, text: str, start_seconds: float, duration: float) -> List[Dict]:
         tokens = [match.group(0) for match in re.finditer(r"[A-Za-z0-9']+", text)]
@@ -990,6 +1051,9 @@ class ContentAnalyzer:
                         text_hint='',
                         start_seconds=float(start_seconds),
                         duration_seconds=duration_seconds,
+                        language=self.stt_language,
+                        hotword_hints=self._extract_stt_hotword_hints(preferences),
+                        vad_filter=self.stt_vad_filter,
                     )
                     candidate_words = stt_result.get('words') if isinstance(stt_result, dict) else []
                     whisper_text = str((stt_result or {}).get('text') or '').strip() if isinstance(stt_result, dict) else ''
