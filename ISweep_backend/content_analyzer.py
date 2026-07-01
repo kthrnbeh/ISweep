@@ -1030,6 +1030,15 @@ class ContentAnalyzer:
             source_name = 'audio_stt'
         else:
             if caption_only:
+                if stt_failure_reason in {'stt_unavailable', 'transcription_failed'}:
+                    return {
+                        'status': 'error',
+                        'source': 'audio_stt',
+                        'text': '',
+                        'events': [],
+                        'cleaned_captions': [],
+                        'failure_reason': stt_failure_reason,
+                    }
                 # In caption-only mode, never fall back to dev stub text.
                 return {
                     'status': 'ready',

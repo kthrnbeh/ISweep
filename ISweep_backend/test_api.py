@@ -1,6 +1,11 @@
 import json  # Standard library JSON handling for request/response bodies
+import base64
+import math
+import wave
+from io import BytesIO
 from pathlib import Path
 import pytest  # Testing framework used for assertions and fixtures
+import numpy as np
 
 
 def signup_and_get_token(client, email="user@example.com"):
@@ -13,6 +18,33 @@ def signup_and_get_token(client, email="user@example.com"):
 
 def auth_headers(token):
     return {"Authorization": f"Bearer {token}"}  # Helper to build auth header for requests
+
+
+def make_wav_base64(samples, sample_rate=16000):
+    pcm = np.asarray(samples, dtype=np.float32)
+    if pcm.ndim != 1:
+        pcm = pcm.reshape(-1)
+    pcm = np.clip(pcm, -1.0, 1.0)
+    pcm16 = (pcm * 32767.0).astype(np.int16)
+    with BytesIO() as wav_buffer:
+        with wave.open(wav_buffer, 'wb') as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(int(sample_rate))
+            wav_file.writeframes(pcm16.tobytes())
+        return base64.b64encode(wav_buffer.getvalue()).decode('ascii')
+
+
+def make_silent_wav_base64(duration_seconds=0.5, sample_rate=16000):
+    count = int(max(duration_seconds, 0.0) * sample_rate)
+    return make_wav_base64(np.zeros(count, dtype=np.float32), sample_rate=sample_rate)
+
+
+def make_tone_wav_base64(duration_seconds=0.5, sample_rate=16000, hz=440.0, amplitude=0.2):
+    count = int(max(duration_seconds, 0.0) * sample_rate)
+    t = np.arange(count, dtype=np.float32) / float(sample_rate)
+    samples = amplitude * np.sin(2.0 * math.pi * float(hz) * t)
+    return make_wav_base64(samples, sample_rate=sample_rate)
 
 
 class TestAPI:
@@ -728,11 +760,19 @@ class TestAPI:
         assert data['confidence'] == 0.0
         assert data['reason'] == 'Speech-to-text is not enabled'
         assert data['failure_reason'] == 'stt_disabled'
+        assert data['stt_status'] == 'disabled'
+        assert data['stt_error'] == 'stt_disabled'
 
     def test_captions_transcribe_unavailable_returns_unavailable_source(self, client):
         token, _ = signup_and_get_token(client, email='captions-transcribe-unavailable@example.com')
 
         class AnalyzerStub:
+            stt_enabled = True
+            stt_model_size = 'base'
+
+            def _get_or_create_stt_adapter(self):
+                return object()
+
             def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id, caption_only=False):
                 return {
                     'status': 'error',
@@ -760,11 +800,19 @@ class TestAPI:
         assert data['source'] == 'audio_stt_unavailable'
         assert data['reason'] == 'Speech-to-text is unavailable'
         assert data['failure_reason'] == 'stt_unavailable'
+        assert data['stt_status'] == 'model_unavailable'
+        assert data['stt_error'] == 'stt_unavailable'
 
-    def test_captions_transcribe_empty_text_returns_silence_source(self, client):
+    def test_captions_transcribe_empty_text_returns_silent_audio_status(self, client):
         token, _ = signup_and_get_token(client, email='captions-transcribe-silence@example.com')
 
         class AnalyzerStub:
+            stt_enabled = True
+            stt_model_size = 'base'
+
+            def _get_or_create_stt_adapter(self):
+                return object()
+
             def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id, caption_only=False):
                 return {
                     'status': 'ready',
@@ -781,7 +829,7 @@ class TestAPI:
             '/captions/transcribe',
             json={
                 'video_id': 'captions-vid-silence',
-                'audio_chunk': 'ZmFrZQ==',
+                'audio_chunk': make_silent_wav_base64(),
                 'mime_type': 'audio/wav',
                 'chunk_start_seconds': 7.0,
                 'chunk_end_seconds': 8.0,
@@ -794,11 +842,19 @@ class TestAPI:
         assert data['text'] == ''
         assert data['source'] == 'silence'
         assert data['confidence'] == 0.0
+        assert data['stt_status'] == 'silent_audio'
+        assert data['stt_error'] is None
 
-    def test_captions_transcribe_returns_word_timestamps(self, client):
+    def test_captions_transcribe_non_silent_stt_result_returns_text_words_and_ok_status(self, client):
         token, _ = signup_and_get_token(client, email='captions-word-timestamps@example.com')
 
         class AnalyzerStub:
+            stt_enabled = True
+            stt_model_size = 'base'
+
+            def _get_or_create_stt_adapter(self):
+                return object()
+
             def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id, caption_only=False):
                 return {
                     'status': 'ready',
@@ -834,7 +890,7 @@ class TestAPI:
             '/captions/transcribe',
             json={
                 'video_id': 'captions-vid-words',
-                'audio_chunk': 'ZmFrZQ==',
+                'audio_chunk': make_tone_wav_base64(),
                 'mime_type': 'audio/wav',
                 'chunk_start_seconds': 1.0,
                 'chunk_end_seconds': 2.0,
@@ -851,6 +907,43 @@ class TestAPI:
         assert isinstance(data.get('word_timestamps'), list)
         assert len(data['word_timestamps']) == 4
         assert data['word_timestamps'][2]['word'].lower() == 'hell'
+        assert data['stt_status'] == 'ok'
+        assert data['stt_error'] is None
+
+    def test_captions_transcribe_exception_returns_transcription_error_status(self, client):
+        token, _ = signup_and_get_token(client, email='captions-transcribe-exception@example.com')
+
+        class AnalyzerStub:
+            stt_enabled = True
+            stt_model_size = 'base'
+
+            def _get_or_create_stt_adapter(self):
+                return object()
+
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id, caption_only=False):
+                raise RuntimeError('mock transcription explosion')
+
+        client.application.analyzer = AnalyzerStub()
+        response = client.post(
+            '/captions/transcribe',
+            json={
+                'video_id': 'captions-vid-exception',
+                'audio_chunk': make_tone_wav_base64(),
+                'mime_type': 'audio/wav',
+                'chunk_start_seconds': 10.0,
+                'chunk_end_seconds': 11.0,
+            },
+            headers=auth_headers(token),
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['text'] == ''
+        assert data['words'] == []
+        assert data['word_timestamps'] == []
+        assert data['stt_status'] == 'transcription_error'
+        assert isinstance(data['stt_error'], str)
+        assert 'mock transcription explosion' in data['stt_error']
 
     def test_captions_transcribe_accepts_float_audio_payload(self, client):
         token, _ = signup_and_get_token(client, email='captions-transcribe-float-audio@example.com')

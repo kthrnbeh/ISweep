@@ -181,6 +181,82 @@ def _float_audio_payload_to_base64_wav(sample_rate: int, channels: int, samples)
         return base64.b64encode(wav_buffer.getvalue()).decode('ascii')
 
 
+def _decode_base64_audio_payload(audio_chunk: str) -> bytes:
+    """Decode base64 audio payload with optional data URI prefix."""
+    payload = str(audio_chunk or '').strip()
+    if not payload:
+        return b''
+    if payload.startswith('data:') and ',' in payload:
+        payload = payload.split(',', 1)[1]
+    try:
+        return base64.b64decode(payload, validate=False)
+    except Exception:
+        return b''
+
+
+def _measure_wav_audio(decoded_audio: bytes) -> dict:
+    """Return WAV diagnostics used for transcribe troubleshooting logs."""
+    diagnostics = {
+        'sample_rate': None,
+        'channels': None,
+        'duration_seconds': 0.0,
+        'rms': None,
+        'peak': None,
+        'wav_parse_ok': False,
+    }
+    if not decoded_audio:
+        return diagnostics
+
+    try:
+        with wave.open(BytesIO(decoded_audio), 'rb') as wav_reader:
+            channels = int(wav_reader.getnchannels() or 1)
+            sample_width = int(wav_reader.getsampwidth() or 0)
+            sample_rate = int(wav_reader.getframerate() or 0)
+            frame_count = int(wav_reader.getnframes() or 0)
+            raw_frames = wav_reader.readframes(frame_count)
+
+        diagnostics['sample_rate'] = sample_rate if sample_rate > 0 else None
+        diagnostics['channels'] = channels if channels > 0 else None
+        diagnostics['duration_seconds'] = round((frame_count / sample_rate), 3) if sample_rate > 0 else 0.0
+
+        if not raw_frames or sample_width <= 0:
+            diagnostics['wav_parse_ok'] = True
+            diagnostics['rms'] = 0.0
+            diagnostics['peak'] = 0.0
+            return diagnostics
+
+        if sample_width == 1:
+            # 8-bit PCM is unsigned.
+            mono = (np.frombuffer(raw_frames, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
+        elif sample_width == 2:
+            mono = np.frombuffer(raw_frames, dtype=np.int16).astype(np.float32) / 32768.0
+        elif sample_width == 4:
+            mono = np.frombuffer(raw_frames, dtype=np.int32).astype(np.float32) / 2147483648.0
+        else:
+            diagnostics['wav_parse_ok'] = True
+            diagnostics['rms'] = None
+            diagnostics['peak'] = None
+            return diagnostics
+
+        if channels > 1 and mono.size >= channels:
+            frame_total = mono.size // channels
+            mono = mono[: frame_total * channels].reshape(frame_total, channels).mean(axis=1)
+
+        if mono.size == 0:
+            rms = 0.0
+            peak = 0.0
+        else:
+            rms = float(np.sqrt(np.mean(np.square(mono, dtype=np.float32), dtype=np.float32)))
+            peak = float(np.max(np.abs(mono)))
+
+        diagnostics['wav_parse_ok'] = True
+        diagnostics['rms'] = round(rms, 6)
+        diagnostics['peak'] = round(peak, 6)
+        return diagnostics
+    except Exception:
+        return diagnostics
+
+
 def issue_token(user_id: int) -> str:
     """Create a bearer token valid for 7 days and persist it for auth checks."""
     token = secrets.token_urlsafe(32)
@@ -848,18 +924,118 @@ def transcribe_caption_audio():
     db = get_db()
     preferences = db.get_user_preferences(request.user_id) or {}
     analyzer = get_analyzer()
-    result = analyzer.analyze_audio_chunk(
-        audio_chunk,
-        mime_type,
-        start_seconds,
-        end_seconds,
-        preferences,
-        video_id,
-        caption_only=True,
-    )
 
+    decoded_audio = _decode_base64_audio_payload(audio_chunk)
+    wav_metrics = _measure_wav_audio(decoded_audio)
+    captions_debug['last_audio_bytes'] = len(decoded_audio)
+
+    stt_enabled = bool(getattr(analyzer, 'stt_enabled', False) is True)
+    stt_model_name = str(getattr(analyzer, 'stt_model_size', '') or '') or None
+    stt_model_initialized = False
+    stt_model_init_error = None
+
+    if stt_enabled:
+        try:
+            adapter = analyzer._get_or_create_stt_adapter() if hasattr(analyzer, '_get_or_create_stt_adapter') else None
+            if adapter is not None:
+                if hasattr(adapter, '_ensure_model') and callable(getattr(adapter, '_ensure_model')):
+                    adapter._ensure_model()
+                stt_model_initialized = True
+            else:
+                stt_model_init_error = 'stt_adapter_missing'
+        except Exception as exc:
+            stt_model_init_error = str(exc) or 'model_initialization_failed'
+
+    print('[ISWEEP][CAPTIONS_TRANSCRIBE] stt state', {
+        'video_id': video_id,
+        'stt_enabled': stt_enabled,
+        'model_name': stt_model_name,
+        'model_initialized': stt_model_initialized,
+        'model_init_error': stt_model_init_error,
+    })
+    print('[ISWEEP][CAPTIONS_TRANSCRIBE] audio diagnostics', {
+        'video_id': video_id,
+        'wav_bytes': len(decoded_audio),
+        'sample_rate': wav_metrics.get('sample_rate'),
+        'duration_seconds': wav_metrics.get('duration_seconds'),
+        'rms': wav_metrics.get('rms'),
+        'peak': wav_metrics.get('peak'),
+        'wav_parse_ok': wav_metrics.get('wav_parse_ok'),
+    })
+
+    caught_transcription_exception = None
+    try:
+        result = analyzer.analyze_audio_chunk(
+            audio_chunk,
+            mime_type,
+            start_seconds,
+            end_seconds,
+            preferences,
+            video_id,
+            caption_only=True,
+        )
+    except Exception as exc:
+        caught_transcription_exception = str(exc) or exc.__class__.__name__
+        print('[ISWEEP][CAPTIONS_TRANSCRIBE] transcription exception', {
+            'video_id': video_id,
+            'error': caught_transcription_exception,
+        })
+        result = {
+            'status': 'error',
+            'source': 'audio_stt',
+            'events': [],
+            'cleaned_captions': [],
+            'failure_reason': 'transcription_failed',
+            'text': '',
+            'words': [],
+        }
+
+    raw_transcription_text = str((result or {}).get('text') or '').strip() if isinstance(result, dict) else ''
     text = _extract_transcribe_text(result)
     failure_reason = result.get('failure_reason')
+    words = result.get('words') if isinstance(result.get('words'), list) else []
+    word_timestamps = result.get('word_timestamps') if isinstance(result.get('word_timestamps'), list) else words
+
+    print('[ISWEEP][CAPTIONS_TRANSCRIBE] transcription output', {
+        'video_id': video_id,
+        'raw_text_preview': raw_transcription_text[:120],
+        'clean_text_preview': str(text or '')[:120],
+        'word_timestamp_count': len(word_timestamps),
+        'failure_reason': failure_reason,
+    })
+
+    is_quiet_audio = (
+        isinstance(wav_metrics.get('rms'), (int, float))
+        and isinstance(wav_metrics.get('peak'), (int, float))
+        and float(wav_metrics.get('rms')) <= 0.003
+        and float(wav_metrics.get('peak')) <= 0.02
+    )
+
+    stt_status = 'ok'
+    stt_error = None
+    if not stt_enabled:
+        stt_status = 'disabled'
+        stt_error = 'stt_disabled'
+    elif stt_model_init_error:
+        stt_status = 'model_unavailable'
+        stt_error = stt_model_init_error
+    elif caught_transcription_exception:
+        stt_status = 'transcription_error'
+        stt_error = caught_transcription_exception
+    elif failure_reason in {'stt_unavailable', 'transcription_unavailable'}:
+        stt_status = 'model_unavailable'
+        stt_error = failure_reason
+    elif failure_reason in {'transcription_failed', 'analyze_exception', 'audio_decode_failed', 'transcription_error'}:
+        stt_status = 'transcription_error'
+        stt_error = failure_reason
+    elif not text and len(word_timestamps) == 0:
+        if is_quiet_audio:
+            stt_status = 'silent_audio'
+            stt_error = None
+        else:
+            stt_status = 'transcription_error'
+            stt_error = failure_reason or 'empty_transcription_non_silent'
+
     if not text and not failure_reason:
         source = 'silence'
     else:
@@ -871,6 +1047,15 @@ def transcribe_caption_audio():
     elif failure_reason in unavailable_reasons:
         source = 'audio_stt_unavailable'
     elif text:
+        source = 'audio_stt'
+
+    if stt_status == 'disabled':
+        source = 'audio_stt_disabled'
+    elif stt_status == 'model_unavailable':
+        source = 'audio_stt_unavailable'
+    elif stt_status == 'silent_audio':
+        source = 'silence'
+    elif stt_status == 'transcription_error' and source == 'silence':
         source = 'audio_stt'
 
     response = {
@@ -889,30 +1074,19 @@ def transcribe_caption_audio():
         'clean_captions': result.get('cleaned_captions', []),
         'clean_text': result.get('clean_text') or text,
         'cleaned_text': result.get('cleaned_text') or result.get('clean_text') or text,
-        'words': result.get('words', []),
-        'word_timestamps': result.get('word_timestamps') or result.get('words', []),
+        'words': words,
+        'word_timestamps': word_timestamps,
+        'stt_status': stt_status,
+        'stt_error': stt_error,
         'start_seconds': start_seconds,
         'end_seconds': end_seconds,
         'cached': False,
     }
-    try:
-        audio_debug = audio_chunk.split(',', 1)[1] if ',' in audio_chunk else audio_chunk
-        audio_bytes = base64.b64decode(audio_debug, validate=False)
-        captions_debug['last_audio_bytes'] = len(audio_bytes)
-        print('[ISWEEP][CAPTIONS_TRANSCRIBE] audio bytes received', {
-            'video_id': video_id,
-            'bytes': len(audio_bytes),
-        })
-    except Exception:
-        captions_debug['last_audio_bytes'] = 0
-        print('[ISWEEP][CAPTIONS_TRANSCRIBE] audio bytes received', {
-            'video_id': video_id,
-            'bytes': 0,
-        })
 
     captions_debug['last_source'] = response['source']
     captions_debug['last_text_length'] = len(response['text'] or '')
     captions_debug['last_text_preview'] = (response['text'] or '')[:60]
+    captions_debug['last_error'] = stt_error
     captions_debug['transcribeFinishedAt'] = int(time.time() * 1000)
     if captions_debug['chunkStartedAt'] is not None:
         try:
