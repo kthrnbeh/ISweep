@@ -901,3 +901,51 @@ class TestContentAnalyzer:
         assert result.get('text') == ''
         assert result.get('failure_reason') == 'transcription_failed'
         assert DEFAULT_AUDIO_AHEAD_FALLBACK_TEXT not in (result.get('text') or '')
+
+    def test_selected_filter_words_are_passed_as_stt_hints_only(self, monkeypatch):
+        monkeypatch.setenv('ISWEEP_STT_ENABLED', 'true')
+
+        class HintCaptureAdapter:
+            def __init__(self):
+                self.last_hotword_hints = None
+                self.last_language = None
+                self.last_vad_filter = None
+
+            def transcribe_with_word_timestamps(self, audio_path_or_bytes, text_hint='', start_seconds=0.0, duration_seconds=0.0, language=None, hotword_hints=None, vad_filter=None):
+                self.last_hotword_hints = list(hotword_hints or [])
+                self.last_language = language
+                self.last_vad_filter = vad_filter
+                # Hints must not inject fake words when nothing is spoken.
+                return {'words': [], 'text': ''}
+
+        adapter = HintCaptureAdapter()
+        analyzer = ContentAnalyzer(speech_to_text_adapter=adapter)
+        analyzer.stt_enabled = True
+
+        result = analyzer.analyze_audio_chunk(
+            audio_chunk='UklGRiQAAABXQVZFZm10IBAAAAABAAEAgD4AAIA+AAABAAgAZGF0YQAAAAA=',
+            mime_type='audio/wav',
+            start_seconds=0.0,
+            end_seconds=1.0,
+            preferences={
+                'categories': {
+                    'language': {
+                        'items': ['hell', 'jerk'],
+                    },
+                },
+                'blocklist': {
+                    'items': ['damn'],
+                },
+            },
+            video_id='hint-only',
+            caption_only=True,
+        )
+
+        assert result['events'] == []
+        assert result['text'] == ''
+        assert result['failure_reason'] is None
+        assert isinstance(adapter.last_hotword_hints, list)
+        assert 'hell' in adapter.last_hotword_hints
+        assert 'jerk' in adapter.last_hotword_hints
+        assert 'damn' in adapter.last_hotword_hints
+        assert adapter.last_language == analyzer.stt_language

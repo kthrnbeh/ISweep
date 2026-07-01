@@ -21,6 +21,7 @@ import json
 import math
 import os
 import secrets
+import re
 import base64
 import time
 import wave
@@ -1022,12 +1023,21 @@ def transcribe_caption_audio():
     if end_seconds < start_seconds:
         end_seconds = start_seconds
 
+    capture_started_at = int(data.get('capture_started_at')) if str(data.get('capture_started_at') or '').isdigit() else None
+    chunk_started_at = int(data.get('chunk_started_at')) if str(data.get('chunk_started_at') or '').isdigit() else None
+    chunk_flushed_at = int(data.get('chunk_flushed_at')) if str(data.get('chunk_flushed_at') or '').isdigit() else None
+    chunk_emitted_at = int(data.get('chunk_emitted_at')) if str(data.get('chunk_emitted_at') or '').isdigit() else chunk_flushed_at
+    backend_received_at = int(data.get('backend_received_at')) if str(data.get('backend_received_at') or '').isdigit() else int(time.time() * 1000)
+
     captions_debug['transcribe_requests'] += 1
     captions_debug['last_duration_seconds'] = round(max(end_seconds - start_seconds, 0.0), 3)
     captions_debug['last_sample_rate'] = sample_rate
     captions_debug['last_error'] = None
-    captions_debug['chunkStartedAt'] = data.get('chunk_started_at')
-    captions_debug['chunkFlushedAt'] = data.get('chunk_flushed_at')
+    captions_debug['chunkStartedAt'] = chunk_started_at
+    captions_debug['chunkFlushedAt'] = chunk_flushed_at
+    captions_debug['captureStartedAt'] = capture_started_at
+    captions_debug['chunkEmittedAt'] = chunk_emitted_at
+    captions_debug['backendReceivedAt'] = backend_received_at
     captions_debug['transcribeStartedAt'] = transcribe_started_at
     print('[ISWEEP][CAPTIONS_TRANSCRIBE] request received', {
         'video_id': video_id,
@@ -1088,44 +1098,151 @@ def transcribe_caption_audio():
         'wav_parse_ok': wav_metrics.get('wav_parse_ok'),
     })
 
-    caught_transcription_exception = None
+    rolling_state = _get_or_create_rolling_state(request.user_id, video_id)
+    mono_samples = np.array([], dtype=np.float32)
+    decoded_sample_rate = wav_metrics.get('sample_rate') if isinstance(wav_metrics.get('sample_rate'), (int, float)) else None
     try:
-        result = analyzer.analyze_audio_chunk(
-            audio_chunk,
-            mime_type,
-            start_seconds,
-            end_seconds,
-            preferences,
-            video_id,
-            caption_only=True,
-        )
-    except Exception as exc:
-        caught_transcription_exception = str(exc) or exc.__class__.__name__
-        print('[ISWEEP][CAPTIONS_TRANSCRIBE] transcription exception', {
-            'video_id': video_id,
-            'error': caught_transcription_exception,
-        })
+        mono_samples, sample_rate_from_wav = _decode_wav_to_mono_float(decoded_audio)
+        if sample_rate_from_wav:
+            decoded_sample_rate = sample_rate_from_wav
+    except Exception:
+        mono_samples = np.array([], dtype=np.float32)
+
+    if decoded_sample_rate and int(decoded_sample_rate) > 0:
+        rolling_sample_rate = int(decoded_sample_rate)
+    else:
+        rolling_sample_rate = int(rolling_state.get('sample_rate') or AUDIO_SAMPLE_RATE)
+
+    existing_rate = int(rolling_state.get('sample_rate') or rolling_sample_rate)
+    if existing_rate != rolling_sample_rate:
+        rolling_state['samples'] = np.array([], dtype=np.float32)
+        rolling_state['last_words'] = []
+        rolling_state['last_word_tokens'] = []
+        rolling_state['last_text'] = ''
+        rolling_state['last_stable_text'] = ''
+    rolling_state['sample_rate'] = rolling_sample_rate
+
+    if mono_samples.size:
+        existing_samples = rolling_state.get('samples')
+        if isinstance(existing_samples, np.ndarray) and existing_samples.size:
+            combined = np.concatenate([existing_samples.astype(np.float32, copy=False), mono_samples.astype(np.float32, copy=False)])
+        else:
+            combined = mono_samples.astype(np.float32, copy=False)
+        max_samples = int(ROLLING_CAPTION_WINDOW_SEC * rolling_sample_rate)
+        if combined.size > max_samples:
+            combined = combined[-max_samples:]
+        rolling_state['samples'] = combined
+
+    transcribe_finished_at = int(time.time() * 1000)
+    can_transcribe_now = (transcribe_finished_at - int(rolling_state.get('last_transcribe_at') or 0)) >= ROLLING_TRANSCRIBE_INTERVAL_MS
+    use_cached_only = not can_transcribe_now and bool(rolling_state.get('last_text'))
+
+    caught_transcription_exception = None
+    if use_cached_only:
         result = {
-            'status': 'error',
-            'source': 'audio_stt',
+            'status': 'ready',
+            'source': 'audio_stt_live',
             'events': [],
             'cleaned_captions': [],
-            'failure_reason': 'transcription_failed',
-            'text': '',
-            'words': [],
+            'failure_reason': None,
+            'text': rolling_state.get('last_text') or '',
+            'clean_text': rolling_state.get('last_text') or '',
+            'words': rolling_state.get('last_words') or [],
         }
+    else:
+        rolling_samples = rolling_state.get('samples') if isinstance(rolling_state.get('samples'), np.ndarray) else np.array([], dtype=np.float32)
+        rolling_duration_sec = (rolling_samples.size / rolling_sample_rate) if rolling_sample_rate > 0 else 0.0
+        rolling_start_seconds = max(end_seconds - rolling_duration_sec, 0.0)
+        rolling_audio_chunk = _float_to_base64_wav(rolling_samples, rolling_sample_rate)
+        hint_words = _extract_filter_word_hints(preferences)
+        print('[ISWEEP][CAPTIONS_TRANSCRIBE] hotword hints', {
+            'video_id': video_id,
+            'count': len(hint_words),
+            'preview': hint_words[:8],
+        })
+        try:
+            result = analyzer.analyze_audio_chunk(
+                rolling_audio_chunk or audio_chunk,
+                'audio/wav',
+                rolling_start_seconds,
+                end_seconds,
+                preferences,
+                video_id,
+                caption_only=True,
+            )
+            rolling_state['last_transcribe_at'] = int(time.time() * 1000)
+        except Exception as exc:
+            caught_transcription_exception = str(exc) or exc.__class__.__name__
+            print('[ISWEEP][CAPTIONS_TRANSCRIBE] transcription exception', {
+                'video_id': video_id,
+                'error': caught_transcription_exception,
+            })
+            result = {
+                'status': 'error',
+                'source': 'audio_stt_live',
+                'events': [],
+                'cleaned_captions': [],
+                'failure_reason': 'transcription_failed',
+                'text': '',
+                'words': [],
+            }
 
     raw_transcription_text = str((result or {}).get('text') or '').strip() if isinstance(result, dict) else ''
-    text = _extract_transcribe_text(result)
+    full_text = _extract_transcribe_text(result)
     failure_reason = result.get('failure_reason')
     words = result.get('words') if isinstance(result.get('words'), list) else []
-    word_timestamps = result.get('word_timestamps') if isinstance(result.get('word_timestamps'), list) else words
+    word_timestamps_full = result.get('word_timestamps') if isinstance(result.get('word_timestamps'), list) else words
+
+    previous_text = str(rolling_state.get('last_text') or '')
+    previous_tokens = rolling_state.get('last_word_tokens') if isinstance(rolling_state.get('last_word_tokens'), list) else []
+    new_tokens = _normalized_word_tokens(word_timestamps_full)
+    if not new_tokens and full_text:
+        new_tokens = [token.strip().lower() for token in full_text.split(' ') if token.strip()]
+
+    overlap_size = _suffix_prefix_overlap(previous_tokens, new_tokens)
+    dedup_tokens = new_tokens[overlap_size:] if overlap_size > 0 else new_tokens
+    dedup_words = word_timestamps_full[overlap_size:] if overlap_size > 0 else word_timestamps_full
+
+    text = ' '.join(dedup_tokens).strip()
+    if not text and full_text and full_text != previous_text:
+        # Correction-only update: publish corrected rolling text when overlap consumed the delta.
+        text = full_text
+
+    stable_text = _longest_common_prefix_words(previous_text, full_text)
+    if not stable_text:
+        stable_text = str(rolling_state.get('last_stable_text') or '')
+
+    is_partial = bool(full_text) and not bool(re.search(r"[.!?]['\")\]]?\s*$", full_text))
+    if failure_reason:
+        is_partial = False
+
+    if full_text:
+        rolling_state['last_text'] = full_text
+        rolling_state['last_words'] = word_timestamps_full
+        rolling_state['last_word_tokens'] = new_tokens
+        if not is_partial:
+            rolling_state['last_stable_text'] = full_text
+            stable_text = full_text
+        elif stable_text and len(stable_text) >= len(str(rolling_state.get('last_stable_text') or '')):
+            rolling_state['last_stable_text'] = stable_text
+    elif failure_reason:
+        rolling_state['last_text'] = ''
+        rolling_state['last_words'] = []
+        rolling_state['last_word_tokens'] = []
+
+    word_timestamps = dedup_words if isinstance(dedup_words, list) else []
+    words = word_timestamps
+
+    transcribe_finished_at = int(time.time() * 1000)
 
     print('[ISWEEP][CAPTIONS_TRANSCRIBE] transcription output', {
         'video_id': video_id,
         'raw_text_preview': raw_transcription_text[:120],
         'clean_text_preview': str(text or '')[:120],
-        'word_timestamp_count': len(word_timestamps),
+        'word_timestamp_count': len(word_timestamps_full),
+        'dedup_word_timestamp_count': len(word_timestamps),
+        'is_partial': is_partial,
+        'stable_text_preview': str(stable_text or '')[:120],
         'failure_reason': failure_reason,
     })
 
@@ -1182,6 +1299,24 @@ def transcribe_caption_audio():
         source = 'silence'
     elif stt_status == 'transcription_error' and source == 'silence':
         source = 'audio_stt'
+    elif stt_status == 'ok':
+        source = 'audio_stt_live'
+
+    latency = {
+        'capture_started_at': capture_started_at,
+        'chunk_started_at': chunk_started_at,
+        'chunk_flushed_at': chunk_flushed_at,
+        'chunk_emitted_at': chunk_emitted_at,
+        'backend_received_at': backend_received_at,
+        'transcribe_started_at': transcribe_started_at,
+        'transcribe_finished_at': transcribe_finished_at,
+        'content_script_received_at': None,
+        'overlay_rendered_at': None,
+        'total_latency_ms': (
+            max(transcribe_finished_at - int(capture_started_at), 0)
+            if capture_started_at is not None else None
+        ),
+    }
 
     response = {
         'text': text,
@@ -1201,8 +1336,11 @@ def transcribe_caption_audio():
         'cleaned_text': result.get('cleaned_text') or result.get('clean_text') or text,
         'words': words,
         'word_timestamps': word_timestamps,
+        'is_partial': is_partial,
+        'stable_text': stable_text,
         'stt_status': stt_status,
         'stt_error': stt_error,
+        'latency': latency,
         'start_seconds': start_seconds,
         'end_seconds': end_seconds,
         'cached': False,
@@ -1212,10 +1350,10 @@ def transcribe_caption_audio():
     captions_debug['last_text_length'] = len(response['text'] or '')
     captions_debug['last_text_preview'] = (response['text'] or '')[:60]
     captions_debug['last_error'] = stt_error
-    captions_debug['transcribeFinishedAt'] = int(time.time() * 1000)
-    if captions_debug['chunkStartedAt'] is not None:
+    captions_debug['transcribeFinishedAt'] = transcribe_finished_at
+    if captions_debug['captureStartedAt'] is not None:
         try:
-            captions_debug['totalLatencyMs'] = max(int(captions_debug['transcribeFinishedAt']) - int(captions_debug['chunkStartedAt']), 0)
+            captions_debug['totalLatencyMs'] = max(int(captions_debug['transcribeFinishedAt']) - int(captions_debug['captureStartedAt']), 0)
         except (TypeError, ValueError):
             captions_debug['totalLatencyMs'] = None
     print('[ISWEEP][CAPTIONS_TRANSCRIBE] text returned', {

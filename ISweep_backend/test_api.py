@@ -900,7 +900,7 @@ class TestAPI:
 
         assert response.status_code == 200
         data = json.loads(response.data)
-        assert data['source'] == 'audio_stt'
+        assert data['source'] == 'audio_stt_live'
         assert isinstance(data.get('words'), list)
         assert len(data['words']) == 4
         assert data['words'][2]['word'].lower() == 'hell'
@@ -945,6 +945,209 @@ class TestAPI:
         assert isinstance(data['stt_error'], str)
         assert 'mock transcription explosion' in data['stt_error']
 
+    def test_captions_transcribe_rolling_text_does_not_repeat_previous_words(self, client):
+        import app as app_module
+        token, _ = signup_and_get_token(client, email='captions-rolling-dedupe@example.com')
+
+        class AnalyzerStub:
+            stt_enabled = True
+            stt_model_size = 'base.en'
+
+            def __init__(self):
+                self.calls = 0
+
+            def _get_or_create_stt_adapter(self):
+                return object()
+
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id, caption_only=False):
+                self.calls += 1
+                if self.calls == 1:
+                    words = [
+                        {'word': 'hello', 'start': 1.0, 'end': 1.2},
+                        {'word': 'world', 'start': 1.2, 'end': 1.4},
+                        {'word': 'from', 'start': 1.4, 'end': 1.55},
+                        {'word': 'isweep', 'start': 1.55, 'end': 1.8},
+                    ]
+                    text = 'hello world from isweep'
+                else:
+                    words = [
+                        {'word': 'world', 'start': 1.2, 'end': 1.4},
+                        {'word': 'from', 'start': 1.4, 'end': 1.55},
+                        {'word': 'isweep', 'start': 1.55, 'end': 1.8},
+                        {'word': 'now', 'start': 1.8, 'end': 2.0},
+                        {'word': 'faster', 'start': 2.0, 'end': 2.3},
+                    ]
+                    text = 'world from isweep now faster'
+                return {
+                    'status': 'ready',
+                    'source': 'audio_stt_live',
+                    'events': [],
+                    'cleaned_captions': [],
+                    'text': text,
+                    'clean_text': text,
+                    'words': words,
+                    'failure_reason': None,
+                }
+
+        original_interval = app_module.ROLLING_TRANSCRIBE_INTERVAL_MS
+        app_module.ROLLING_TRANSCRIBE_INTERVAL_MS = 0
+        client.application.analyzer = AnalyzerStub()
+        try:
+            first = client.post(
+                '/captions/transcribe',
+                json={
+                    'video_id': 'captions-rolling-dedupe-1',
+                    'audio_chunk': make_tone_wav_base64(),
+                    'mime_type': 'audio/wav',
+                    'chunk_start_seconds': 1.0,
+                    'chunk_end_seconds': 2.0,
+                },
+                headers=auth_headers(token),
+            )
+            second = client.post(
+                '/captions/transcribe',
+                json={
+                    'video_id': 'captions-rolling-dedupe-1',
+                    'audio_chunk': make_tone_wav_base64(),
+                    'mime_type': 'audio/wav',
+                    'chunk_start_seconds': 1.35,
+                    'chunk_end_seconds': 2.35,
+                },
+                headers=auth_headers(token),
+            )
+        finally:
+            app_module.ROLLING_TRANSCRIBE_INTERVAL_MS = original_interval
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        first_data = json.loads(first.data)
+        second_data = json.loads(second.data)
+        assert first_data['text']
+        assert second_data['text']
+        assert 'world from isweep' not in second_data['text'].lower()
+        assert second_data['text'].lower().endswith('now faster')
+
+    def test_captions_transcribe_partial_caption_can_be_corrected_by_stable_caption(self, client):
+        import app as app_module
+        token, _ = signup_and_get_token(client, email='captions-partial-stable@example.com')
+
+        class AnalyzerStub:
+            stt_enabled = True
+            stt_model_size = 'base.en'
+
+            def __init__(self):
+                self.calls = 0
+
+            def _get_or_create_stt_adapter(self):
+                return object()
+
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id, caption_only=False):
+                self.calls += 1
+                if self.calls == 1:
+                    text = 'this caption is partial'
+                else:
+                    text = 'this caption is partial.'
+                return {
+                    'status': 'ready',
+                    'source': 'audio_stt_live',
+                    'events': [],
+                    'cleaned_captions': [],
+                    'text': text,
+                    'clean_text': text,
+                    'words': [
+                        {'word': 'this', 'start': 1.0, 'end': 1.1},
+                        {'word': 'caption', 'start': 1.1, 'end': 1.3},
+                        {'word': 'is', 'start': 1.3, 'end': 1.4},
+                        {'word': 'partial', 'start': 1.4, 'end': 1.7},
+                    ],
+                    'failure_reason': None,
+                }
+
+        original_interval = app_module.ROLLING_TRANSCRIBE_INTERVAL_MS
+        app_module.ROLLING_TRANSCRIBE_INTERVAL_MS = 0
+        client.application.analyzer = AnalyzerStub()
+        try:
+            partial = client.post(
+                '/captions/transcribe',
+                json={
+                    'video_id': 'captions-partial-stable-1',
+                    'audio_chunk': make_tone_wav_base64(),
+                    'mime_type': 'audio/wav',
+                    'chunk_start_seconds': 1.0,
+                    'chunk_end_seconds': 2.0,
+                },
+                headers=auth_headers(token),
+            )
+            stable = client.post(
+                '/captions/transcribe',
+                json={
+                    'video_id': 'captions-partial-stable-1',
+                    'audio_chunk': make_tone_wav_base64(),
+                    'mime_type': 'audio/wav',
+                    'chunk_start_seconds': 1.2,
+                    'chunk_end_seconds': 2.2,
+                },
+                headers=auth_headers(token),
+            )
+        finally:
+            app_module.ROLLING_TRANSCRIBE_INTERVAL_MS = original_interval
+
+        partial_data = json.loads(partial.data)
+        stable_data = json.loads(stable.data)
+        assert partial_data['is_partial'] is True
+        assert stable_data['is_partial'] is False
+        assert stable_data['stable_text'].strip().endswith('.')
+
+    def test_captions_transcribe_populates_latency_diagnostics(self, client):
+        token, _ = signup_and_get_token(client, email='captions-latency-diag@example.com')
+
+        class AnalyzerStub:
+            stt_enabled = True
+            stt_model_size = 'base.en'
+
+            def _get_or_create_stt_adapter(self):
+                return object()
+
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id, caption_only=False):
+                return {
+                    'status': 'ready',
+                    'source': 'audio_stt_live',
+                    'events': [],
+                    'cleaned_captions': [],
+                    'text': 'latency ready',
+                    'clean_text': 'latency ready',
+                    'words': [{'word': 'latency', 'start': 2.0, 'end': 2.2}],
+                    'failure_reason': None,
+                }
+
+        client.application.analyzer = AnalyzerStub()
+        response = client.post(
+            '/captions/transcribe',
+            json={
+                'video_id': 'captions-latency-1',
+                'audio_chunk': make_tone_wav_base64(),
+                'mime_type': 'audio/wav',
+                'chunk_start_seconds': 2.0,
+                'chunk_end_seconds': 2.5,
+                'capture_started_at': 1000,
+                'chunk_started_at': 1100,
+                'chunk_flushed_at': 1200,
+                'chunk_emitted_at': 1200,
+                'backend_received_at': 1210,
+            },
+            headers=auth_headers(token),
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert isinstance(data.get('latency'), dict)
+        assert data['latency']['capture_started_at'] == 1000
+        assert data['latency']['chunk_emitted_at'] == 1200
+        assert data['latency']['backend_received_at'] == 1210
+        assert isinstance(data['latency']['transcribe_started_at'], int)
+        assert isinstance(data['latency']['transcribe_finished_at'], int)
+        assert data['latency']['total_latency_ms'] is None or data['latency']['total_latency_ms'] >= 0
+
     def test_captions_transcribe_accepts_float_audio_payload(self, client):
         token, _ = signup_and_get_token(client, email='captions-transcribe-float-audio@example.com')
 
@@ -988,7 +1191,7 @@ class TestAPI:
 
         assert response.status_code == 200
         data = json.loads(response.data)
-        assert data['source'] == 'audio_stt'
+        assert data['source'] == 'audio_stt_live'
         assert data['text'] == 'hello world'
         assert isinstance(stub.last_chunk, str)
         assert len(stub.last_chunk) > 0

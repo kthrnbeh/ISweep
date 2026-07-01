@@ -1046,15 +1046,23 @@ class ContentAnalyzer:
                         'model': self.stt_model_size,
                     })
                     stt_audio_path = self._persist_audio_for_stt(decoded_audio, mime_type)
-                    stt_result = adapter.transcribe_with_word_timestamps(
-                        stt_audio_path,
-                        text_hint='',
-                        start_seconds=float(start_seconds),
-                        duration_seconds=duration_seconds,
-                        language=self.stt_language,
-                        hotword_hints=self._extract_stt_hotword_hints(preferences),
-                        vad_filter=self.stt_vad_filter,
-                    )
+                    try:
+                        stt_result = adapter.transcribe_with_word_timestamps(
+                            stt_audio_path,
+                            text_hint='',
+                            start_seconds=float(start_seconds),
+                            duration_seconds=duration_seconds,
+                            language=self.stt_language,
+                            hotword_hints=self._extract_stt_hotword_hints(preferences),
+                            vad_filter=self.stt_vad_filter,
+                        )
+                    except TypeError:
+                        stt_result = adapter.transcribe_with_word_timestamps(
+                            stt_audio_path,
+                            text_hint='',
+                            start_seconds=float(start_seconds),
+                            duration_seconds=duration_seconds,
+                        )
                     candidate_words = stt_result.get('words') if isinstance(stt_result, dict) else []
                     whisper_text = str((stt_result or {}).get('text') or '').strip() if isinstance(stt_result, dict) else ''
                     if isinstance(candidate_words, list):
