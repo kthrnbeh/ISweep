@@ -36,6 +36,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from database import Database
 from content_analyzer import ContentAnalyzer
 
+AUDIO_SAMPLE_RATE = 16000
+
 # Load environment variables
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
@@ -111,6 +113,12 @@ captions_debug: dict = {
     'totalLatencyMs': None,
 }
 
+# Rolling per-session caption state used by /captions/transcribe live pipeline.
+# Keyed by user+video so each active tab/session keeps an independent buffer.
+rolling_caption_state: dict = {}
+ROLLING_CAPTION_WINDOW_SEC = 4.0
+ROLLING_TRANSCRIBE_INTERVAL_MS = 750
+
 
 def build_preferences_fingerprint(preferences: dict, stt_mode: dict | None = None) -> str:
     """Build stable hash for preference payloads used by /videos/analyze cache."""
@@ -137,6 +145,123 @@ def _extract_transcribe_text(result: dict) -> str:
             if isinstance(value, str) and value.strip():
                 return value.strip()
     return ''
+
+
+def _rolling_state_key(user_id: int | None, video_id: str) -> str:
+    clean_video_id = str(video_id or '').strip() or 'unknown_video'
+    return f"{int(user_id or 0)}::{clean_video_id}"
+
+
+def _get_or_create_rolling_state(user_id: int | None, video_id: str) -> dict:
+    key = _rolling_state_key(user_id, video_id)
+    if key not in rolling_caption_state:
+        rolling_caption_state[key] = {
+            'sample_rate': AUDIO_SAMPLE_RATE,
+            'samples': np.array([], dtype=np.float32),
+            'last_transcribe_at': 0,
+            'last_text': '',
+            'last_stable_text': '',
+            'last_words': [],
+            'last_word_tokens': [],
+        }
+    return rolling_caption_state[key]
+
+
+def _extract_filter_word_hints(preferences: dict) -> list[str]:
+    if not isinstance(preferences, dict):
+        return []
+    out: list[str] = []
+    categories = preferences.get('categories') if isinstance(preferences.get('categories'), dict) else {}
+    language = categories.get('language') if isinstance(categories.get('language'), dict) else {}
+    blocklist = preferences.get('blocklist') if isinstance(preferences.get('blocklist'), dict) else {}
+    for key in ('items', 'words', 'customWords'):
+        values = language.get(key)
+        if isinstance(values, list):
+            out.extend(values)
+        values = blocklist.get(key)
+        if isinstance(values, list):
+            out.extend(values)
+    custom_words = preferences.get('customWords')
+    if isinstance(custom_words, list):
+        out.extend(custom_words)
+
+    normalized = []
+    for entry in out:
+        word = str(entry or '').strip().lower()
+        if not word:
+            continue
+        if word not in normalized:
+            normalized.append(word)
+    return normalized[:32]
+
+
+def _decode_wav_to_mono_float(decoded_audio: bytes) -> tuple[np.ndarray, int]:
+    if not decoded_audio:
+        return np.array([], dtype=np.float32), AUDIO_SAMPLE_RATE
+    with wave.open(BytesIO(decoded_audio), 'rb') as wav_reader:
+        channels = int(wav_reader.getnchannels() or 1)
+        sample_width = int(wav_reader.getsampwidth() or 0)
+        sample_rate = int(wav_reader.getframerate() or 0) or AUDIO_SAMPLE_RATE
+        frame_count = int(wav_reader.getnframes() or 0)
+        raw_frames = wav_reader.readframes(frame_count)
+
+    if not raw_frames or sample_width <= 0:
+        return np.array([], dtype=np.float32), sample_rate
+
+    if sample_width == 1:
+        mono = (np.frombuffer(raw_frames, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
+    elif sample_width == 2:
+        mono = np.frombuffer(raw_frames, dtype=np.int16).astype(np.float32) / 32768.0
+    elif sample_width == 4:
+        mono = np.frombuffer(raw_frames, dtype=np.int32).astype(np.float32) / 2147483648.0
+    else:
+        return np.array([], dtype=np.float32), sample_rate
+
+    if channels > 1 and mono.size >= channels:
+        frame_total = mono.size // channels
+        mono = mono[: frame_total * channels].reshape(frame_total, channels).mean(axis=1)
+    return mono.astype(np.float32, copy=False), sample_rate
+
+
+def _float_to_base64_wav(samples: np.ndarray, sample_rate: int) -> str:
+    if samples is None or int(samples.size) == 0:
+        return ''
+    pcm = np.clip(samples.astype(np.float32, copy=False), -1.0, 1.0)
+    pcm16 = (pcm * 32767.0).astype(np.int16)
+    with BytesIO() as wav_buffer:
+        with cast(wave.Wave_write, wave.open(wav_buffer, 'wb')) as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(int(sample_rate) if int(sample_rate) > 0 else AUDIO_SAMPLE_RATE)
+            wav_file.writeframes(pcm16.tobytes())
+        return base64.b64encode(wav_buffer.getvalue()).decode('ascii')
+
+
+def _normalized_word_tokens(words: list[dict]) -> list[str]:
+    return [str(entry.get('word') or '').strip().lower() for entry in (words or []) if str(entry.get('word') or '').strip()]
+
+
+def _suffix_prefix_overlap(prev_tokens: list[str], new_tokens: list[str], max_overlap: int = 20) -> int:
+    if not prev_tokens or not new_tokens:
+        return 0
+    limit = min(len(prev_tokens), len(new_tokens), max_overlap)
+    for size in range(limit, 0, -1):
+        if prev_tokens[-size:] == new_tokens[:size]:
+            return size
+    return 0
+
+
+def _longest_common_prefix_words(first_text: str, second_text: str) -> str:
+    first = [token for token in str(first_text or '').split(' ') if token]
+    second = [token for token in str(second_text or '').split(' ') if token]
+    out = []
+    for idx, token in enumerate(first):
+        if idx >= len(second):
+            break
+        if token != second[idx]:
+            break
+        out.append(token)
+    return ' '.join(out).strip()
 
 
 def as_bool(value) -> bool:
