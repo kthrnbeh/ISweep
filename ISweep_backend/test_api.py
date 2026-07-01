@@ -795,6 +795,63 @@ class TestAPI:
         assert data['source'] == 'silence'
         assert data['confidence'] == 0.0
 
+    def test_captions_transcribe_returns_word_timestamps(self, client):
+        token, _ = signup_and_get_token(client, email='captions-word-timestamps@example.com')
+
+        class AnalyzerStub:
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id, caption_only=False):
+                return {
+                    'status': 'ready',
+                    'source': 'audio_stt',
+                    'events': [],
+                    'cleaned_captions': [
+                        {
+                            'start_seconds': 1.0,
+                            'end_seconds': 2.0,
+                            'text': 'go to hell now',
+                            'clean_text': 'go to ___ now',
+                            'words': [
+                                {'word': 'go', 'start': 1.0, 'end': 1.2},
+                                {'word': 'to', 'start': 1.2, 'end': 1.3},
+                                {'word': 'hell', 'start': 1.3, 'end': 1.7},
+                                {'word': 'now', 'start': 1.7, 'end': 2.0},
+                            ],
+                        }
+                    ],
+                    'text': 'go to hell now',
+                    'clean_text': 'go to ___ now',
+                    'words': [
+                        {'word': 'go', 'start': 1.0, 'end': 1.2},
+                        {'word': 'to', 'start': 1.2, 'end': 1.3},
+                        {'word': 'hell', 'start': 1.3, 'end': 1.7},
+                        {'word': 'now', 'start': 1.7, 'end': 2.0},
+                    ],
+                    'failure_reason': None,
+                }
+
+        client.application.analyzer = AnalyzerStub()
+        response = client.post(
+            '/captions/transcribe',
+            json={
+                'video_id': 'captions-vid-words',
+                'audio_chunk': 'ZmFrZQ==',
+                'mime_type': 'audio/wav',
+                'chunk_start_seconds': 1.0,
+                'chunk_end_seconds': 2.0,
+            },
+            headers=auth_headers(token),
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['source'] == 'audio_stt'
+        assert isinstance(data.get('words'), list)
+        assert len(data['words']) == 4
+        assert data['words'][2]['word'].lower() == 'hell'
+        assert isinstance(data.get('word_timestamps'), list)
+        assert len(data['word_timestamps']) == 4
+        assert data['word_timestamps'][2]['word'].lower() == 'hell'
+
     def test_captions_transcribe_accepts_float_audio_payload(self, client):
         token, _ = signup_and_get_token(client, email='captions-transcribe-float-audio@example.com')
 
