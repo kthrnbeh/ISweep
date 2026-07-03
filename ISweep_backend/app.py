@@ -115,7 +115,7 @@ captions_debug: dict = {
 }
 
 # Rolling per-session caption state used by /captions/transcribe live pipeline.
-# Keyed by user+video so each active tab/session keeps an independent buffer.
+# Keyed by user+tab+video+session so each active tab/session keeps an independent buffer.
 rolling_caption_state: dict = {}
 ROLLING_CAPTION_WINDOW_SEC = 4.0
 ROLLING_TRANSCRIBE_INTERVAL_MS = 750
@@ -148,24 +148,37 @@ def _extract_transcribe_text(result: dict) -> str:
     return ''
 
 
-def _rolling_state_key(user_id: int | None, video_id: str) -> str:
+def _rolling_state_key(user_id: int | None, tab_id: int | None, video_id: str, session_id: str | None) -> str:
     clean_video_id = str(video_id or '').strip() or 'unknown_video'
-    return f"{int(user_id or 0)}::{clean_video_id}"
+    clean_session_id = str(session_id or '').strip() or 'unknown_session'
+    clean_tab_id = int(tab_id or 0)
+    return f"{int(user_id or 0)}::{clean_tab_id}::{clean_video_id}::{clean_session_id}"
 
 
-def _get_or_create_rolling_state(user_id: int | None, video_id: str) -> dict:
-    key = _rolling_state_key(user_id, video_id)
+def _reset_rolling_state(state: dict, sample_rate: int = AUDIO_SAMPLE_RATE) -> None:
+    state['sample_rate'] = int(sample_rate or AUDIO_SAMPLE_RATE)
+    state['samples'] = np.array([], dtype=np.float32)
+    state['last_transcribe_at'] = 0
+    state['last_text'] = ''
+    state['last_stable_text'] = ''
+    state['last_words'] = []
+    state['last_word_tokens'] = []
+    state['last_sequence_number'] = None
+
+
+def _get_or_create_rolling_state(user_id: int | None, tab_id: int | None, video_id: str, session_id: str | None) -> tuple[str, dict, bool]:
+    key = _rolling_state_key(user_id, tab_id, video_id, session_id)
     if key not in rolling_caption_state:
-        rolling_caption_state[key] = {
-            'sample_rate': AUDIO_SAMPLE_RATE,
-            'samples': np.array([], dtype=np.float32),
-            'last_transcribe_at': 0,
-            'last_text': '',
-            'last_stable_text': '',
-            'last_words': [],
-            'last_word_tokens': [],
-        }
-    return rolling_caption_state[key]
+        rolling_caption_state[key] = {}
+        _reset_rolling_state(rolling_caption_state[key], AUDIO_SAMPLE_RATE)
+        rolling_caption_state[key]['created_at'] = int(time.time() * 1000)
+        rolling_caption_state[key]['key'] = key
+        return key, rolling_caption_state[key], True
+    return key, rolling_caption_state[key], False
+
+
+def _log_stt_session(event: str, payload: dict) -> None:
+    print(f"[ISWEEP][STT_SESSION] {event}", payload)
 
 
 def _extract_filter_word_hints(preferences: dict) -> list[str]:
@@ -1003,6 +1016,13 @@ def transcribe_caption_audio():
     float_samples = data.get('audio')
     mime_type = str(data.get('mime_type') or 'audio/wav').strip()
     video_id = str(data.get('video_id') or '').strip()
+    tab_id = int(data.get('tab_id')) if str(data.get('tab_id') or '').isdigit() else None
+    session_id = str(data.get('session_id') or '').strip() or None
+    chunk_id = str(data.get('chunk_id') or '').strip() or None
+    sequence_number = int(data.get('sequence_number')) if str(data.get('sequence_number') or '').isdigit() else None
+    audio_window_start_ms = int(data.get('audio_window_start_ms')) if str(data.get('audio_window_start_ms') or '').isdigit() else None
+    audio_window_end_ms = int(data.get('audio_window_end_ms')) if str(data.get('audio_window_end_ms') or '').isdigit() else None
+    vad_state = str(data.get('vad_state') or '').strip().lower() or None
 
     try:
         start_seconds = float(
@@ -1098,7 +1118,24 @@ def transcribe_caption_audio():
         'wav_parse_ok': wav_metrics.get('wav_parse_ok'),
     })
 
-    rolling_state = _get_or_create_rolling_state(request.user_id, video_id)
+    rolling_key, rolling_state, created_new_state = _get_or_create_rolling_state(
+        request.user_id,
+        tab_id,
+        video_id,
+        session_id,
+    )
+    if created_new_state:
+        _log_stt_session('buffer reset', {
+            'tab_id': tab_id,
+            'video_id': video_id,
+            'session_id': session_id,
+            'chunk_id': chunk_id,
+            'audio_window_start_ms': audio_window_start_ms,
+            'audio_window_end_ms': audio_window_end_ms,
+            'vad_state': vad_state,
+            'reason': 'new_identity_key',
+            'rolling_key': rolling_key,
+        })
     mono_samples = np.array([], dtype=np.float32)
     decoded_sample_rate = wav_metrics.get('sample_rate') if isinstance(wav_metrics.get('sample_rate'), (int, float)) else None
     try:
@@ -1112,6 +1149,64 @@ def transcribe_caption_audio():
         rolling_sample_rate = int(decoded_sample_rate)
     else:
         rolling_sample_rate = int(rolling_state.get('sample_rate') or AUDIO_SAMPLE_RATE)
+
+    previous_sequence_number = rolling_state.get('last_sequence_number')
+    if sequence_number is not None and isinstance(previous_sequence_number, int) and sequence_number <= previous_sequence_number:
+        _log_stt_session('stale transcript rejected', {
+            'tab_id': tab_id,
+            'video_id': video_id,
+            'session_id': session_id,
+            'chunk_id': chunk_id,
+            'sequence_number': sequence_number,
+            'previous_sequence_number': previous_sequence_number,
+            'audio_window_start_ms': audio_window_start_ms,
+            'audio_window_end_ms': audio_window_end_ms,
+            'vad_state': vad_state,
+            'stt_status': 'transcription_error',
+            'text_length': 0,
+            'word_count': 0,
+        })
+        stale_response = {
+            'text': '',
+            'source': 'silence',
+            'confidence': 0.0,
+            'status': 'error',
+            'reason': 'stale transcript rejected',
+            'failure_reason': 'stale_chunk_rejected',
+            'events': [],
+            'cleaned_captions': [],
+            'clean_captions': [],
+            'clean_text': '',
+            'cleaned_text': '',
+            'words': [],
+            'word_timestamps': [],
+            'is_partial': False,
+            'stable_text': '',
+            'stt_status': 'transcription_error',
+            'stt_error': 'stale_chunk_rejected',
+            'latency': {
+                'capture_started_at': capture_started_at,
+                'chunk_started_at': chunk_started_at,
+                'chunk_flushed_at': chunk_flushed_at,
+                'chunk_emitted_at': chunk_emitted_at,
+                'backend_received_at': backend_received_at,
+                'transcribe_started_at': transcribe_started_at,
+                'transcribe_finished_at': int(time.time() * 1000),
+                'content_script_received_at': None,
+                'overlay_rendered_at': None,
+                'total_latency_ms': (
+                    max(int(time.time() * 1000) - int(capture_started_at), 0)
+                    if capture_started_at is not None else None
+                ),
+            },
+            'start_seconds': start_seconds,
+            'end_seconds': end_seconds,
+            'cached': False,
+        }
+        return jsonify(stale_response), 200
+
+    if sequence_number is not None:
+        rolling_state['last_sequence_number'] = sequence_number
 
     existing_rate = int(rolling_state.get('sample_rate') or rolling_sample_rate)
     if existing_rate != rolling_sample_rate:
@@ -1302,6 +1397,21 @@ def transcribe_caption_audio():
     elif stt_status == 'ok':
         source = 'audio_stt_live'
 
+    force_silence_payload = (
+        stt_status == 'silent_audio'
+        or vad_state in {'speech_end', 'silence', 'speech_ended'}
+        or source == 'silence'
+    )
+    if force_silence_payload:
+        _reset_rolling_state(rolling_state, rolling_sample_rate)
+        if sequence_number is not None:
+            rolling_state['last_sequence_number'] = sequence_number
+        source = 'silence'
+        text = ''
+        words = []
+        word_timestamps = []
+        stable_text = ''
+
     latency = {
         'capture_started_at': capture_started_at,
         'chunk_started_at': chunk_started_at,
@@ -1345,6 +1455,41 @@ def transcribe_caption_audio():
         'end_seconds': end_seconds,
         'cached': False,
     }
+
+    if force_silence_payload:
+        response['text'] = ''
+        response['clean_text'] = ''
+        response['cleaned_text'] = ''
+        response['stable_text'] = ''
+        response['words'] = []
+        response['word_timestamps'] = []
+        _log_stt_session('silence response emitted', {
+            'tab_id': tab_id,
+            'video_id': video_id,
+            'session_id': session_id,
+            'chunk_id': chunk_id,
+            'sequence_number': sequence_number,
+            'audio_window_start_ms': audio_window_start_ms,
+            'audio_window_end_ms': audio_window_end_ms,
+            'vad_state': vad_state,
+            'stt_status': response['stt_status'],
+            'text_length': 0,
+            'word_count': 0,
+        })
+    elif response['stt_status'] == 'ok' and response['source'] == 'audio_stt_live' and response['text']:
+        _log_stt_session('transcript accepted', {
+            'tab_id': tab_id,
+            'video_id': video_id,
+            'session_id': session_id,
+            'chunk_id': chunk_id,
+            'sequence_number': sequence_number,
+            'audio_window_start_ms': audio_window_start_ms,
+            'audio_window_end_ms': audio_window_end_ms,
+            'vad_state': vad_state,
+            'stt_status': response['stt_status'],
+            'text_length': len(response['text'] or ''),
+            'word_count': len(response.get('word_timestamps') or []),
+        })
 
     captions_debug['last_source'] = response['source']
     captions_debug['last_text_length'] = len(response['text'] or '')

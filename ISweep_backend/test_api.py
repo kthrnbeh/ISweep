@@ -844,6 +844,149 @@ class TestAPI:
         assert data['confidence'] == 0.0
         assert data['stt_status'] == 'silent_audio'
         assert data['stt_error'] is None
+        assert data['clean_text'] == ''
+        assert data['cleaned_text'] == ''
+        assert data['stable_text'] == ''
+        assert data['words'] == []
+        assert data['word_timestamps'] == []
+
+    def test_captions_transcribe_speech_end_vad_forces_empty_payload(self, client):
+        token, _ = signup_and_get_token(client, email='captions-speech-end-empty@example.com')
+
+        class AnalyzerStub:
+            stt_enabled = True
+            stt_model_size = 'base'
+
+            def _get_or_create_stt_adapter(self):
+                return object()
+
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id, caption_only=False):
+                return {
+                    'status': 'ready',
+                    'source': 'audio_stt_live',
+                    'events': [],
+                    'cleaned_captions': [],
+                    'text': 'carry over words should not survive speech_end',
+                    'clean_text': 'carry over words should not survive speech_end',
+                    'words': [{'word': 'carry', 'start': 1.0, 'end': 1.2}],
+                    'failure_reason': None,
+                }
+
+        client.application.analyzer = AnalyzerStub()
+        response = client.post(
+            '/captions/transcribe',
+            json={
+                'video_id': 'captions-vid-speech-end',
+                'tab_id': 73,
+                'session_id': 'session-a',
+                'chunk_id': 'session-a:4',
+                'sequence_number': 4,
+                'audio_chunk': make_tone_wav_base64(),
+                'mime_type': 'audio/wav',
+                'vad_state': 'speech_end',
+                'chunk_start_seconds': 3.0,
+                'chunk_end_seconds': 4.0,
+            },
+            headers=auth_headers(token),
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['source'] == 'silence'
+        assert data['text'] == ''
+        assert data['clean_text'] == ''
+        assert data['cleaned_text'] == ''
+        assert data['stable_text'] == ''
+        assert data['words'] == []
+        assert data['word_timestamps'] == []
+
+    def test_captions_transcribe_rejects_stale_sequence_only_within_same_tab_video_session(self, client):
+        import app as app_module
+        token, _ = signup_and_get_token(client, email='captions-stale-sequence@example.com')
+
+        class AnalyzerStub:
+            stt_enabled = True
+            stt_model_size = 'base.en'
+
+            def _get_or_create_stt_adapter(self):
+                return object()
+
+            def analyze_audio_chunk(self, audio_chunk, mime_type, start_seconds, end_seconds, preferences, video_id, caption_only=False):
+                return {
+                    'status': 'ready',
+                    'source': 'audio_stt_live',
+                    'events': [],
+                    'cleaned_captions': [],
+                    'text': 'fresh transcript',
+                    'clean_text': 'fresh transcript',
+                    'words': [{'word': 'fresh', 'start': 1.0, 'end': 1.2}],
+                    'failure_reason': None,
+                }
+
+        original_interval = app_module.ROLLING_TRANSCRIBE_INTERVAL_MS
+        app_module.ROLLING_TRANSCRIBE_INTERVAL_MS = 0
+        client.application.analyzer = AnalyzerStub()
+        try:
+            first = client.post(
+                '/captions/transcribe',
+                json={
+                    'video_id': 'captions-seq-vid',
+                    'tab_id': 101,
+                    'session_id': 'session-seq',
+                    'chunk_id': 'session-seq:5',
+                    'sequence_number': 5,
+                    'audio_chunk': make_tone_wav_base64(),
+                    'mime_type': 'audio/wav',
+                    'chunk_start_seconds': 1.0,
+                    'chunk_end_seconds': 2.0,
+                },
+                headers=auth_headers(token),
+            )
+            stale = client.post(
+                '/captions/transcribe',
+                json={
+                    'video_id': 'captions-seq-vid',
+                    'tab_id': 101,
+                    'session_id': 'session-seq',
+                    'chunk_id': 'session-seq:4',
+                    'sequence_number': 4,
+                    'audio_chunk': make_tone_wav_base64(),
+                    'mime_type': 'audio/wav',
+                    'chunk_start_seconds': 1.1,
+                    'chunk_end_seconds': 2.1,
+                },
+                headers=auth_headers(token),
+            )
+            different_session = client.post(
+                '/captions/transcribe',
+                json={
+                    'video_id': 'captions-seq-vid',
+                    'tab_id': 101,
+                    'session_id': 'session-seq-new',
+                    'chunk_id': 'session-seq-new:1',
+                    'sequence_number': 1,
+                    'audio_chunk': make_tone_wav_base64(),
+                    'mime_type': 'audio/wav',
+                    'chunk_start_seconds': 1.2,
+                    'chunk_end_seconds': 2.2,
+                },
+                headers=auth_headers(token),
+            )
+        finally:
+            app_module.ROLLING_TRANSCRIBE_INTERVAL_MS = original_interval
+
+        assert first.status_code == 200
+        assert stale.status_code == 200
+        assert different_session.status_code == 200
+
+        stale_data = json.loads(stale.data)
+        different_session_data = json.loads(different_session.data)
+        assert stale_data['failure_reason'] == 'stale_chunk_rejected'
+        assert stale_data['text'] == ''
+        assert stale_data['word_timestamps'] == []
+        assert different_session_data['source'] == 'audio_stt_live'
+        assert isinstance(different_session_data['text'], str)
+        assert different_session_data['text']
 
     def test_captions_transcribe_non_silent_stt_result_returns_text_words_and_ok_status(self, client):
         token, _ = signup_and_get_token(client, email='captions-word-timestamps@example.com')
