@@ -166,6 +166,7 @@ def evaluate_manifest_and_predictions(gold_entries: list[dict[str, Any]], predic
     ts_errors: list[float] = []
     mute_leaks: list[float] = []
     over_mutes: list[float] = []
+    line_alignment_success: list[float] = []
 
     for gold in gold_entries:
         sample_id = str(gold.get("id"))
@@ -196,6 +197,10 @@ def evaluate_manifest_and_predictions(gold_entries: list[dict[str, Any]], predic
         mute_leaks.append(mute_metrics["mute_leak_duration_ms"])
         over_mutes.append(mute_metrics["over_mute_duration_ms"])
 
+        alignment_status = str(pred.get("alignment_status") or pred.get("reference_alignment_status") or "").strip().lower()
+        if alignment_status:
+            line_alignment_success.append(1.0 if alignment_status == "aligned" else 0.0)
+
     def _avg(values: list[float]) -> float:
         return (sum(values) / float(len(values))) if values else 0.0
 
@@ -205,42 +210,45 @@ def evaluate_manifest_and_predictions(gold_entries: list[dict[str, Any]], predic
         "word_error_rate": _avg(wers),
         "selected_word_recall": _avg(recalls),
         "selected_word_false_positive_rate": _avg(fp_rates),
+        "line_alignment_success_rate": _avg(line_alignment_success),
         "word_timestamp_error_ms": _avg(ts_errors),
         "mute_leak_duration_ms": _avg(mute_leaks),
         "over_mute_duration_ms": _avg(over_mutes),
     }
 
 
-def get_model_comparison_config() -> dict[str, Any]:
-    configured_model = str(os.getenv("ISWEEP_STT_MODEL_SIZE", "base") or "base").strip() or "base"
-    candidate = "base.en"
-
-    comparison = {
-        "configured_model": configured_model,
-        "candidate_model": candidate,
-        "candidate_available": False,
-        "fallback_model": configured_model,
+def _parse_available_model_names() -> set[str]:
+    raw = str(os.getenv("ISWEEP_STT_AVAILABLE_MODELS", "") or "").strip()
+    if not raw:
+        return set()
+    return {
+        part.strip()
+        for part in raw.split(',')
+        if part.strip()
     }
 
-    try:
-        import importlib
 
-        fw_module = importlib.import_module("faster_whisper")
-        whisper_model = getattr(fw_module, "WhisperModel")
-        try:
-            model = whisper_model(candidate, device="cpu", compute_type="int8")
-            comparison["candidate_available"] = model is not None
-        except Exception:
-            comparison["candidate_available"] = False
-    except Exception:
-        comparison["candidate_available"] = False
+def get_model_comparison_config() -> dict[str, Any]:
+    configured_model = str(os.getenv("ISWEEP_STT_MODEL_SIZE", "base") or "base").strip() or "base"
+    available = _parse_available_model_names()
 
-    if comparison["candidate_available"]:
-        comparison["selected_comparison_model"] = candidate
-    else:
-        comparison["selected_comparison_model"] = configured_model
+    candidate_models: list[str] = []
+    for name in [configured_model, "base.en"]:
+        if name and name not in candidate_models:
+            candidate_models.append(name)
 
-    return comparison
+    # Include small.en only if explicitly configured or already locally available.
+    if configured_model == "small.en" or "small.en" in available:
+        if "small.en" not in candidate_models:
+            candidate_models.append("small.en")
+
+    return {
+        "configured_model": configured_model,
+        "candidate_models": candidate_models,
+        "selected_comparison_models": candidate_models,
+        "available_models_hint": sorted(list(available)),
+        "download_policy": "no_automatic_model_downloads",
+    }
 
 
 def main() -> int:

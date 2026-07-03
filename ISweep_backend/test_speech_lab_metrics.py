@@ -1,6 +1,7 @@
 from speech_lab.scripts.evaluate_stt import (
     caption_latency_ms,
     evaluate_manifest_and_predictions,
+    get_model_comparison_config,
     mute_timing_errors_ms,
     selected_word_metrics,
     word_error_rate,
@@ -76,8 +77,24 @@ def test_evaluate_manifest_and_predictions_outputs_all_required_metrics():
         "word_error_rate",
         "selected_word_recall",
         "selected_word_false_positive_rate",
+        "line_alignment_success_rate",
         "word_timestamp_error_ms",
         "mute_leak_duration_ms",
         "over_mute_duration_ms",
     ):
         assert key in report
+
+
+def test_model_comparison_config_includes_base_and_conditional_small_without_download(monkeypatch):
+    monkeypatch.setenv("ISWEEP_STT_MODEL_SIZE", "base")
+    monkeypatch.setenv("ISWEEP_STT_AVAILABLE_MODELS", "base.en")
+
+    config = get_model_comparison_config()
+    assert config["configured_model"] == "base"
+    assert "base.en" in config["candidate_models"]
+    assert "small.en" not in config["candidate_models"]
+    assert config["download_policy"] == "no_automatic_model_downloads"
+
+    monkeypatch.setenv("ISWEEP_STT_AVAILABLE_MODELS", "base.en,small.en")
+    config_with_small = get_model_comparison_config()
+    assert "small.en" in config_with_small["candidate_models"]
