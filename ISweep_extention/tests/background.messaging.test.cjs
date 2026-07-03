@@ -157,7 +157,7 @@ test('caption runtime status stays listening until audio STT has real text', asy
   assert.equal(result.sourceLabel, 'Listening');
 });
 
-test('caption runtime status reports audio STT live only after real text is present', async () => {
+test('caption runtime status reports audio STT only after real text is present', async () => {
   const bg = loadBackgroundContext();
   bg.getCaptionBackendStatus = async () => ({
     state: 'ready',
@@ -178,8 +178,8 @@ test('caption runtime status reports audio STT live only after real text is pres
 
   const result = await bg.handleCaptionRuntimeStatus();
   assert.equal(result.state, 'ready');
-  assert.equal(result.source, 'audio_stt_live');
-  assert.equal(result.sourceLabel, 'Audio STT Live');
+  assert.equal(result.source, 'audio_stt');
+  assert.equal(result.sourceLabel, 'Audio STT');
 });
 
 test('caption runtime status reports stt_disabled only when health stt_enabled is false', async () => {

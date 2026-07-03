@@ -153,3 +153,13 @@ test('popup shows explicit primary caption source readiness field', () => {
   assert.equal(popupSource.includes('primaryCaptionSourceValue'), true);
   assert.equal(popupSource.includes('Waiting for audio'), true);
 });
+
+test('local reference artifacts are gitignored and not committed as fixtures', () => {
+  const gitignore = fs.readFileSync(path.join(extensionRoot, '.gitignore'), 'utf8');
+  assert.equal(gitignore.includes('local_user_references/'), true);
+  const localRefDir = path.join(extensionRoot, 'local_user_references');
+  if (fs.existsSync(localRefDir)) {
+    const files = fs.readdirSync(localRefDir).filter((name) => !name.startsWith('.'));
+    assert.equal(files.length, 0);
+  }
+});
