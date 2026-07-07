@@ -118,7 +118,7 @@ captions_debug: dict = {
 # Keyed by user+tab+video+session so each active tab/session keeps an independent buffer.
 rolling_caption_state: dict = {}
 ROLLING_CAPTION_WINDOW_SEC = 4.0
-ROLLING_TRANSCRIBE_INTERVAL_MS = 750
+MIN_INITIAL_STT_CONTEXT_MS = 1500
 
 
 def build_preferences_fingerprint(preferences: dict, stt_mode: dict | None = None) -> str:
@@ -1227,7 +1227,59 @@ def transcribe_caption_audio():
         if combined.size > max_samples:
             combined = combined[-max_samples:]
         rolling_state['samples'] = combined
+    rolling_samples_for_context = rolling_state.get('samples')
+    if not isinstance(rolling_samples_for_context, np.ndarray):
+        rolling_samples_for_context = np.array([], dtype=np.float32)
 
+    rolling_duration_ms = (
+        int(round((rolling_samples_for_context.size / rolling_sample_rate) * 1000))
+        if rolling_sample_rate > 0 else 0
+    )
+
+    # Do not ask Whisper to guess from a fraction of a second of audio.
+    if wav_metrics.get('wav_parse_ok') and rolling_duration_ms < MIN_INITIAL_STT_CONTEXT_MS:
+        now_ms = int(time.time() * 1000)
+        waiting_response = {
+            'text': '',
+            'source': 'waiting_audio_context',
+            'confidence': 0.0,
+            'status': 'waiting',
+            'reason': '',
+            'failure_reason': None,
+            'events': [],
+            'cleaned_captions': [],
+            'clean_captions': [],
+            'clean_text': '',
+            'cleaned_text': '',
+            'words': [],
+            'word_timestamps': [],
+            'is_partial': False,
+            'stable_text': '',
+            'stt_status': 'waiting_for_context',
+            'stt_error': None,
+            'start_seconds': start_seconds,
+            'end_seconds': end_seconds,
+            'cached': False,
+        }
+
+        captions_debug['last_source'] = waiting_response['source']
+        captions_debug['last_text_length'] = 0
+        captions_debug['last_text_preview'] = ''
+        captions_debug['last_error'] = None
+        captions_debug['transcribeFinishedAt'] = now_ms
+
+        _log_stt_session('waiting for context', {
+            'tab_id': tab_id,
+            'video_id': video_id,
+            'session_id': session_id,
+            'chunk_id': chunk_id,
+            'sequence_number': sequence_number,
+            'audio_window_end_ms': audio_window_end_ms,
+            'rolling_audio_duration_ms': rolling_duration_ms,
+            'minimum_audio_context_ms': MIN_INITIAL_STT_CONTEXT_MS,
+        })
+
+        return jsonify(waiting_response), 200
     transcribe_finished_at = int(time.time() * 1000)
     can_transcribe_now = (transcribe_finished_at - int(rolling_state.get('last_transcribe_at') or 0)) >= ROLLING_TRANSCRIBE_INTERVAL_MS
     use_cached_only = not can_transcribe_now and bool(rolling_state.get('last_text'))
