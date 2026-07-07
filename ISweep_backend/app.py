@@ -118,6 +118,7 @@ captions_debug: dict = {
 # Keyed by user+tab+video+session so each active tab/session keeps an independent buffer.
 rolling_caption_state: dict = {}
 ROLLING_CAPTION_WINDOW_SEC = 4.0
+ROLLING_TRANSCRIBE_INTERVAL_MS = 750
 MIN_INITIAL_STT_CONTEXT_MS = 1500
 
 
@@ -1280,59 +1281,74 @@ def transcribe_caption_audio():
         })
 
         return jsonify(waiting_response), 200
-    transcribe_finished_at = int(time.time() * 1000)
-    can_transcribe_now = (transcribe_finished_at - int(rolling_state.get('last_transcribe_at') or 0)) >= ROLLING_TRANSCRIBE_INTERVAL_MS
-    use_cached_only = not can_transcribe_now and bool(rolling_state.get('last_text'))
+   transcribe_finished_at = int(time.time() * 1000)
 
-    caught_transcription_exception = None
-    if use_cached_only:
-        result = {
-            'status': 'ready',
-            'source': 'audio_stt_live',
-            'events': [],
-            'cleaned_captions': [],
-            'failure_reason': None,
-            'text': rolling_state.get('last_text') or '',
-            'clean_text': rolling_state.get('last_text') or '',
-            'words': rolling_state.get('last_words') or [],
-        }
-    else:
-        rolling_samples = rolling_state.get('samples') if isinstance(rolling_state.get('samples'), np.ndarray) else np.array([], dtype=np.float32)
-        rolling_duration_sec = (rolling_samples.size / rolling_sample_rate) if rolling_sample_rate > 0 else 0.0
-        rolling_start_seconds = max(end_seconds - rolling_duration_sec, 0.0)
-        rolling_audio_chunk = _float_to_base64_wav(rolling_samples, rolling_sample_rate)
-        hint_words = _extract_filter_word_hints(preferences)
-        print('[ISWEEP][CAPTIONS_TRANSCRIBE] hotword hints', {
-            'video_id': video_id,
-            'count': len(hint_words),
-            'preview': hint_words[:8],
-        })
-        try:
-            result = analyzer.analyze_audio_chunk(
-                rolling_audio_chunk or audio_chunk,
-                'audio/wav',
-                rolling_start_seconds,
-                end_seconds,
-                preferences,
-                video_id,
-                caption_only=True,
-            )
-            rolling_state['last_transcribe_at'] = int(time.time() * 1000)
-        except Exception as exc:
-            caught_transcription_exception = str(exc) or exc.__class__.__name__
-            print('[ISWEEP][CAPTIONS_TRANSCRIBE] transcription exception', {
-                'video_id': video_id,
-                'error': caught_transcription_exception,
-            })
-            result = {
-                'status': 'error',
-                'source': 'audio_stt_live',
-                'events': [],
-                'cleaned_captions': [],
-                'failure_reason': 'transcription_failed',
-                'text': '',
-                'words': [],
-            }
+can_transcribe_now = (
+    transcribe_finished_at
+    - int(rolling_state.get('last_transcribe_at') or 0)
+) >= ROLLING_TRANSCRIBE_INTERVAL_MS
+
+use_cached_only = (
+    not can_transcribe_now
+    and bool(rolling_state.get('last_text'))
+    and vad_state not in {'speech_end', 'silence', 'speech_ended'}
+)
+
+# A throttled window does not mean silence. It only means there is no new
+# transcription result yet. Return a no-change response so background.js
+# preserves the current overlay instead of replaying or clearing it.
+if use_cached_only:
+    no_change_response = {
+        'text': '',
+        'source': 'audio_stt_cached',
+        'confidence': 0.0,
+        'status': 'ready',
+        'reason': '',
+        'failure_reason': None,
+        'events': [],
+        'cleaned_captions': [],
+        'clean_captions': [],
+        'clean_text': '',
+        'cleaned_text': '',
+        'words': [],
+        'word_timestamps': [],
+        'is_partial': False,
+        'stable_text': '',
+        'no_change': True,
+        'stt_status': 'ok',
+        'stt_error': None,
+        'latency': {
+            'capture_started_at': capture_started_at,
+            'chunk_started_at': chunk_started_at,
+            'chunk_flushed_at': chunk_flushed_at,
+            'chunk_emitted_at': chunk_emitted_at,
+            'backend_received_at': backend_received_at,
+            'transcribe_started_at': transcribe_started_at,
+            'transcribe_finished_at': transcribe_finished_at,
+            'content_script_received_at': None,
+            'overlay_rendered_at': None,
+            'total_latency_ms': (
+                max(transcribe_finished_at - int(capture_started_at), 0)
+                if capture_started_at is not None else None
+            ),
+        },
+        'start_seconds': start_seconds,
+        'end_seconds': end_seconds,
+        'cached': True,
+    }
+
+    _log_stt_session('no transcript change', {
+        'tab_id': tab_id,
+        'video_id': video_id,
+        'session_id': session_id,
+        'chunk_id': chunk_id,
+        'sequence_number': sequence_number,
+        'audio_window_end_ms': audio_window_end_ms,
+    })
+
+    return jsonify(no_change_response), 200
+
+caught_transcription_exception = None
 
     raw_transcription_text = str((result or {}).get('text') or '').strip() if isinstance(result, dict) else ''
     full_text = _extract_transcribe_text(result)
@@ -1346,15 +1362,23 @@ def transcribe_caption_audio():
     if not new_tokens and full_text:
         new_tokens = [token.strip().lower() for token in full_text.split(' ') if token.strip()]
 
+    transcript_unchanged = bool(full_text) and full_text == previous_text and not failure_reason
+
+if transcript_unchanged:
+    overlap_size = len(new_tokens)
+    dedup_tokens = []
+    dedup_words = []
+    text = ''
+else:
     overlap_size = _suffix_prefix_overlap(previous_tokens, new_tokens)
     dedup_tokens = new_tokens[overlap_size:] if overlap_size > 0 else new_tokens
     dedup_words = word_timestamps_full[overlap_size:] if overlap_size > 0 else word_timestamps_full
 
     text = ' '.join(dedup_tokens).strip()
+
     if not text and full_text and full_text != previous_text:
         # Correction-only update: publish corrected rolling text when overlap consumed the delta.
         text = full_text
-
     stable_text = _longest_common_prefix_words(previous_text, full_text)
     if not stable_text:
         stable_text = str(rolling_state.get('last_stable_text') or '')
@@ -1417,7 +1441,7 @@ def transcribe_caption_audio():
     elif failure_reason in {'transcription_failed', 'analyze_exception', 'audio_decode_failed', 'transcription_error'}:
         stt_status = 'transcription_error'
         stt_error = failure_reason
-    elif not text and len(word_timestamps) == 0:
+    elif not text and len(word_timestamps) == 0 and not transcript_unchanged:
         if is_quiet_audio:
             stt_status = 'silent_audio'
             stt_error = None
@@ -1448,12 +1472,18 @@ def transcribe_caption_audio():
         source = 'audio_stt'
     elif stt_status == 'ok':
         source = 'audio_stt_live'
+        if transcript_unchanged:
+            source = 'audio_stt_cached'
+    
 
     force_silence_payload = (
+    not transcript_unchanged
+    and (
         stt_status == 'silent_audio'
         or vad_state in {'speech_end', 'silence', 'speech_ended'}
         or source == 'silence'
     )
+)
     if force_silence_payload:
         _reset_rolling_state(rolling_state, rolling_sample_rate)
         if sequence_number is not None:
