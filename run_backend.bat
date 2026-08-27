@@ -12,15 +12,20 @@ if not exist "%BACKEND_DIR%\app.py" (
 
 cd /d "%BACKEND_DIR%"
 
-REM Prefer backend-local virtual environment, then repo-level environment.
-if exist "%BACKEND_DIR%\.venv\Scripts\activate.bat" (
-  call "%BACKEND_DIR%\.venv\Scripts\activate.bat"
-) else if exist "%ROOT_DIR%.venv\Scripts\activate.bat" (
-  call "%ROOT_DIR%.venv\Scripts\activate.bat"
+REM Prefer an explicit virtual-environment interpreter so Windows startup does
+REM not depend on PATH or the Microsoft Store Python alias.
+set "PYTHON_EXE="
+if exist "%BACKEND_DIR%\.venv\Scripts\python.exe" (
+  set "PYTHON_EXE=%BACKEND_DIR%\.venv\Scripts\python.exe"
+) else if exist "%ROOT_DIR%.venv\Scripts\python.exe" (
+  set "PYTHON_EXE=%ROOT_DIR%.venv\Scripts\python.exe"
+) else (
+  set "PYTHON_EXE=python.exe"
 )
 
 echo [ISweep] Starting backend from "%BACKEND_DIR%"
-python app.py
+echo [ISweep] Using Python: "%PYTHON_EXE%"
+"%PYTHON_EXE%" app.py
 set "EXIT_CODE=%ERRORLEVEL%"
 
 echo.
