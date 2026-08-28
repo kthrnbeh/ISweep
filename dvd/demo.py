@@ -152,7 +152,7 @@ def load_shared_preferences():
         return None
 
     # getpass hides the password while the user types.
-    password = getpass("ISweep password: ")
+    password = getpass("ISweep password (typing is hidden — press Enter when done): ")
 
     if not password:
         print("An ISweep password is required.")
