@@ -2,3 +2,8 @@ WARNING: This is a development server. Do not use it in a production deployment.
  * Running on http://127.0.0.1:5000
 Press CTRL+C to quit
 127.0.0.1 - - [27/Aug/2026 18:51:32] "GET /health HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:51:41] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:51:41] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:51:43] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:51:45] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:51:47] "POST /captions/transcribe HTTP/1.1" 200 -
