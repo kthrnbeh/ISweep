@@ -15,7 +15,26 @@
         { "id": "profanity-11", "token": "ZGFuZw==" },
         { "id": "profanity-12", "token": "cmF0cw==" },
         { "id": "profanity-13", "token": "Y3J1ZGR5" },
-        { "id": "profanity-14", "token": "Z29zaGRhcm4=" }
+        { "id": "profanity-14", "token": "Z29zaGRhcm4=" },
+        { "id": "profanity-15", "token": "aGVsbA==" },
+        { "id": "profanity-16", "token": "ZGFtbg==" },
+        { "id": "profanity-17", "token": "ZGFtbWl0" },
+        { "id": "profanity-18", "token": "ZnVjaw==" },
+        { "id": "profanity-19", "token": "ZnVja2luZw==" },
+        { "id": "profanity-20", "token": "ZnVja2Vk" },
+        { "id": "profanity-21", "token": "ZnVja2Vy" },
+        { "id": "profanity-22", "token": "c2hpdA==" },
+        { "id": "profanity-23", "token": "c2hpdHR5" },
+        { "id": "profanity-24", "token": "Yml0Y2g=" },
+        { "id": "profanity-25", "token": "YmFzdGFyZA==" },
+        { "id": "profanity-26", "token": "YXNzaG9sZQ==" },
+        { "id": "profanity-27", "token": "YXNz" },
+        { "id": "profanity-28", "token": "YnVsbHNoaXQ=" },
+        { "id": "profanity-29", "token": "Y3JhcA==" },
+        { "id": "profanity-30", "token": "cGlzcw==" },
+        { "id": "profanity-31", "token": "ZGljaw==" },
+        { "id": "profanity-32", "token": "ZGlja2hlYWQ=" },
+        { "id": "profanity-33", "token": "cHJpY2s=" }
       ]
     },
     "blasphemy": {
@@ -25,7 +44,10 @@
         { "id": "blasphemy-3", "token": "Z2Vl" },
         { "id": "blasphemy-4", "token": "Z2Vld2hpeg==" },
         { "id": "blasphemy-5", "token": "Z29vZG5lc3M=" },
-        { "id": "blasphemy-6", "token": "Z3JhY2lvdXM=" }
+        { "id": "blasphemy-6", "token": "Z3JhY2lvdXM=" },
+        { "id": "blasphemy-7", "token": "Z29kZGFtbg==" },
+        { "id": "blasphemy-8", "token": "Z29kIGRhbW4=" },
+        { "id": "blasphemy-9", "token": "b2ggbXkgZ29k" }
       ]
     },
     "childish": {
