@@ -23,6 +23,8 @@ import os
 import secrets
 import re
 import base64
+import logging
+import sys
 import time
 import wave
 from io import BytesIO
@@ -45,6 +47,26 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 # Initialize Flask app
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key')
+
+# Werkzeug emits normal access traffic through stderr by default. The hidden
+# launcher separates stdout and stderr, so route routine traffic to activity
+# while preserving ERROR records for the backend error log.
+class _BelowError(logging.Filter):
+    def filter(self, record):
+        return record.levelno < logging.ERROR
+
+
+werkzeug_logger = logging.getLogger('werkzeug')
+werkzeug_logger.handlers.clear()
+activity_handler = logging.StreamHandler(sys.stdout)
+activity_handler.setLevel(logging.INFO)
+activity_handler.addFilter(_BelowError())
+error_handler = logging.StreamHandler(sys.stderr)
+error_handler.setLevel(logging.ERROR)
+werkzeug_logger.addHandler(activity_handler)
+werkzeug_logger.addHandler(error_handler)
+werkzeug_logger.setLevel(logging.INFO)
+werkzeug_logger.propagate = False
 
 ALLOWED_ORIGINS = [
     "http://127.0.0.1:5500",
