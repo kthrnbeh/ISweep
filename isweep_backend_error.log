@@ -41,3 +41,17 @@ Press CTRL+C to quit
 127.0.0.1 - - [27/Aug/2026 18:52:45] "POST /captions/transcribe HTTP/1.1" 200 -
 127.0.0.1 - - [27/Aug/2026 18:52:47] "POST /captions/transcribe HTTP/1.1" 200 -
 127.0.0.1 - - [27/Aug/2026 18:52:49] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:52:51] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:52:53] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:52:55] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:52:57] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:52:59] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:53:01] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:53:03] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:53:05] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:53:07] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:53:09] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:53:11] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:53:13] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:53:15] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:53:17] "POST /captions/transcribe HTTP/1.1" 200 -
