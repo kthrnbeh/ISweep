@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-REM Start core local-dev pieces used by ISweep.
+REM Start the ISweep backend without requiring VS Code or a visible terminal.
 set "ROOT_DIR=%~dp0"
 
 if not exist "%ROOT_DIR%start_backend.bat" (
@@ -11,16 +11,7 @@ if not exist "%ROOT_DIR%start_backend.bat" (
 
 call "%ROOT_DIR%start_backend.bat"
 
-REM Open quick checks and local pages.
-start "" "http://127.0.0.1:5000/health"
-
-if exist "%ROOT_DIR%docs\index.html" (
-  start "" "%ROOT_DIR%docs\index.html"
-)
-
-start "" "chrome://extensions/"
-
 echo [ISweep] Startup sequence launched.
-echo [ISweep] If your frontend uses Live Server, open the docs URL from your VS Code Live Server session.
+echo [ISweep] Backend runs independently of VS Code and the browser popup.
 
 endlocal & exit /b 0

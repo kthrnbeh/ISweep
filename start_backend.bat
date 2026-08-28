@@ -1,16 +1,20 @@
 @echo off
 setlocal
 
-REM Launch backend in a dedicated terminal window.
+REM Launch the backend independently of VS Code or a visible terminal window.
 set "ROOT_DIR=%~dp0"
-set "RUN_SCRIPT=%ROOT_DIR%run_backend.bat"
+set "HIDDEN_SCRIPT=%ROOT_DIR%run_backend_hidden.ps1"
 
-if not exist "%RUN_SCRIPT%" (
-  echo [ISweep] Missing script: "%RUN_SCRIPT%"
+if not exist "%HIDDEN_SCRIPT%" (
+  echo [ISweep] Missing script: "%HIDDEN_SCRIPT%"
   endlocal & exit /b 1
 )
 
-start "ISweep Backend" cmd /k ""%RUN_SCRIPT%""
-echo [ISweep] Backend window launched.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%HIDDEN_SCRIPT%"
+if errorlevel 1 (
+  echo [ISweep] Backend launch failed.
+  endlocal & exit /b 1
+)
+echo [ISweep] Backend launch requested in the background.
 
 endlocal & exit /b 0
