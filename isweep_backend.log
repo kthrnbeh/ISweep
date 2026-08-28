@@ -1,2 +1,145 @@
  * Serving Flask app 'app'
  * Debug mode: off
+[ISWEEP][STT] whisper enabled {'model': 'base', 'fallback_model': 'base', 'language': 'en', 'vad_filter': True, 'device': 'cpu', 'compute_type': 'int8'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] request received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 117.55200000000002, 'end_seconds': 119.80800000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] stt state {'video_id': 'tQmEd_UeeIk', 'stt_enabled': True, 'model_name': 'base', 'model_initialized': True, 'model_init_error': None}
+[ISWEEP][CAPTIONS_TRANSCRIBE] audio diagnostics {'video_id': 'tQmEd_UeeIk', 'wav_bytes': 72236, 'sample_rate': 16000, 'duration_seconds': 2.256, 'rms': 0.0, 'peak': 0.0, 'wav_parse_ok': True}
+[ISWEEP][STT_SESSION] buffer reset {'tab_id': 124035955, 'video_id': 'tQmEd_UeeIk', 'session_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63', 'chunk_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63:94', 'audio_window_start_ms': 117552, 'audio_window_end_ms': 119808, 'vad_state': None, 'reason': 'new_identity_key', 'rolling_key': '2::124035955::tQmEd_UeeIk::124035955:tQmEd_UeeIk:1787878149450:nvsc63'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] hotword hints {'video_id': 'tQmEd_UeeIk', 'count': 0, 'preview': []}
+[ISWEEP][AUDIO_STT] chunk received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 117.55200000000002, 'end_seconds': 119.80800000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][AUDIO_DEBUG] received audio bytes: 72236
+[ISWEEP][AUDIO_STT] whisper started {'video_id': 'tQmEd_UeeIk', 'model': 'base'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] transcription output {'video_id': 'tQmEd_UeeIk', 'raw_text_preview': '', 'clean_text_preview': '', 'word_timestamp_count': 0, 'dedup_word_timestamp_count': 0, 'is_partial': False, 'stable_text_preview': '', 'failure_reason': None}
+[ISWEEP][STT_SESSION] silence response emitted {'tab_id': 124035955, 'video_id': 'tQmEd_UeeIk', 'session_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63', 'chunk_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63:94', 'sequence_number': 94, 'audio_window_start_ms': 117552, 'audio_window_end_ms': 119808, 'vad_state': None, 'stt_status': 'silent_audio', 'text_length': 0, 'word_count': 0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] text returned {'video_id': 'tQmEd_UeeIk', 'source': 'silence', 'text': '', 'confidence': 0.0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] request received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 125.08800000000002, 'end_seconds': 127.34400000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] stt state {'video_id': 'tQmEd_UeeIk', 'stt_enabled': True, 'model_name': 'base', 'model_initialized': True, 'model_init_error': None}
+[ISWEEP][CAPTIONS_TRANSCRIBE] audio diagnostics {'video_id': 'tQmEd_UeeIk', 'wav_bytes': 72236, 'sample_rate': 16000, 'duration_seconds': 2.256, 'rms': 0.0, 'peak': 0.0, 'wav_parse_ok': True}
+[ISWEEP][CAPTIONS_TRANSCRIBE] hotword hints {'video_id': 'tQmEd_UeeIk', 'count': 0, 'preview': []}
+[ISWEEP][AUDIO_STT] chunk received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 125.08800000000002, 'end_seconds': 127.34400000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][AUDIO_DEBUG] received audio bytes: 72236
+[ISWEEP][AUDIO_STT] whisper started {'video_id': 'tQmEd_UeeIk', 'model': 'base'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] transcription output {'video_id': 'tQmEd_UeeIk', 'raw_text_preview': '', 'clean_text_preview': '', 'word_timestamp_count': 0, 'dedup_word_timestamp_count': 0, 'is_partial': False, 'stable_text_preview': '', 'failure_reason': None}
+[ISWEEP][STT_SESSION] silence response emitted {'tab_id': 124035955, 'video_id': 'tQmEd_UeeIk', 'session_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63', 'chunk_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63:100', 'sequence_number': 100, 'audio_window_start_ms': 125088, 'audio_window_end_ms': 127344, 'vad_state': None, 'stt_status': 'silent_audio', 'text_length': 0, 'word_count': 0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] text returned {'video_id': 'tQmEd_UeeIk', 'source': 'silence', 'text': '', 'confidence': 0.0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] request received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 126.34400000000002, 'end_seconds': 128.60000000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] stt state {'video_id': 'tQmEd_UeeIk', 'stt_enabled': True, 'model_name': 'base', 'model_initialized': True, 'model_init_error': None}
+[ISWEEP][CAPTIONS_TRANSCRIBE] audio diagnostics {'video_id': 'tQmEd_UeeIk', 'wav_bytes': 72236, 'sample_rate': 16000, 'duration_seconds': 2.256, 'rms': 0.0, 'peak': 0.0, 'wav_parse_ok': True}
+[ISWEEP][CAPTIONS_TRANSCRIBE] hotword hints {'video_id': 'tQmEd_UeeIk', 'count': 0, 'preview': []}
+[ISWEEP][AUDIO_STT] chunk received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 126.34400000000002, 'end_seconds': 128.60000000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][AUDIO_DEBUG] received audio bytes: 72236
+[ISWEEP][AUDIO_STT] whisper started {'video_id': 'tQmEd_UeeIk', 'model': 'base'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] transcription output {'video_id': 'tQmEd_UeeIk', 'raw_text_preview': '', 'clean_text_preview': '', 'word_timestamp_count': 0, 'dedup_word_timestamp_count': 0, 'is_partial': False, 'stable_text_preview': '', 'failure_reason': None}
+[ISWEEP][STT_SESSION] silence response emitted {'tab_id': 124035955, 'video_id': 'tQmEd_UeeIk', 'session_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63', 'chunk_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63:101', 'sequence_number': 101, 'audio_window_start_ms': 126344, 'audio_window_end_ms': 128600, 'vad_state': None, 'stt_status': 'silent_audio', 'text_length': 0, 'word_count': 0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] text returned {'video_id': 'tQmEd_UeeIk', 'source': 'silence', 'text': '', 'confidence': 0.0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] request received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 127.60000000000002, 'end_seconds': 129.85600000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] stt state {'video_id': 'tQmEd_UeeIk', 'stt_enabled': True, 'model_name': 'base', 'model_initialized': True, 'model_init_error': None}
+[ISWEEP][CAPTIONS_TRANSCRIBE] audio diagnostics {'video_id': 'tQmEd_UeeIk', 'wav_bytes': 72236, 'sample_rate': 16000, 'duration_seconds': 2.256, 'rms': 0.0, 'peak': 0.0, 'wav_parse_ok': True}
+[ISWEEP][CAPTIONS_TRANSCRIBE] hotword hints {'video_id': 'tQmEd_UeeIk', 'count': 0, 'preview': []}
+[ISWEEP][AUDIO_STT] chunk received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 127.60000000000002, 'end_seconds': 129.85600000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][AUDIO_DEBUG] received audio bytes: 72236
+[ISWEEP][AUDIO_STT] whisper started {'video_id': 'tQmEd_UeeIk', 'model': 'base'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] transcription output {'video_id': 'tQmEd_UeeIk', 'raw_text_preview': '', 'clean_text_preview': '', 'word_timestamp_count': 0, 'dedup_word_timestamp_count': 0, 'is_partial': False, 'stable_text_preview': '', 'failure_reason': None}
+[ISWEEP][STT_SESSION] silence response emitted {'tab_id': 124035955, 'video_id': 'tQmEd_UeeIk', 'session_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63', 'chunk_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63:102', 'sequence_number': 102, 'audio_window_start_ms': 127600, 'audio_window_end_ms': 129856, 'vad_state': None, 'stt_status': 'silent_audio', 'text_length': 0, 'word_count': 0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] text returned {'video_id': 'tQmEd_UeeIk', 'source': 'silence', 'text': '', 'confidence': 0.0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] request received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 128.85600000000002, 'end_seconds': 131.11200000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] stt state {'video_id': 'tQmEd_UeeIk', 'stt_enabled': True, 'model_name': 'base', 'model_initialized': True, 'model_init_error': None}
+[ISWEEP][CAPTIONS_TRANSCRIBE] audio diagnostics {'video_id': 'tQmEd_UeeIk', 'wav_bytes': 72236, 'sample_rate': 16000, 'duration_seconds': 2.256, 'rms': 0.0, 'peak': 0.0, 'wav_parse_ok': True}
+[ISWEEP][CAPTIONS_TRANSCRIBE] hotword hints {'video_id': 'tQmEd_UeeIk', 'count': 0, 'preview': []}
+[ISWEEP][AUDIO_STT] chunk received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 128.85600000000002, 'end_seconds': 131.11200000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][AUDIO_DEBUG] received audio bytes: 72236
+[ISWEEP][AUDIO_STT] whisper started {'video_id': 'tQmEd_UeeIk', 'model': 'base'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] transcription output {'video_id': 'tQmEd_UeeIk', 'raw_text_preview': '', 'clean_text_preview': '', 'word_timestamp_count': 0, 'dedup_word_timestamp_count': 0, 'is_partial': False, 'stable_text_preview': '', 'failure_reason': None}
+[ISWEEP][STT_SESSION] silence response emitted {'tab_id': 124035955, 'video_id': 'tQmEd_UeeIk', 'session_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63', 'chunk_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63:103', 'sequence_number': 103, 'audio_window_start_ms': 128856, 'audio_window_end_ms': 131112, 'vad_state': None, 'stt_status': 'silent_audio', 'text_length': 0, 'word_count': 0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] text returned {'video_id': 'tQmEd_UeeIk', 'source': 'silence', 'text': '', 'confidence': 0.0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] request received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 130.11200000000002, 'end_seconds': 132.36800000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] stt state {'video_id': 'tQmEd_UeeIk', 'stt_enabled': True, 'model_name': 'base', 'model_initialized': True, 'model_init_error': None}
+[ISWEEP][CAPTIONS_TRANSCRIBE] audio diagnostics {'video_id': 'tQmEd_UeeIk', 'wav_bytes': 72236, 'sample_rate': 16000, 'duration_seconds': 2.256, 'rms': 0.0, 'peak': 0.0, 'wav_parse_ok': True}
+[ISWEEP][CAPTIONS_TRANSCRIBE] hotword hints {'video_id': 'tQmEd_UeeIk', 'count': 0, 'preview': []}
+[ISWEEP][AUDIO_STT] chunk received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 130.11200000000002, 'end_seconds': 132.36800000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][AUDIO_DEBUG] received audio bytes: 72236
+[ISWEEP][AUDIO_STT] whisper started {'video_id': 'tQmEd_UeeIk', 'model': 'base'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] transcription output {'video_id': 'tQmEd_UeeIk', 'raw_text_preview': '', 'clean_text_preview': '', 'word_timestamp_count': 0, 'dedup_word_timestamp_count': 0, 'is_partial': False, 'stable_text_preview': '', 'failure_reason': None}
+[ISWEEP][STT_SESSION] silence response emitted {'tab_id': 124035955, 'video_id': 'tQmEd_UeeIk', 'session_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63', 'chunk_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63:104', 'sequence_number': 104, 'audio_window_start_ms': 130112, 'audio_window_end_ms': 132368, 'vad_state': None, 'stt_status': 'silent_audio', 'text_length': 0, 'word_count': 0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] text returned {'video_id': 'tQmEd_UeeIk', 'source': 'silence', 'text': '', 'confidence': 0.0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] request received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 131.36800000000002, 'end_seconds': 133.62400000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] stt state {'video_id': 'tQmEd_UeeIk', 'stt_enabled': True, 'model_name': 'base', 'model_initialized': True, 'model_init_error': None}
+[ISWEEP][CAPTIONS_TRANSCRIBE] audio diagnostics {'video_id': 'tQmEd_UeeIk', 'wav_bytes': 72236, 'sample_rate': 16000, 'duration_seconds': 2.256, 'rms': 0.0, 'peak': 0.0, 'wav_parse_ok': True}
+[ISWEEP][CAPTIONS_TRANSCRIBE] hotword hints {'video_id': 'tQmEd_UeeIk', 'count': 0, 'preview': []}
+[ISWEEP][AUDIO_STT] chunk received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 131.36800000000002, 'end_seconds': 133.62400000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][AUDIO_DEBUG] received audio bytes: 72236
+[ISWEEP][AUDIO_STT] whisper started {'video_id': 'tQmEd_UeeIk', 'model': 'base'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] transcription output {'video_id': 'tQmEd_UeeIk', 'raw_text_preview': '', 'clean_text_preview': '', 'word_timestamp_count': 0, 'dedup_word_timestamp_count': 0, 'is_partial': False, 'stable_text_preview': '', 'failure_reason': None}
+[ISWEEP][STT_SESSION] silence response emitted {'tab_id': 124035955, 'video_id': 'tQmEd_UeeIk', 'session_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63', 'chunk_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63:105', 'sequence_number': 105, 'audio_window_start_ms': 131368, 'audio_window_end_ms': 133624, 'vad_state': None, 'stt_status': 'silent_audio', 'text_length': 0, 'word_count': 0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] text returned {'video_id': 'tQmEd_UeeIk', 'source': 'silence', 'text': '', 'confidence': 0.0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] request received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 132.62400000000002, 'end_seconds': 134.88000000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] stt state {'video_id': 'tQmEd_UeeIk', 'stt_enabled': True, 'model_name': 'base', 'model_initialized': True, 'model_init_error': None}
+[ISWEEP][CAPTIONS_TRANSCRIBE] audio diagnostics {'video_id': 'tQmEd_UeeIk', 'wav_bytes': 72236, 'sample_rate': 16000, 'duration_seconds': 2.256, 'rms': 0.0, 'peak': 0.0, 'wav_parse_ok': True}
+[ISWEEP][CAPTIONS_TRANSCRIBE] hotword hints {'video_id': 'tQmEd_UeeIk', 'count': 0, 'preview': []}
+[ISWEEP][AUDIO_STT] chunk received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 132.62400000000002, 'end_seconds': 134.88000000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][AUDIO_DEBUG] received audio bytes: 72236
+[ISWEEP][AUDIO_STT] whisper started {'video_id': 'tQmEd_UeeIk', 'model': 'base'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] transcription output {'video_id': 'tQmEd_UeeIk', 'raw_text_preview': '', 'clean_text_preview': '', 'word_timestamp_count': 0, 'dedup_word_timestamp_count': 0, 'is_partial': False, 'stable_text_preview': '', 'failure_reason': None}
+[ISWEEP][STT_SESSION] silence response emitted {'tab_id': 124035955, 'video_id': 'tQmEd_UeeIk', 'session_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63', 'chunk_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63:106', 'sequence_number': 106, 'audio_window_start_ms': 132624, 'audio_window_end_ms': 134880, 'vad_state': None, 'stt_status': 'silent_audio', 'text_length': 0, 'word_count': 0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] text returned {'video_id': 'tQmEd_UeeIk', 'source': 'silence', 'text': '', 'confidence': 0.0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] request received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 133.88000000000002, 'end_seconds': 136.13600000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] stt state {'video_id': 'tQmEd_UeeIk', 'stt_enabled': True, 'model_name': 'base', 'model_initialized': True, 'model_init_error': None}
+[ISWEEP][CAPTIONS_TRANSCRIBE] audio diagnostics {'video_id': 'tQmEd_UeeIk', 'wav_bytes': 72236, 'sample_rate': 16000, 'duration_seconds': 2.256, 'rms': 0.0, 'peak': 0.0, 'wav_parse_ok': True}
+[ISWEEP][CAPTIONS_TRANSCRIBE] hotword hints {'video_id': 'tQmEd_UeeIk', 'count': 0, 'preview': []}
+[ISWEEP][AUDIO_STT] chunk received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 133.88000000000002, 'end_seconds': 136.13600000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][AUDIO_DEBUG] received audio bytes: 72236
+[ISWEEP][AUDIO_STT] whisper started {'video_id': 'tQmEd_UeeIk', 'model': 'base'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] transcription output {'video_id': 'tQmEd_UeeIk', 'raw_text_preview': '', 'clean_text_preview': '', 'word_timestamp_count': 0, 'dedup_word_timestamp_count': 0, 'is_partial': False, 'stable_text_preview': '', 'failure_reason': None}
+[ISWEEP][STT_SESSION] silence response emitted {'tab_id': 124035955, 'video_id': 'tQmEd_UeeIk', 'session_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63', 'chunk_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63:107', 'sequence_number': 107, 'audio_window_start_ms': 133880, 'audio_window_end_ms': 136136, 'vad_state': None, 'stt_status': 'silent_audio', 'text_length': 0, 'word_count': 0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] text returned {'video_id': 'tQmEd_UeeIk', 'source': 'silence', 'text': '', 'confidence': 0.0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] request received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 135.13600000000002, 'end_seconds': 137.39200000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] stt state {'video_id': 'tQmEd_UeeIk', 'stt_enabled': True, 'model_name': 'base', 'model_initialized': True, 'model_init_error': None}
+[ISWEEP][CAPTIONS_TRANSCRIBE] audio diagnostics {'video_id': 'tQmEd_UeeIk', 'wav_bytes': 72236, 'sample_rate': 16000, 'duration_seconds': 2.256, 'rms': 0.0, 'peak': 0.0, 'wav_parse_ok': True}
+[ISWEEP][CAPTIONS_TRANSCRIBE] hotword hints {'video_id': 'tQmEd_UeeIk', 'count': 0, 'preview': []}
+[ISWEEP][AUDIO_STT] chunk received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 135.13600000000002, 'end_seconds': 137.39200000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][AUDIO_DEBUG] received audio bytes: 72236
+[ISWEEP][AUDIO_STT] whisper started {'video_id': 'tQmEd_UeeIk', 'model': 'base'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] transcription output {'video_id': 'tQmEd_UeeIk', 'raw_text_preview': '', 'clean_text_preview': '', 'word_timestamp_count': 0, 'dedup_word_timestamp_count': 0, 'is_partial': False, 'stable_text_preview': '', 'failure_reason': None}
+[ISWEEP][STT_SESSION] silence response emitted {'tab_id': 124035955, 'video_id': 'tQmEd_UeeIk', 'session_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63', 'chunk_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63:108', 'sequence_number': 108, 'audio_window_start_ms': 135136, 'audio_window_end_ms': 137392, 'vad_state': None, 'stt_status': 'silent_audio', 'text_length': 0, 'word_count': 0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] text returned {'video_id': 'tQmEd_UeeIk', 'source': 'silence', 'text': '', 'confidence': 0.0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] request received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 136.39200000000002, 'end_seconds': 138.64800000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] stt state {'video_id': 'tQmEd_UeeIk', 'stt_enabled': True, 'model_name': 'base', 'model_initialized': True, 'model_init_error': None}
+[ISWEEP][CAPTIONS_TRANSCRIBE] audio diagnostics {'video_id': 'tQmEd_UeeIk', 'wav_bytes': 72236, 'sample_rate': 16000, 'duration_seconds': 2.256, 'rms': 0.0, 'peak': 0.0, 'wav_parse_ok': True}
+[ISWEEP][CAPTIONS_TRANSCRIBE] hotword hints {'video_id': 'tQmEd_UeeIk', 'count': 0, 'preview': []}
+[ISWEEP][AUDIO_STT] chunk received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 136.39200000000002, 'end_seconds': 138.64800000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][AUDIO_DEBUG] received audio bytes: 72236
+[ISWEEP][AUDIO_STT] whisper started {'video_id': 'tQmEd_UeeIk', 'model': 'base'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] transcription output {'video_id': 'tQmEd_UeeIk', 'raw_text_preview': '', 'clean_text_preview': '', 'word_timestamp_count': 0, 'dedup_word_timestamp_count': 0, 'is_partial': False, 'stable_text_preview': '', 'failure_reason': None}
+[ISWEEP][STT_SESSION] silence response emitted {'tab_id': 124035955, 'video_id': 'tQmEd_UeeIk', 'session_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63', 'chunk_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63:109', 'sequence_number': 109, 'audio_window_start_ms': 136392, 'audio_window_end_ms': 138648, 'vad_state': None, 'stt_status': 'silent_audio', 'text_length': 0, 'word_count': 0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] text returned {'video_id': 'tQmEd_UeeIk', 'source': 'silence', 'text': '', 'confidence': 0.0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] request received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 137.64800000000002, 'end_seconds': 139.90400000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] stt state {'video_id': 'tQmEd_UeeIk', 'stt_enabled': True, 'model_name': 'base', 'model_initialized': True, 'model_init_error': None}
+[ISWEEP][CAPTIONS_TRANSCRIBE] audio diagnostics {'video_id': 'tQmEd_UeeIk', 'wav_bytes': 72236, 'sample_rate': 16000, 'duration_seconds': 2.256, 'rms': 0.0, 'peak': 0.0, 'wav_parse_ok': True}
+[ISWEEP][CAPTIONS_TRANSCRIBE] hotword hints {'video_id': 'tQmEd_UeeIk', 'count': 0, 'preview': []}
+[ISWEEP][AUDIO_STT] chunk received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 137.64800000000002, 'end_seconds': 139.90400000000002, 'mime_type': 'audio/wav'}
+[ISWEEP][AUDIO_DEBUG] received audio bytes: 72236
+[ISWEEP][AUDIO_STT] whisper started {'video_id': 'tQmEd_UeeIk', 'model': 'base'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] transcription output {'video_id': 'tQmEd_UeeIk', 'raw_text_preview': '', 'clean_text_preview': '', 'word_timestamp_count': 0, 'dedup_word_timestamp_count': 0, 'is_partial': False, 'stable_text_preview': '', 'failure_reason': None}
+[ISWEEP][STT_SESSION] silence response emitted {'tab_id': 124035955, 'video_id': 'tQmEd_UeeIk', 'session_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63', 'chunk_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63:110', 'sequence_number': 110, 'audio_window_start_ms': 137648, 'audio_window_end_ms': 139904, 'vad_state': None, 'stt_status': 'silent_audio', 'text_length': 0, 'word_count': 0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] text returned {'video_id': 'tQmEd_UeeIk', 'source': 'silence', 'text': '', 'confidence': 0.0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] request received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 138.90400000000002, 'end_seconds': 141.16000000000003, 'mime_type': 'audio/wav'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] stt state {'video_id': 'tQmEd_UeeIk', 'stt_enabled': True, 'model_name': 'base', 'model_initialized': True, 'model_init_error': None}
+[ISWEEP][CAPTIONS_TRANSCRIBE] audio diagnostics {'video_id': 'tQmEd_UeeIk', 'wav_bytes': 72236, 'sample_rate': 16000, 'duration_seconds': 2.256, 'rms': 0.0, 'peak': 0.0, 'wav_parse_ok': True}
+[ISWEEP][CAPTIONS_TRANSCRIBE] hotword hints {'video_id': 'tQmEd_UeeIk', 'count': 0, 'preview': []}
+[ISWEEP][AUDIO_STT] chunk received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 138.90400000000002, 'end_seconds': 141.16000000000003, 'mime_type': 'audio/wav'}
+[ISWEEP][AUDIO_DEBUG] received audio bytes: 72236
+[ISWEEP][AUDIO_STT] whisper started {'video_id': 'tQmEd_UeeIk', 'model': 'base'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] transcription output {'video_id': 'tQmEd_UeeIk', 'raw_text_preview': '', 'clean_text_preview': '', 'word_timestamp_count': 0, 'dedup_word_timestamp_count': 0, 'is_partial': False, 'stable_text_preview': '', 'failure_reason': None}
+[ISWEEP][STT_SESSION] silence response emitted {'tab_id': 124035955, 'video_id': 'tQmEd_UeeIk', 'session_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63', 'chunk_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63:111', 'sequence_number': 111, 'audio_window_start_ms': 138904, 'audio_window_end_ms': 141160, 'vad_state': None, 'stt_status': 'silent_audio', 'text_length': 0, 'word_count': 0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] text returned {'video_id': 'tQmEd_UeeIk', 'source': 'silence', 'text': '', 'confidence': 0.0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] request received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 140.16000000000003, 'end_seconds': 142.41600000000003, 'mime_type': 'audio/wav'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] stt state {'video_id': 'tQmEd_UeeIk', 'stt_enabled': True, 'model_name': 'base', 'model_initialized': True, 'model_init_error': None}
+[ISWEEP][CAPTIONS_TRANSCRIBE] audio diagnostics {'video_id': 'tQmEd_UeeIk', 'wav_bytes': 72236, 'sample_rate': 16000, 'duration_seconds': 2.256, 'rms': 0.0, 'peak': 0.0, 'wav_parse_ok': True}
+[ISWEEP][CAPTIONS_TRANSCRIBE] hotword hints {'video_id': 'tQmEd_UeeIk', 'count': 0, 'preview': []}
+[ISWEEP][AUDIO_STT] chunk received {'video_id': 'tQmEd_UeeIk', 'start_seconds': 140.16000000000003, 'end_seconds': 142.41600000000003, 'mime_type': 'audio/wav'}
+[ISWEEP][AUDIO_DEBUG] received audio bytes: 72236
+[ISWEEP][AUDIO_STT] whisper started {'video_id': 'tQmEd_UeeIk', 'model': 'base'}
+[ISWEEP][CAPTIONS_TRANSCRIBE] transcription output {'video_id': 'tQmEd_UeeIk', 'raw_text_preview': '', 'clean_text_preview': '', 'word_timestamp_count': 0, 'dedup_word_timestamp_count': 0, 'is_partial': False, 'stable_text_preview': '', 'failure_reason': None}
+[ISWEEP][STT_SESSION] silence response emitted {'tab_id': 124035955, 'video_id': 'tQmEd_UeeIk', 'session_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63', 'chunk_id': '124035955:tQmEd_UeeIk:1787878149450:nvsc63:112', 'sequence_number': 112, 'audio_window_start_ms': 140160, 'audio_window_end_ms': 142416, 'vad_state': None, 'stt_status': 'silent_audio', 'text_length': 0, 'word_count': 0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] text returned {'video_id': 'tQmEd_UeeIk', 'source': 'silence', 'text': '', 'confidence': 0.0}
+[ISWEEP][CAPTIONS_TRANSCRIBE] request received 

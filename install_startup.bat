@@ -3,7 +3,7 @@ setlocal
 
 REM Install or remove an autostart shortcut for ISweep.
 set "ROOT_DIR=%~dp0"
-set "TARGET=%ROOT_DIR%start_isweep.bat"
+set "TARGET=%ROOT_DIR%run_backend_hidden.ps1"
 set "STARTUP_DIR=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup"
 set "SHORTCUT=%STARTUP_DIR%\Start ISweep.lnk"
 
@@ -14,7 +14,7 @@ if not exist "%TARGET%" (
   endlocal & exit /b 1
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws=New-Object -ComObject WScript.Shell; $s=$ws.CreateShortcut('%SHORTCUT%'); $s.TargetPath='%TARGET%'; $s.WorkingDirectory='%ROOT_DIR%'; $s.IconLocation='%SystemRoot%\System32\shell32.dll,220'; $s.Save()"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws=New-Object -ComObject WScript.Shell; $s=$ws.CreateShortcut('%SHORTCUT%'); $s.TargetPath='powershell.exe'; $s.Arguments='-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""%TARGET%""'; $s.WorkingDirectory='%ROOT_DIR%'; $s.WindowStyle=0; $s.IconLocation='%SystemRoot%\System32\shell32.dll,220'; $s.Save()"
 if errorlevel 1 (
   echo [ISweep] Failed to create startup shortcut.
   endlocal & exit /b 1
