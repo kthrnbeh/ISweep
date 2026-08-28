@@ -64,3 +64,13 @@ Press CTRL+C to quit
 127.0.0.1 - - [27/Aug/2026 18:53:31] "POST /captions/transcribe HTTP/1.1" 200 -
 127.0.0.1 - - [27/Aug/2026 18:53:33] "POST /captions/transcribe HTTP/1.1" 200 -
 127.0.0.1 - - [27/Aug/2026 18:53:34] "GET /health HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:53:41] "GET /health HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:53:44] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:53:46] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:53:48] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:53:50] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:53:52] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:53:54] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:53:57] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:53:58] "POST /captions/transcribe HTTP/1.1" 200 -
+127.0.0.1 - - [27/Aug/2026 18:54:00] "POST /captions/transcribe HTTP/1.1" 200 -
