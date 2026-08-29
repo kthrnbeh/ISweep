@@ -26,13 +26,6 @@
   let hardRestoreTimer = null;
   let observer = null;
 
-  function normalizeWord(value) {
-    return String(value || '')
-      .toLowerCase()
-      .replace(/[^a-z0-9']/g, '')
-      .trim();
-  }
-
   function normalizePhrase(value) {
     return String(value || '')
       .toLowerCase()
@@ -86,6 +79,34 @@
         y: Math.max(0, Math.min(1, Number(position.y) || 0.8)),
       },
     };
+  }
+
+  function ensureRemoteStyles() {
+    if (document.getElementById('isweep-caption-remote-style')) return;
+    const style = document.createElement('style');
+    style.id = 'isweep-caption-remote-style';
+    style.textContent = `
+      [data-isweep-clean-captions="true"] {
+        position: fixed !important;
+        left: var(--isweep-caption-left, 50%) !important;
+        top: var(--isweep-caption-top, 80%) !important;
+        transform: translate(-50%, -50%) !important;
+        max-width: var(--isweep-caption-max-width, 80vw) !important;
+      }
+      [data-isweep-clean-captions="true"][data-isweep-remote-style="transparent_white"] > div {
+        color: #fff !important;
+        background: rgba(0, 0, 0, 0.78) !important;
+        border: 1px solid rgba(255, 255, 255, 0.9) !important;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9) !important;
+      }
+      [data-isweep-clean-captions="true"][data-isweep-remote-style="white_black"] > div {
+        color: #111 !important;
+        background: rgba(255, 255, 255, 0.94) !important;
+        border: 1px solid rgba(17, 17, 17, 0.9) !important;
+        text-shadow: none !important;
+      }
+    `;
+    (document.head || document.documentElement).appendChild(style);
   }
 
   function getVideo() {
@@ -143,7 +164,6 @@
     activeMute = null;
     clearRestoreTimers();
 
-    // Restore exactly what the viewer had before ISweep took control.
     setMuted(state.wasMuted === true, `restore:${reason}`);
     console.log('[ISWEEP][WORD_MUTE]', 'mute end', {
       reason,
@@ -155,17 +175,11 @@
   function dynamicMuteDurationMs(phrase) {
     const words = tokenize(phrase);
     const chars = words.join('').length;
-
-    // Short spoken words normally land around 300-500ms. Longer words/phrases
-    // receive a little more time, but never the old blanket 850ms minimum.
     const estimated = 260 + (chars * 30) + (Math.max(words.length - 1, 0) * 120);
     return Math.max(320, Math.min(900, estimated));
   }
 
   function estimatedDelayToWordMs(tokens, matchStart, wasAppended) {
-    // If YouTube just appended the selected word to an existing caption, the word
-    // is being spoken now, so mute immediately. If a whole line appeared at once,
-    // estimate the word position using a conservative ~3.4 words/second cadence.
     if (wasAppended || matchStart <= 0) return 0;
     const estimatedWordMs = 290;
     return Math.min(matchStart * estimatedWordMs, 1400);
@@ -221,10 +235,13 @@
       const currentVideo = getVideo();
       if (!currentVideo) return;
 
+      const currentCaption = tokenize(extractCaptionText());
+      const currentMatches = findPhraseMatches(currentCaption, [match.phrase]);
+      if (!currentMatches.length) return;
+
       if (activeMute) restoreMute('new_selected_word');
 
       const wasMuted = Boolean(currentVideo.muted);
-      // If the viewer manually had the video muted, do not claim ownership.
       if (wasMuted) {
         console.log(LOG, 'selected word detected but viewer already muted', { phrase: match.phrase });
         return;
@@ -236,8 +253,7 @@
         signature,
         phrase: match.phrase,
         wasMuted,
-        tokenCountAtStart: tokens.length,
-        matchEndAtStart: match.end,
+        tokenCountAtStart: currentCaption.length,
         startedAtMs: Date.now(),
       };
 
@@ -296,6 +312,8 @@
   }
 
   function updateCleanOverlay(nativeCaptionText) {
+    ensureRemoteStyles();
+
     const overlay = document.querySelector('[data-isweep-clean-captions="true"]');
     const textNode = overlay?.firstElementChild;
     const nativeContainer = document.querySelector('.ytp-caption-window-container');
@@ -306,16 +324,18 @@
     }
 
     const cleanText = maskSelectedText(nativeCaptionText);
-    if (cleanText) textNode.textContent = cleanText;
+    if (cleanText && textNode.textContent !== cleanText) {
+      textNode.textContent = cleanText;
+    }
+
+    overlay.dataset.isweepRemoteStyle = settings.cleanCaptionStyle;
 
     const video = getVideo();
     if (video) {
       const rect = video.getBoundingClientRect();
-      overlay.style.position = 'fixed';
-      overlay.style.left = `${rect.left + (rect.width * settings.cleanCaptionPosition.x)}px`;
-      overlay.style.top = `${rect.top + (rect.height * settings.cleanCaptionPosition.y)}px`;
-      overlay.style.transform = 'translate(-50%, -50%)';
-      overlay.style.maxWidth = `${Math.max(rect.width * 0.82, 220)}px`;
+      overlay.style.setProperty('--isweep-caption-left', `${rect.left + (rect.width * settings.cleanCaptionPosition.x)}px`);
+      overlay.style.setProperty('--isweep-caption-top', `${rect.top + (rect.height * settings.cleanCaptionPosition.y)}px`);
+      overlay.style.setProperty('--isweep-caption-max-width', `${Math.max(rect.width * 0.82, 220)}px`);
     }
 
     textNode.style.fontSize = settings.cleanCaptionTextSize === 'large'
@@ -326,19 +346,6 @@
     textNode.style.padding = '0.18em 0.4em';
     textNode.style.borderRadius = '3px';
 
-    if (settings.cleanCaptionStyle === 'white_black') {
-      textNode.style.color = '#111';
-      textNode.style.background = 'rgba(255,255,255,0.94)';
-      textNode.style.border = '1px solid rgba(17,17,17,0.9)';
-      textNode.style.textShadow = 'none';
-    } else {
-      textNode.style.color = '#fff';
-      textNode.style.background = 'rgba(0,0,0,0.78)';
-      textNode.style.border = '1px solid rgba(255,255,255,0.9)';
-      textNode.style.textShadow = '0 1px 3px rgba(0,0,0,0.9)';
-    }
-
-    // Hide YouTube's raw caption only when the ISweep replacement is actually visible.
     if (nativeContainer) {
       nativeContainer.style.visibility = cleanText ? 'hidden' : '';
     }
@@ -394,8 +401,6 @@
       characterData: true,
     });
 
-    // Low-frequency fallback for YouTube DOM updates that do not create a mutation
-    // in the caption subtree visible to the observer.
     setInterval(processCaption, 120);
   }
 
@@ -422,6 +427,7 @@
 
   loadState()
     .then(() => {
+      ensureRemoteStyles();
       startObserver();
       processCaption();
     })
