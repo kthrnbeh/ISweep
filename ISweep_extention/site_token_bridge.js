@@ -148,6 +148,21 @@ async function copySitePreferencesToExtension() {
   };
 }
 
+function scheduleMirrorAfterPopupSync() {
+  // popup.js performs its own /preferences refresh after ISWEEP_PULL_TOKEN.
+  // Re-apply the Filter-page mirror just after that refresh so a stale/empty
+  // backend response cannot overwrite the selections the user just saved.
+  setTimeout(() => {
+    copySitePreferencesToExtension().catch((error) => {
+      console.warn('[ISWEEP][TOKEN_BRIDGE] delayed preference mirror failed', error?.message || error);
+    });
+  }, 500);
+
+  setTimeout(() => {
+    copySitePreferencesToExtension().catch(() => {});
+  }, 1200);
+}
+
 async function pushSiteStateToExtension() {
   try {
     const token = window.localStorage.getItem(TOKEN_KEY);
@@ -167,6 +182,7 @@ async function pushSiteStateToExtension() {
     // Always mirror the Filter page's current saved selections after the backend
     // refresh attempt. This removes the old 0/[missing] gap in the extension.
     const localMirror = await copySitePreferencesToExtension();
+    scheduleMirrorAfterPopupSync();
 
     return {
       ok: localMirror.ok,
