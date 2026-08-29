@@ -1,260 +1,391 @@
-# ISweep DVD Hardware Bridge
+# ISweep DVD Device Bridge
 
-## Purpose
+## Core Product Rule
 
-ISweep DVD is intended to control playback without modifying the DVD, Blu-ray, movie file, or television program itself.
+ISweep itself should be the control system.
 
-The software therefore needs three separate abilities:
+The preferred design is **software-first**: use devices the user already owns (computer, phone, smart TV, Wi-Fi/Bluetooth-enabled player) and communicate through interfaces those devices already expose.
 
-1. **Sense** what is being played.
-2. **Decide** whether the current or upcoming content matches the user's saved ISweep preferences.
-3. **Control** the existing television / receiver / DVD player using commands that the device already supports.
+ISweep should **not require a purchased universal remote or IR bridge** as part of the normal product.
 
-The current repository has a working Decision Engine and a simulated remote. It does **not yet control real DVD/TV hardware**.
+Infrared support may remain as an optional compatibility path for older equipment, but it is not the primary architecture.
 
 ---
 
-## Current Status
+# What ISweep DVD Must Do
 
-### Working now
+ISweep DVD needs three abilities:
 
-- ISweep DVD Decision Engine
+1. **Sense** what is playing.
+2. **Decide** whether content matches the user's saved ISweep preferences.
+3. **Control** playback using software/network commands already supported by the user's equipment.
+
+The DVD, Blu-ray, movie, or show remains unchanged.
+
+---
+
+# Current Status
+
+## Working now
+
+- Shared ISweep website/backend preference design
+- DVD preference bridge
+- Decision Engine
 - Language whole-word matching
-- Shared-preference bridge for the ISweep website/backend
 - Simulated remote commands
 - Automated tests
 
-### Not implemented yet
+## In progress
 
-- Real DVD audio/video input
-- Real subtitle/caption input from a DVD player
-- Real-time playback synchronization
-- Infrared transmitter control
-- HDMI-CEC control
-- Smart-TV control
-- Real mute/unmute timing
-- Real skip / fast-forward timing
+- Website/backend preference synchronization
 
-The empty controller modules in `dvd/control/` are placeholders for these future hardware implementations.
+## Not implemented yet
+
+- Automatic discovery of TVs/players on the local network
+- Wi-Fi smart-TV command adapters
+- Bluetooth device-control adapters
+- HDMI-CEC adapter
+- Phone/PC companion controller
+- Real DVD audio/video sensing
+- Playback synchronization
+- Real-time MUTE / UNMUTE / SKIP / FAST_FORWARD control
 
 ---
 
-# Target Physical Architecture
+# Primary Architecture — ISweep Companion
 
-A standalone DVD player version of ISweep can be thought of as four pieces:
+The preferred design is an ISweep Companion running on a computer or phone already owned by the user.
 
 ```text
-                       ISWEEP WEBSITE
-                         Preferences
-                              |
-                              v
-                     ISweep DVD Computer
-                              |
-          +-------------------+-------------------+
-          |                   |                   |
-          v                   v                   v
-     MEDIA SENSOR       DECISION ENGINE      REMOTE CONTROL
-   (ears + eyes)             (brain)             (hands)
-          |                   |                   |
-          +-------------------+-------------------+
-                              |
-                              v
-                    TV / Receiver / DVD Player
+                    ISWEEP WEBSITE
+                 shared user preferences
+                          |
+                          v
+                 ISWEEP BACKEND / ACCOUNT
+                          |
+                          v
+                    ISWEEP COMPANION
+                 phone and/or computer
+                          |
+            +-------------+-------------+
+            |             |             |
+            v             v             v
+         Wi-Fi        Bluetooth      HDMI-CEC
+            |             |             |
+            +-------------+-------------+
+                          |
+                          v
+                TV / Receiver / Player
 ```
 
-The DVD itself remains unchanged.
+The companion is the "universal remote" logic. ISweep does not need a third-party universal remote application.
 
 ---
 
-# 1. Media Sensor — How ISweep Knows What Is Playing
+# Important Physical Limitation
 
-For a normal standalone DVD player, ISweep needs a way to observe the movie while it is playing.
+A phone or computer can only send commands through communication methods that both sides support.
 
-Possible inputs include:
-
-## Audio capture
-
-Preferred early prototype options:
-
-- DVD player's analog/RCA audio output into a USB audio capture interface
-- Optical audio output through a compatible capture interface
-- HDMI audio capture where the equipment permits it
-- PC system-audio loopback when the DVD is played on the computer
-
-The captured audio can be sent to speech recognition and language detection.
-
-## Video capture
-
-Possible later options:
-
-- HDMI capture where supported
-- Analog/composite/component capture from compatible players
-- PC playback capture when the disc is played on the computer
-
-Video capture would feed future scene and visual-category AI.
-
-### Important HDMI limitation
-
-Commercial DVD/Blu-ray players may use HDCP on HDMI output. Ordinary capture cards may refuse to capture protected HDMI video. ISweep must not rely on an HDMI-capture design until the exact player/capture hardware has been tested.
-
-For the first physical prototype, audio capture and remote control can be tested independently of protected HDMI video.
-
----
-
-# 2. Decision Engine — The Brain
-
-This part already exists in the project.
+For example:
 
 ```text
-Detected dialogue / event
+Phone has Wi-Fi
+TV exposes Wi-Fi remote API
+        -> ISweep can control TV over Wi-Fi
+```
+
+But:
+
+```text
+Phone has Wi-Fi/Bluetooth
+Old DVD player accepts ONLY infrared
+        -> software alone cannot make the DVD player receive Wi-Fi/Bluetooth
+```
+
+That is not a software limitation we can code around; the receiving device must understand at least one protocol the phone/computer can transmit.
+
+For ISweep's no-extra-hardware mode, equipment with no usable Wi-Fi, Bluetooth, HDMI-CEC, USB, or other software-control interface would simply be unsupported unless the user's phone already contains an IR emitter.
+
+Optional IR support can remain for people who want compatibility with legacy devices, but it should not be a requirement for ISweep.
+
+---
+
+# Software Control Priority
+
+ISweep should try control methods in this order:
+
+## 1. Direct local-network control
+
+Preferred when the TV/player exposes a local API.
+
+Examples of transport we may support through adapters:
+
+- local HTTP
+- WebSocket
+- TCP/UDP device protocols
+- SSDP / UPnP discovery
+- mDNS discovery
+
+The ISweep code should perform discovery, pairing, and command transmission itself.
+
+## 2. Smart-TV control
+
+The TV is often the best target for:
+
+- MUTE
+- UNMUTE
+- volume
+- input selection
+
+If the TV can also forward transport commands to an HDMI-connected player through HDMI-CEC, ISweep may be able to control the DVD/Blu-ray player indirectly without another device.
+
+## 3. Direct network control of the DVD/Blu-ray/media player
+
+When a player exposes its own network protocol, ISweep can send:
+
+- PLAY
+- PAUSE
+- FAST_FORWARD
+- SKIP
+- REWIND
+
+Support will be adapter-based because manufacturers/models expose different capabilities.
+
+## 4. Bluetooth control
+
+Use Bluetooth when the playback device actually accepts remote/media-control commands over Bluetooth.
+
+Having Bluetooth hardware alone does not guarantee a DVD player accepts Bluetooth remote commands; ISweep must discover and pair with a compatible service/profile.
+
+## 5. HDMI-CEC
+
+If the computer/TV/player chain exposes CEC control, ISweep can potentially send playback commands through HDMI.
+
+CEC support varies by computer hardware, TV, player, and operating-system access.
+
+## 6. Infrared — optional legacy fallback
+
+IR remains an adapter for equipment that has no usable software interface.
+
+It is **not required** for the main ISweep product vision.
+
+---
+
+# Using a Phone as the ISweep Device
+
+A phone can potentially provide both sensing and control without additional purchased hardware.
+
+```text
+                    PHONE
+              +------+------+
+              |             |
+              v             v
+          Microphone       Camera
+              |             |
+              v             v
+          Audio AI       Visual AI
+              \             /
+               \           /
+                v         v
+               Decision Engine
+                      |
+                      v
+                Wi-Fi / Bluetooth
+                      |
+                      v
+                 TV / Player
+```
+
+Possible phone roles:
+
+- microphone for live dialogue recognition
+- camera for future visual recognition
+- account/preferences UI
+- local network device discovery
+- device pairing
+- remote commands
+- synchronization assistant
+
+A phone camera/microphone is useful for a no-extra-hardware prototype, although live recognition latency must still be solved for accurate profanity muting.
+
+---
+
+# Using a Computer as the ISweep Device
+
+The existing Python project can become the first ISweep Companion.
+
+```text
+ISweep backend/preferences
           |
           v
-Saved ISweep preferences
+Python DVD service
+          |
+          +--> network device discovery
+          +--> smart-TV adapter
+          +--> player adapter
+          +--> Bluetooth adapter
+          +--> CEC adapter
           |
           v
+TV / DVD player
+```
+
+This is the easiest place to build and test the protocol layer before packaging it into a phone application.
+
+---
+
+# Sensing — Giving ISweep Ears and Eyes Without Required Capture Hardware
+
+The software-first design should prefer existing sensors and available data sources.
+
+## Audio options
+
+1. Phone microphone listening near the TV
+2. Computer microphone listening near the TV
+3. System-audio capture when playback occurs on the computer
+4. Subtitle/caption data when available
+5. Known transcript/timestamp data
+6. Direct audio input only when the user already has compatible equipment
+
+## Video options
+
+1. Phone camera pointed at the display
+2. Computer camera where practical
+3. Computer playback frames when media is played locally
+4. Network-accessible media/metadata where supported
+5. Direct video capture only when already available and legally/technically supported
+
+The product should not depend on purchasing an HDMI capture card.
+
+---
+
+# Synchronization — The Hard Part
+
+Recognizing a word after it was spoken is too late for perfect muting.
+
+ISweep therefore needs look-ahead or synchronization.
+
+Preferred sources include:
+
+- subtitle/caption timing
+- known movie timestamps
+- pre-analysis of a title
+- transcript alignment
+- audio fingerprint synchronization
+- live speech recognition as a fallback
+- hybrid detection using several sources
+
+Long term:
+
+```text
+Movie identified
+      +
+playback synchronized
+      +
+known/subtitle event ahead
+      |
+      v
 Decision Engine
-          |
-          +--> ALLOW
-          +--> MUTE
-          +--> future SKIP
-          +--> future FAST_FORWARD
+      |
+      v
+MUTE before unwanted word
+      |
+      v
+UNMUTE after event
 ```
-
-The existing webpage should remain the single source of truth for the user's preferences. The extension and DVD system should consume the same account settings rather than maintaining separate filter lists.
 
 ---
 
-# 3. Remote Control — How ISweep Presses the Buttons
+# Adapter Architecture
 
-The current `SimulatedRemote` only prints commands. A physical controller must replace that simulation.
+All control technologies should implement the same command vocabulary already defined in:
 
-## Recommended first physical controller: Infrared (IR)
+```text
+dvd/control/commands.py
+```
 
-IR is the most practical first target because it mimics the normal remote control and works with many televisions, receivers, and DVD players.
+Commands include:
 
-A future IR controller would learn or store the same remote codes as the user's existing remotes.
+```text
+ALLOW
+MUTE
+UNMUTE
+PLAY
+PAUSE
+FAST_FORWARD
+REWIND
+SKIP
+```
+
+That allows ISweep to select a controller based on the user's existing equipment without changing the Decision Engine.
 
 Example:
 
 ```text
-ISweep decides MUTE
-        |
-        v
-USB / network IR transmitter
-        |
-        v
-TV receives normal MUTE remote code
+Decision Engine -> MUTE
+                    |
+                    +--> Samsung/LG/etc. Wi-Fi adapter
+                    +--> Bluetooth adapter
+                    +--> CEC adapter
+                    +--> optional IR adapter
 ```
-
-For skipping a scene:
-
-```text
-ISweep decides SKIP
-        |
-        v
-IR transmitter sends FAST FORWARD / SKIP / PLAY
-        |
-        v
-DVD player performs the same action as if the user pressed the remote
-```
-
-## Other controller options
-
-Later adapters may include:
-
-- HDMI-CEC
-- Smart-TV APIs
-- Network-controlled receivers
-- Bluetooth controls
-
-All adapters should ultimately implement the same ISweep command vocabulary already defined in `dvd/control/commands.py`.
 
 ---
 
-# 4. Synchronization — Knowing WHEN to Act
+# Recommended Development Path
 
-This is a separate problem from recognizing content.
+## Phase A — Shared preferences
 
-ISweep must know when to send MUTE and when to send UNMUTE, or when a scene begins and ends.
+Finish proving that the website, extension, and DVD controller read the same successfully saved backend preference object.
 
-Possible synchronization sources include:
+## Phase B — Software device discovery
 
-- Known timestamps for a specific movie/disc version
-- Subtitle timing
-- Closed-caption timing
-- Audio fingerprint synchronization
-- Live speech recognition
-- Hybrid synchronization using more than one source
+Build a local ISweep device-discovery service that can identify controllable TVs/players on the user's LAN and report what protocols they expose.
 
-## Profanity timing challenge
+## Phase C — First real Wi-Fi control adapter
 
-If speech-to-text recognizes a word only after the viewer has already heard it, a mute command will be late.
+Choose one real TV/device already owned by the user and implement:
 
-For accurate language filtering, the long-term design should prefer information that gives ISweep some look-ahead, such as:
+```text
+MUTE
+UNMUTE
+```
 
-1. known event timestamps,
-2. subtitle/caption timing,
-3. pre-analysis of a title,
-4. or another synchronized prediction source.
+without a purchased universal remote.
 
-Live speech recognition is still useful as a fallback and for learning, but by itself it may not always react before the first sound of a word.
+## Phase D — Player transport control
+
+For the user's actual DVD/Blu-ray player, determine whether it can be controlled by:
+
+```text
+Wi-Fi API
+Bluetooth
+HDMI-CEC through TV
+other existing software protocol
+```
+
+Then implement PLAY / PAUSE / FAST_FORWARD / SKIP.
+
+## Phase E — Phone/PC sensing
+
+Use existing microphone/camera/system audio to feed detection.
+
+## Phase F — Synchronization / look-ahead
+
+Make mute/skip commands occur at the correct playback time.
+
+## Phase G — Visual AI
+
+Connect Intimacy, Violence, Substances, and Horror preferences to visual classification and playback actions.
 
 ---
 
-# Recommended Prototype Path
+# Product Principle
 
-## Prototype A — Real remote control, simulated detection
+ISweep should be the intelligence, preference system, controller, and user experience.
 
-Goal: prove the computer can physically control the user's equipment.
+We can implement support for standard device protocols ourselves, but we cannot make a physical player receive a protocol it was never designed to receive.
 
-```text
-Computer
-   |
-   | manual test command
-   v
-IR transmitter
-   |
-   +--> TV MUTE / UNMUTE
-   +--> DVD PLAY / PAUSE / FAST FORWARD
-```
+Therefore the main ISweep product should be:
 
-This is the first real hardware milestone.
-
-## Prototype B — Real audio input + real remote
-
-```text
-DVD Player
-   |
-   | audio output
-   v
-USB audio capture
-   |
-   v
-Speech / content detector
-   |
-   v
-Decision Engine
-   |
-   v
-IR remote controller
-```
-
-## Prototype C — Synchronization and look-ahead
-
-Add movie identification, subtitle/timestamp information, or audio fingerprint synchronization so commands can occur before unwanted content reaches the viewer.
-
-## Prototype D — Visual AI
-
-Add video input and scene recognition for the visual categories already represented on the ISweep Filters page.
-
----
-
-# What We Should Build Next
-
-Before adding more AI, the next physical-development task should be a **real control adapter** that can replace `SimulatedRemote`.
-
-The recommended first adapter is IR because it most closely matches the project's core principle: ISweep acts like an automated person pressing the user's existing remote buttons.
-
-Once a real IR MUTE / UNMUTE command works on one television, we can add DVD-player PLAY / PAUSE / FAST FORWARD commands and then connect detection to those same commands.
-
-This keeps the extension, website, Decision Engine, and physical-DVD work separated enough that one component can be improved without breaking the others.
+**AI + shared preferences + phone/computer companion + Wi-Fi/Bluetooth/CEC/device APIs, with IR only as an optional legacy compatibility adapter.**
