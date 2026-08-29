@@ -37,7 +37,7 @@
     },
     {
       "matches": ["*://*.youtube.com/watch*"],
-      "js": ["youtube_captions.js", "caption_remote.js"],
+      "js": ["caption_bootstrap.js", "youtube_captions.js", "caption_remote.js"],
       "run_at": "document_idle"
     },
     {
