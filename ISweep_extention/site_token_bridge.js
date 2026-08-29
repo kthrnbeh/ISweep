@@ -1,13 +1,18 @@
-// Bridges hosted/local website auth + saved Filter selections into extension storage.
-// This keeps the extension's cached preferences aligned with the Filter page even
-// when a backend refresh is delayed or temporarily unavailable.
+// Bridges website auth + the last successfully saved backend preferences into extension storage.
+//
+// Cohesion rule:
+//   Filter.html saves to /preferences
+//        ↓
+//   Backend/database is the durable source of truth
+//        ↓
+//   Chrome extension + ISweep DVD consume the same preference object
+//
+// The browser/extension may keep cached copies for resilience, but an unsaved local
+// Filters-page state must never silently become a second preference system.
 const TOKEN_KEY = 'isweep_auth_token';
 const SITE_PREFS_CACHE_KEY = 'isweep-preferences';
-const SITE_SETTINGS_KEY = 'isweep-settings';
 const EXTENSION_PREFS_KEY = 'isweepPreferences';
-const LANGUAGE_WORDLIST_PATH = 'wordlists/language_words.json';
 
-let cachedWordLibrary = null;
 let lastObservedSnapshot = '';
 
 function safeParseJson(raw, fallback = null) {
@@ -18,192 +23,158 @@ function safeParseJson(raw, fallback = null) {
   }
 }
 
-function decodeToken(token) {
-  try {
-    return atob(String(token || ''));
-  } catch (_) {
-    return '';
-  }
-}
+function normalizeSavedPreferences(raw) {
+  const prefs = raw && typeof raw === 'object' ? raw : null;
+  if (!prefs) return null;
 
-async function loadLanguageWordLibrary() {
-  if (cachedWordLibrary) return cachedWordLibrary;
+  const blocklistItems = Array.isArray(prefs?.blocklist?.items)
+    ? prefs.blocklist.items
+    : Array.isArray(prefs?.categories?.language?.items)
+      ? prefs.categories.language.items
+      : [];
 
-  try {
-    const url = new URL(LANGUAGE_WORDLIST_PATH, window.location.href);
-    const response = await fetch(url.toString(), { cache: 'no-store' });
-    if (!response.ok) throw new Error(`status ${response.status}`);
-
-    const data = await response.json();
-    const language = data?.language && typeof data.language === 'object'
-      ? data.language
-      : {};
-    const mapped = {};
-
-    Object.entries(language).forEach(([subKey, payload]) => {
-      const items = Array.isArray(payload?.items) ? payload.items : [];
-      mapped[subKey] = items.map((item, index) => ({
-        id: String(item?.id || `${subKey}-${index}`),
-        word: decodeToken(item?.token || ''),
-      })).filter((entry) => entry.id && entry.word);
-    });
-
-    cachedWordLibrary = mapped;
-    return cachedWordLibrary;
-  } catch (error) {
-    console.warn('[ISWEEP][TOKEN_BRIDGE] word library load failed', error?.message || error);
-    return null;
-  }
-}
-
-async function buildPreferencesFromFilterSettings() {
-  const settings = safeParseJson(window.localStorage.getItem(SITE_SETTINGS_KEY), null);
-  if (!settings || typeof settings !== 'object') return null;
-
-  const library = await loadLanguageWordLibrary();
-  if (!library) return null;
-
-  const selectedWords = [];
-  const selections = settings?.predefined_words?.language || {};
-
-  Object.entries(library).forEach(([subKey, items]) => {
-    const selectedIds = new Set(
-      Array.isArray(selections?.[subKey]?.selectedIds)
-        ? selections[subKey].selectedIds.map(String)
-        : []
-    );
-
-    items.forEach((item) => {
-      if (selectedIds.has(String(item.id)) && item.word) {
-        selectedWords.push(item.word.trim().toLowerCase());
-      }
-    });
-  });
-
-  const customWords = Array.isArray(settings?.custom_words?.language)
-    ? settings.custom_words.language
-        .map((word) => String(word || '').trim().toLowerCase())
-        .filter(Boolean)
-    : [];
-
-  const blocklistItems = Array.from(new Set([
-    ...selectedWords,
-    ...customWords,
-  ])).filter(Boolean);
-
-  const cachedPrefs = safeParseJson(
-    window.localStorage.getItem(SITE_PREFS_CACHE_KEY),
-    {}
-  ) || {};
-
-  const languageEnabled = settings?.filters_enabled?.language !== false;
-  const languageDuration = Number(settings?.actions?.language?.duration) || 4;
+  const cleanedItems = Array.from(new Set(
+    blocklistItems
+      .map((word) => typeof word === 'string' ? word.trim().toLowerCase() : '')
+      .filter(Boolean)
+  ));
 
   return {
-    ...cachedPrefs,
-    enabled: cachedPrefs.enabled !== false,
+    ...prefs,
     categories: {
-      ...(cachedPrefs.categories || {}),
+      ...(prefs.categories || {}),
       language: {
-        ...(cachedPrefs.categories?.language || {}),
-        enabled: languageEnabled,
-        action: 'mute',
-        duration: languageDuration,
-        items: blocklistItems,
+        ...(prefs.categories?.language || {}),
+        items: cleanedItems,
       },
     },
     blocklist: {
-      ...(cachedPrefs.blocklist || {}),
-      enabled: languageEnabled,
-      mode: 'whole_word',
-      action: 'mute',
-      duration: languageDuration,
-      items: blocklistItems,
+      ...(prefs.blocklist || {}),
+      items: cleanedItems,
     },
   };
 }
 
-async function copySitePreferencesToExtension() {
-  const prefs = await buildPreferencesFromFilterSettings();
+function readLastSavedBackendPreferences() {
+  const cached = safeParseJson(
+    window.localStorage.getItem(SITE_PREFS_CACHE_KEY),
+    null
+  );
+
+  return normalizeSavedPreferences(cached);
+}
+
+async function copyLastSavedBackendPreferencesToExtension(reason = 'cached_backend_preferences') {
+  const prefs = readLastSavedBackendPreferences();
+
   if (!prefs) {
-    console.warn('[ISWEEP][TOKEN_BRIDGE] no Filter settings available to mirror');
-    return { ok: false, reason: 'missing_filter_settings' };
+    console.warn('[ISWEEP][TOKEN_BRIDGE] no saved backend preference cache available', {
+      reason,
+    });
+    return {
+      ok: false,
+      reason: 'missing_saved_backend_preferences',
+      selectedWordCount: 0,
+    };
   }
 
   await chrome.storage.local.set({
     [EXTENSION_PREFS_KEY]: prefs,
   });
 
-  const count = Array.isArray(prefs?.blocklist?.items)
+  const selectedWordCount = Array.isArray(prefs?.blocklist?.items)
     ? prefs.blocklist.items.length
     : 0;
 
-  console.log('[ISWEEP][TOKEN_BRIDGE] Filter selections copied to extension', {
-    selectedWordCount: count,
+  console.log('[ISWEEP][TOKEN_BRIDGE] saved backend preferences copied to extension', {
+    reason,
+    selectedWordCount,
   });
 
   return {
     ok: true,
-    selectedWordCount: count,
+    reason,
+    selectedWordCount,
   };
 }
 
-function scheduleMirrorAfterPopupSync() {
-  // popup.js performs its own /preferences refresh after ISWEEP_PULL_TOKEN.
-  // Re-apply the Filter-page mirror just after that refresh so a stale/empty
-  // backend response cannot overwrite the selections the user just saved.
-  setTimeout(() => {
-    copySitePreferencesToExtension().catch((error) => {
-      console.warn('[ISWEEP][TOKEN_BRIDGE] delayed preference mirror failed', error?.message || error);
-    });
-  }, 500);
-
-  setTimeout(() => {
-    copySitePreferencesToExtension().catch(() => {});
-  }, 1200);
-}
-
-async function pushSiteStateToExtension() {
+async function refreshExtensionFromSharedPreferences(reason = 'bridge_refresh') {
   try {
     const token = window.localStorage.getItem(TOKEN_KEY);
 
     if (token) {
-      // Store the website token first so the background worker can still use the
-      // normal /preferences endpoint as the durable account source of truth.
+      // Copy the shared account token first, then ask the background worker to
+      // fetch the exact same /preferences object that ISweep DVD consumes.
       await chrome.storage.local.set({ [TOKEN_KEY]: token });
 
       try {
-        await chrome.runtime.sendMessage({ type: 'isweep_sync_prefs' });
+        const syncResult = await chrome.runtime.sendMessage({
+          type: 'isweep_sync_prefs',
+        });
+
+        if (syncResult?.ok === true || syncResult?.prefs) {
+          const store = await chrome.storage.local.get([EXTENSION_PREFS_KEY]);
+          const synced = normalizeSavedPreferences(store[EXTENSION_PREFS_KEY]);
+          const selectedWordCount = Array.isArray(synced?.blocklist?.items)
+            ? synced.blocklist.items.length
+            : 0;
+
+          console.log('[ISWEEP][TOKEN_BRIDGE] extension refreshed from shared backend preferences', {
+            reason,
+            selectedWordCount,
+          });
+
+          return {
+            ok: true,
+            source: 'backend',
+            hasToken: true,
+            selectedWordCount,
+          };
+        }
       } catch (error) {
-        console.warn('[ISWEEP][TOKEN_BRIDGE] backend preference refresh failed', error?.message || error);
+        console.warn('[ISWEEP][TOKEN_BRIDGE] backend preference refresh failed; using last saved cache', {
+          reason,
+          error: error?.message || error,
+        });
       }
     }
 
-    // Always mirror the Filter page's current saved selections after the backend
-    // refresh attempt. This removes the old 0/[missing] gap in the extension.
-    const localMirror = await copySitePreferencesToExtension();
-    scheduleMirrorAfterPopupSync();
+    // Resilience only: use the site's cache of the LAST SUCCESSFUL /preferences
+    // response. This is still shared-backend state, not unsaved UI state.
+    const fallback = await copyLastSavedBackendPreferencesToExtension(reason);
 
     return {
-      ok: localMirror.ok,
+      ok: fallback.ok,
+      source: fallback.ok ? 'last_saved_backend_cache' : 'none',
       hasToken: Boolean(token),
-      selectedWordCount: localMirror.selectedWordCount || 0,
+      selectedWordCount: fallback.selectedWordCount || 0,
     };
   } catch (error) {
-    console.warn('[ISWEEP][TOKEN_BRIDGE] site state bridge failed', error?.message || error);
-    return { ok: false, error: error?.message || 'bridge_failed' };
+    console.warn('[ISWEEP][TOKEN_BRIDGE] shared preference bridge failed', {
+      reason,
+      error: error?.message || error,
+    });
+
+    return {
+      ok: false,
+      source: 'none',
+      selectedWordCount: 0,
+      error: error?.message || 'bridge_failed',
+    };
   }
 }
 
 function currentSnapshot() {
   return JSON.stringify({
     token: window.localStorage.getItem(TOKEN_KEY) || '',
-    prefs: window.localStorage.getItem(SITE_PREFS_CACHE_KEY) || '',
-    settings: window.localStorage.getItem(SITE_SETTINGS_KEY) || '',
+    // This cache changes only when main.js receives a successful backend
+    // preference response, so watching it keeps DVD and extension aligned.
+    savedBackendPreferences:
+      window.localStorage.getItem(SITE_PREFS_CACHE_KEY) || '',
   });
 }
 
-function watchHostedPreferenceChanges() {
+function watchSharedPreferenceChanges() {
   lastObservedSnapshot = currentSnapshot();
 
   setInterval(() => {
@@ -211,20 +182,23 @@ function watchHostedPreferenceChanges() {
     if (nextSnapshot === lastObservedSnapshot) return;
 
     lastObservedSnapshot = nextSnapshot;
-    console.log('[ISWEEP][TOKEN_BRIDGE] website settings changed; refreshing extension cache');
-    pushSiteStateToExtension();
+
+    console.log('[ISWEEP][TOKEN_BRIDGE] shared saved preferences changed; refreshing extension');
+
+    refreshExtensionFromSharedPreferences('saved_preferences_changed');
   }, 500);
 }
 
-// Push once on load, then keep extension storage aligned with Filter saves.
-pushSiteStateToExtension();
-watchHostedPreferenceChanges();
+// Initial bridge load.
+refreshExtensionFromSharedPreferences('page_loaded');
+watchSharedPreferenceChanges();
 
 // Popup can explicitly request a refresh while the Filter page is active.
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'ISWEEP_PULL_TOKEN') {
-    pushSiteStateToExtension().then(sendResponse);
+    refreshExtensionFromSharedPreferences('popup_requested').then(sendResponse);
     return true;
   }
+
   return false;
 });
