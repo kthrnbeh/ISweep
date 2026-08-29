@@ -2205,36 +2205,74 @@ document.addEventListener(
             toggleWordPanel
           );
 
-          row.addEventListener(
-            'change',
-            (event) => {
-              const target =
-                event.target;
+  row.addEventListener(
+  'change',
+  (event) => {
+    const target = event.target;
 
-              if (
-                target instanceof
-                HTMLInputElement
-              ) {
-                const key =
-                  target.getAttribute(
-                    'data-subfilter'
-                  );
+    if (!(target instanceof HTMLInputElement)) {
+      return;
+    }
 
-                settings.subfilters_enabled[
-                  currentCategory
-                ][key] =
-                  target.checked;
+    const key = target.getAttribute('data-subfilter');
 
-                dot.classList.toggle(
-                  'enabled-on',
-                  target.checked
-                );
+    if (!key) {
+      return;
+    }
 
-                renderTiles();
-              }
-            }
-          );
+    // Turn the subcategory itself on/off.
+    settings.subfilters_enabled[currentCategory][key] =
+      target.checked;
 
+    /*
+     * LANGUAGE MASTER CHECKBOX
+     *
+     * Checking Profanity / Blasphemy / Childish / Slurs
+     * automatically selects every predefined word inside it.
+     *
+     * Unchecking the category clears every predefined word
+     * inside it.
+     */
+    if (currentCategory === 'language') {
+      const libraryItems =
+        Array.isArray(wordLibrary.language?.[key]?.items)
+          ? wordLibrary.language[key].items
+          : [];
+
+      if (!settings.predefined_words) {
+        settings.predefined_words = {};
+      }
+
+      if (!settings.predefined_words.language) {
+        settings.predefined_words.language = {};
+      }
+
+      settings.predefined_words.language[key] = {
+        selectedIds: target.checked
+          ? libraryItems.map((item) => item.id)
+          : [],
+      };
+    }
+
+    dot.classList.toggle(
+      'enabled-on',
+      target.checked
+    );
+
+    // Save the selection locally immediately.
+    saveSettingsToStorage(settings);
+
+    /*
+     * Re-render so the count and individual checkboxes
+     * immediately show the new state.
+     *
+     * Example:
+     * Profanity 0/33 -> 33/33
+     */
+    renderSubcategories();
+    renderTiles();
+  }
+);
           subcategoryList.appendChild(
             row
           );
