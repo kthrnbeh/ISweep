@@ -45,13 +45,29 @@
 
           <div id="kbDropdown" class="kb-dropdown hidden">
             <div class="dropdown-section">
-              <button id="themeToggleDropdown">Toggle Theme</button>
-            </div>
-            <div class="dropdown-section">
-              <a href="Account.html">Account</a>
-              <a href="Settings.html">Settings</a>
-              <button id="signOutBtn" data-logout>Sign Out</button>
-            </div>
+  <button
+    type="button"
+    data-open-auth="signin"
+    id="signInMenuBtn"
+  >
+    Sign In
+  </button>
+
+  <button
+    type="button"
+    data-open-auth="create"
+    id="createAccountMenuBtn"
+  >
+    Create Account
+  </button>
+
+  <a href="Account.html">Account</a>
+  <a href="Settings.html">Settings</a>
+
+  <button id="signOutBtn" data-logout>
+    Sign Out
+  </button>
+</div>
           </div>
         </div>
       </div>
