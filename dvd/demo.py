@@ -26,7 +26,7 @@ the same saved preferences already used by the website/extension.
 No media is edited or modified.
 """
 
-from getpass import getpass
+from dvd.password_input import masked_password
 
 from dvd.control.simulated import SimulatedRemote
 from dvd.decision_engine import DecisionEngine, Detection
@@ -152,7 +152,7 @@ def load_shared_preferences():
         return None
 
     # getpass hides the password while the user types.
-    password = getpass("ISweep password (typing is hidden — press Enter when done): ")
+    password = masked_password("ISweep password: ")
 
     if not password:
         print("An ISweep password is required.")
