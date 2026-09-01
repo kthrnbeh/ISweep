@@ -227,7 +227,11 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Launch the ISweep Host Player")
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--file", dest="file_path", help="Video file to open at startup")
-    source.add_argument("--dvd", dest="dvd_drive", help=r"DVD drive/root, e.g. D:\")
+    source.add_argument(
+        "--dvd",
+        dest="dvd_drive",
+        help="DVD drive/root to open at startup (for example, drive D:)",
+    )
     return parser.parse_args()
 
 
