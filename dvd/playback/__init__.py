@@ -8,6 +8,7 @@ from .controller import PlaybackController
 from .host import ISweepHostPlayback
 from .models import MediaKind, MediaSource, PlaybackState, PlaybackStatus
 from .simulated import SimulatedPlaybackController
+from .vlc import VLCPlaybackController, VLCUnavailableError, dvd_mrl
 
 __all__ = [
     "ISweepHostPlayback",
@@ -17,4 +18,7 @@ __all__ = [
     "PlaybackState",
     "PlaybackStatus",
     "SimulatedPlaybackController",
+    "VLCPlaybackController",
+    "VLCUnavailableError",
+    "dvd_mrl",
 ]
