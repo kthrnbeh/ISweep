@@ -1,3 +1,6 @@
 # ISweep runtime logs
 /isweep_backend.log
 /isweep_backend_error.log
+
+# Local IR remote codes learned from the user's own equipment.
+/dvd/config/ir_codes.json

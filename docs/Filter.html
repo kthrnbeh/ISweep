@@ -9,6 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;500&display=swap" rel="stylesheet">
   <script src="main.js" defer></script>
+  <script src="auth_sync.js" defer></script>
 </head>
 <body>
   <header class="site-header">
@@ -53,7 +54,6 @@
   </header>
 
   <main class="filters-page container" data-filters-page>
-    <!-- Page hero summarizing filter purpose without altering layout -->
     <section class="filters-hero card">
       <div>
         <p class="eyebrow">Control center</p>
@@ -66,47 +66,35 @@
       </div>
     </section>
 
-    <!-- Category tiles list; selection highlights active category -->
     <section class="filter-tiles" aria-label="Filter categories">
       <button class="filter-tile tile-selected" type="button" data-filter-tile="language" style="background: linear-gradient(145deg, #a5d4ff 0%, #3c74ff 100%);">
         <span class="tile-check"></span>
-        <div class="tile-top">
-          <span class="tile-icon">💬</span>
-        </div>
+        <div class="tile-top"><span class="tile-icon">💬</span></div>
         <p class="tile-label">Language</p>
       </button>
       <button class="filter-tile" type="button" data-filter-tile="intimacy" style="background: linear-gradient(145deg, #7ec8ff 0%, #2f6ad9 100%);">
         <span class="tile-check"></span>
-        <div class="tile-top">
-          <span class="tile-icon">❤️</span>
-        </div>
+        <div class="tile-top"><span class="tile-icon">❤️</span></div>
         <p class="tile-label">Intimacy</p>
       </button>
       <button class="filter-tile" type="button" data-filter-tile="violence" style="background: linear-gradient(145deg, #78b7ff 0%, #1f4ea6 100%);">
         <span class="tile-check"></span>
-        <div class="tile-top">
-          <span class="tile-icon">⚔️</span>
-        </div>
+        <div class="tile-top"><span class="tile-icon">⚔️</span></div>
         <p class="tile-label">Violence</p>
       </button>
       <button class="filter-tile" type="button" data-filter-tile="substances" style="background: linear-gradient(145deg, #6db0ff 0%, #1b4c94 100%);">
         <span class="tile-check"></span>
-        <div class="tile-top">
-          <span class="tile-icon">🍷</span>
-        </div>
+        <div class="tile-top"><span class="tile-icon">🍷</span></div>
         <p class="tile-label">Substances</p>
       </button>
       <button class="filter-tile" type="button" data-filter-tile="horror" style="background: linear-gradient(145deg, #5ba3ff 0%, #163f7b 100%);">
         <span class="tile-check"></span>
-        <div class="tile-top">
-          <span class="tile-icon">👁️</span>
-        </div>
+        <div class="tile-top"><span class="tile-icon">👁️</span></div>
         <p class="tile-label">Horror &amp; Fears</p>
       </button>
     </section>
 
     <section class="filters-grid">
-      <!-- Primary category detail panel; toggles and actions live here -->
       <section class="category-card">
         <div class="category-header">
           <div>
@@ -171,7 +159,6 @@
         </div>
       </section>
 
-      <!-- Sidebar with activity and presets remains unchanged for quick stats -->
       <aside class="filters-aside">
         <div class="card" style="padding: 16px;">
           <div style="display:flex; align-items:center; justify-content: space-between; gap: 10px;">
@@ -198,26 +185,19 @@
       </aside>
     </section>
 
-    <!-- Developer toggle placed at the bottom; keeps main layout untouched while exposing tools on demand -->
     <div class="card" style="margin-top: 16px; padding: 12px; text-align: center;">
-      <button id="devPanelToggle" type="button" class="ghost dev-toggle" style="font-size: 0.95rem;">
-        Show Developer Tools
-      </button>
+      <button id="devPanelToggle" type="button" class="ghost dev-toggle" style="font-size: 0.95rem;">Show Developer Tools</button>
     </div>
 
-    <!-- Collapsed developer panel for safe mock testing; hidden by default to avoid altering the primary UI -->
     <section id="devPanel" class="card isweep-dev-panel" style="margin-top: 40px; padding: 16px; display: none;">
       <h3 style="margin-top: 0;">ISweep Developer Panel</h3>
       <p class="muted" style="margin: 6px 0 14px;">Test caption detection and backend responses without changing media.</p>
-
       <label for="devInput" style="display: block; font-weight: 600; margin-bottom: 6px;">Test Caption</label>
       <textarea id="devInput" rows="4" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border); resize: vertical;" placeholder="Paste a sample caption or transcript line"></textarea>
-
       <div style="margin: 10px 0 14px; display: flex; gap: 10px; align-items: center;">
         <button id="devRunBtn" type="button" class="primary">Run Detection</button>
         <span class="muted" style="font-size: 0.9rem;">Mocked output only; hook real backend later if desired.</span>
       </div>
-
       <div class="card dev-results-card" style="padding: 12px;">
         <p class="eyebrow" style="margin: 0 0 8px;">Mock Results</p>
         <div class="dev-results">
@@ -227,7 +207,6 @@
           <div><strong>Reason:</strong> <span id="devResultReason">-</span></div>
         </div>
       </div>
-
       <div style="margin-top: 12px;">
         <p class="eyebrow" style="margin: 0 0 6px;">Event Log</p>
         <div id="devLog" class="dev-log" style="max-height: 140px; overflow-y: auto;">
@@ -238,7 +217,6 @@
   </main>
 
   <script>
-    // Toggle the developer panel without disturbing the existing layout or styling.
     (function () {
       const toggle = document.getElementById('devPanelToggle');
       const panel = document.getElementById('devPanel');
@@ -252,7 +230,7 @@
       };
       const logBox = document.getElementById('devLog');
 
-      if (!toggle || !panel || !runBtn || !input || !result.action || !logBox) return; // Guard if markup changes.
+      if (!toggle || !panel || !runBtn || !input || !result.action || !logBox) return;
 
       toggle.addEventListener('click', () => {
         const isHidden = panel.style.display === 'none';
@@ -264,13 +242,10 @@
       runBtn.addEventListener('click', () => {
         const text = input.value.trim();
         if (!text) {
-          // Keep behavior safe: only log notice when no input is provided.
           setResults('-', '-', '-', 'No input provided');
           appendLog('Run skipped: provide sample caption text.');
           return;
         }
-
-        // Mock outputs to avoid real backend calls; replace with API wiring later if needed.
         setResults('mute', 'profanity', 'adaptive', 'test input received');
         appendLog(`Test run with sample text (${text.length} chars).`);
       });
