@@ -50,6 +50,69 @@ It also eliminates the need for a purchased universal remote for the normal supp
 
 ---
 
+# First real player implementation
+
+The first real Windows playback adapter is now in:
+
+```text
+dvd/playback/vlc.py
+```
+
+and the first ISweep desktop player window is:
+
+```text
+dvd/player_app.py
+```
+
+ISweep owns the UI and filtering architecture. For this prototype, **libVLC is the underlying media-decoding engine**. This is the same kind of separation used by many applications: ISweep supplies the product behavior while a media engine handles codecs, timing, audio output, and video rendering.
+
+The VLC dependency is intentionally optional. The website, Chrome extension, Flask backend, Decision Engine, and normal tests do not import or require VLC.
+
+## Prototype setup on Windows
+
+Install the 64-bit VLC desktop runtime on the ISweep computer, then in the active ISweep virtual environment run:
+
+```powershell
+pip install -r dvd/requirements-player.txt
+```
+
+Pull the current branch and run all tests:
+
+```powershell
+git pull --ff-only origin dvd-shared-preferences-sync
+python -m pytest dvd/tests -v
+```
+
+Launch the first real ISweep Player:
+
+```powershell
+python -m dvd.player_app
+```
+
+The window contains:
+
+- Open Video
+- Load DVD
+- Play
+- Pause
+- Stop
+- -15 seconds
+- +15 seconds
+- Mute
+- Unmute
+- live playback position / duration
+
+A normal video file is the easiest first physical test. Once that works, insert a supported DVD-Video disc and press **Load DVD**.
+
+For a direct startup source, the prototype also accepts:
+
+```powershell
+python -m dvd.player_app --file "C:\path\to\video.mp4"
+python -m dvd.player_app --dvd D:\
+```
+
+---
+
 # Automatic disc flow
 
 The intended user experience is:
@@ -77,15 +140,15 @@ User presses Play
 ISweep filters live playback according to that account
 ```
 
-`dvd/playback/disc.py` now contains the first Windows optical-drive/DVD-Video detection foundation for this flow.
+`dvd/playback/disc.py` contains the first Windows optical-drive/DVD-Video detection foundation for this flow.
 
 ---
 
 # Playback adapter boundary
 
-The Decision Engine should never depend directly on one media framework.
+The Decision Engine does not depend directly on VLC.
 
-Instead, every media engine should implement the same `PlaybackController` contract:
+Every media engine implements the same `PlaybackController` contract:
 
 ```text
 load(source)
@@ -98,15 +161,32 @@ seek_relative(seconds)
 get_state()
 ```
 
-This allows us to begin with a simulated player and later plug in a real Windows-capable media engine without rewriting filters, preferences, AI, or synchronization.
+The real `VLCPlaybackController` and the test-only `SimulatedPlaybackController` both sit behind this contract.
 
-`ISweepHostPlayback` already converts Decision Engine MUTE/ALLOW results into deterministic player mute/unmute calls.
+That means a later packaged/native media engine can replace libVLC without rewriting the ISweep filters, user preferences, AI, or synchronization system.
+
+`ISweepHostPlayback` converts Decision Engine MUTE/ALLOW results into deterministic player mute/unmute calls. Because ISweep owns the player, it can distinguish sound that ISweep muted from sound the user muted manually.
+
+---
+
+# Important DVD limitation
+
+ISweep does not decrypt, rip, copy, or modify discs.
+
+Commercial DVD playback depends on the capabilities legally available through the installed playback/media engine and operating system. ISweep should not implement copy-protection circumvention.
+
+The first playable prototype can be validated using:
+
+- ordinary video files,
+- home-authored DVD-Video,
+- unencrypted DVD-Video,
+- or other media that the installed engine can lawfully open.
 
 ---
 
 # Roku and smart-TV control
 
-Roku-style network discovery is still useful, but it becomes **Mode B**, not the core DVD path.
+Roku-style network discovery is still useful, but it is **Mode B**, not the core DVD path.
 
 ## Mode A — Host Player (preferred)
 
@@ -133,26 +213,18 @@ Mode B extends compatibility when users want to keep an existing standalone play
 
 ---
 
-# What still must be selected
-
-The new playback layer is deliberately independent of the final decoding engine.
-
-A real DVD player app still needs a media engine capable of presenting DVD content on the user's operating system. We should not write video/audio codecs from scratch; ISweep should own the product/UI/filtering logic while using a supported media-decoding layer underneath it.
-
-For commercial encrypted DVDs, playback also depends on what licensed or legally available DVD support exists on the user's system. ISweep should not implement copy-protection circumvention. The first playable prototype can begin with media the operating system/media engine can lawfully open, including unencrypted/home-authored DVD-Video.
-
----
-
 # Next implementation milestones
 
 1. **Disc detection** — detect insertion/removal and standard `VIDEO_TS` structure. (foundation added)
 2. **Playback abstraction** — one controller API for play/pause/mute/seek/state. (added)
 3. **Simulated host player tests** — prove decisions control playback state. (added)
-4. **Real media-engine adapter** — load/play a supported DVD or test media through the same controller interface.
-5. **Auto-session service** — when a DVD appears, create an ISweep playback session and load account preferences automatically.
-6. **Timeline synchronization** — use the player's actual clock instead of artificial timestamps.
-7. **Caption/audio detection** — feed detected text/events into the existing Decision Engine.
-8. **Visual AI** — classify frames/scenes against the same saved visual preferences.
-9. **Phone companion** — remote UI and optional microphone/camera helper over the local network.
+4. **Real media-engine adapter** — libVLC adapter added.
+5. **Real ISweep Player window** — Windows desktop player with video surface and controls added.
+6. **Auto-session service** — when a DVD appears, create an ISweep playback session and load account preferences automatically.
+7. **Timeline synchronization** — feed the player's real clock into filtering instead of artificial timestamps.
+8. **Caption/audio detection** — feed detected text/events into the existing Decision Engine before output where possible.
+9. **Filtering integration** — make `ISweepHostPlayback` automatically mute/unmute the real player from shared `/preferences` decisions.
+10. **Visual AI** — classify frames/scenes against the same saved visual preferences.
+11. **Phone companion** — remote UI and optional microphone/camera helper over the local network.
 
 This architecture keeps the website, browser extension, DVD player, and future phone companion connected through shared preferences while allowing each playback environment to use the control method best suited to it.
