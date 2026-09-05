@@ -850,11 +850,18 @@ function ensurePredefinedSelection(
   return settings.predefined_words[categoryKey][subKey];
 }
 
-function migrateNewLanguageWordDefaults(settings) {
+function migrateNewLanguageWordDefaults(settings, options = {}) {
   const safe =
     ensureFilterSettings(
       settings || {}
     );
+
+  if (options.preserveExplicitEmptyLanguageSelection === true) {
+    return {
+      settings: safe,
+      changed: false,
+    };
+  }
 
   if (
     localStorage.getItem(
@@ -1246,6 +1253,16 @@ function preferencesToFilterSettings(
   }
 
   return ensureFilterSettings(next);
+}
+
+function hasExplicitEmptyLanguageSelection(prefs) {
+  if (Array.isArray(prefs?.blocklist?.items)) {
+    return prefs.blocklist.items.length === 0;
+  }
+  if (Array.isArray(prefs?.categories?.language?.items)) {
+    return prefs.categories.language.items.length === 0;
+  }
+  return false;
 }
 
 const ACTION_DEFAULT_DURATIONS = {
@@ -1797,7 +1814,11 @@ document.addEventListener(
 
     const migration =
       migrateNewLanguageWordDefaults(
-        settings
+        settings,
+        {
+          preserveExplicitEmptyLanguageSelection:
+            hasExplicitEmptyLanguageSelection(prefs),
+        }
       );
 
     settings =

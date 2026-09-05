@@ -107,6 +107,29 @@ test('caption runtime status prefers YouTube fallback when active tab reports li
   assert.equal(result.sourceLabel, 'YouTube Fallback');
 });
 
+test('preference sync reports explicit empty selections as synced, not missing', async () => {
+  const bg = loadBackgroundContext();
+  bg.getAuthToken = async () => 'token';
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      enabled: true,
+      categories: { language: { enabled: true, items: [] } },
+      blocklist: { enabled: true, items: [] },
+    }),
+  });
+
+  const result = await bg.handleSyncPrefs();
+  assert.equal(result.ok, true);
+  assert.equal(result.selectedWordCount, 0);
+
+  const snapshot = await bg.getCaptionModeSnapshot();
+  assert.equal(snapshot.selectedWordCount, 0);
+  assert.equal(snapshot.selectedWordSource, 'synced');
+});
+
 test('caption runtime status reports listening when health has stt_enabled true and no transcript yet', async () => {
   const bg = loadBackgroundContext();
   bg.getCaptionBackendStatus = async () => ({

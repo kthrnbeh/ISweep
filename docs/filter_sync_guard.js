@@ -250,6 +250,26 @@
     return body;
   }
 
+  async function getPreferences(token) {
+    const response = await fetch(`${backendUrl()}/preferences`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    const bodyText = await response.text();
+    let body = {};
+    try {
+      body = bodyText ? JSON.parse(bodyText) : {};
+    } catch (_) {}
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}${bodyText ? `: ${bodyText.slice(0, 160)}` : ''}`);
+    }
+
+    localStorage.setItem(PREFS_CACHE_KEY, JSON.stringify(body));
+    return body;
+  }
+
   async function verifyOrRepairSave() {
     const token = alignTokenKeys();
     if (!token) {
@@ -272,7 +292,15 @@
 
     await new Promise((resolve) => setTimeout(resolve, 650));
 
-    const cached = safeJson(localStorage.getItem(PREFS_CACHE_KEY), null);
+    let cached;
+    try {
+      cached = await getPreferences(token);
+    } catch (error) {
+      setStatus(`Saved locally, but account verification failed: ${error.message}`, true);
+      console.warn(LOG, 'could not verify saved preferences from backend', error);
+      return;
+    }
+
     const cachedCount = getWordCount(cached);
     const cachedItems = getWordItems(cached);
 
@@ -288,10 +316,11 @@
     });
 
     try {
-      const saved = await putPreferences(expected, token);
+      await putPreferences(expected, token);
+      const saved = await getPreferences(token);
       const savedCount = getWordCount(saved);
-      if (savedCount !== expectedCount) {
-        throw new Error(`backend returned ${savedCount} words; expected ${expectedCount}`);
+      if (!sameWordItems(getWordItems(saved), expectedItems)) {
+        throw new Error(`backend returned ${savedCount} different words; expected ${expectedCount}`);
       }
       setStatus(`Saved to ISweep account/backend — ${savedCount} selected language words.`);
       console.log(LOG, 'repair save verified', { selectedWordCount: savedCount });

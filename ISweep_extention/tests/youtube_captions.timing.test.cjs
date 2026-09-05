@@ -1009,6 +1009,14 @@ test('selected word Hell normalizes to hell and matches', () => {
   assert.equal(windows.length, 1);
 });
 
+test('page selected-word mute duration is adaptive and bounded', () => {
+  const hooks = loadYoutubeTimingHooks();
+  assert.equal(hooks.estimatePageWordDurationSec('what the hell', 0), 0.30);
+  assert.equal(hooks.estimatePageWordDurationSec('what the hell', 1.5), 0.5);
+  assert.equal(hooks.estimatePageSelectedWordMuteDurationSec('hell', 0.30), 0.30);
+  assert.equal(hooks.estimatePageSelectedWordMuteDurationSec('extraordinarilylongword', 4), 0.8);
+});
+
 test('mode captions_only does not schedule selected-word mute windows', () => {
   const hooks = loadYoutubeTimingHooks();
   const windows = hooks.scheduleSelectedWordMutesFromAudioPayload(

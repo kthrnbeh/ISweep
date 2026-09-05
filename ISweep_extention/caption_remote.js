@@ -1,6 +1,7 @@
 // ISweep live caption remote.
-// Uses YouTube's visible caption stream as a timing signal for selected-word mute.
-// Playback-only: this never edits or saves media; it only controls live mute state.
+// Uses YouTube's visible caption stream for fast masking and overlay style repair.
+// youtube_captions.js owns playback mute so this observer cannot create a second
+// mute window for the same caption mutation.
 (function () {
   'use strict';
 
@@ -19,11 +20,6 @@
     cleanCaptionPosition: { x: 0.5, y: 0.8 },
   };
 
-  let previousCaptionText = '';
-  let previousTokens = [];
-  let activeMute = null;
-  let restoreTimer = null;
-  let hardRestoreTimer = null;
   let observer = null;
 
   function normalizePhrase(value) {
@@ -32,10 +28,6 @@
       .replace(/[^a-z0-9'\s]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
-  }
-
-  function tokenize(text) {
-    return normalizePhrase(text).split(/\s+/).filter(Boolean);
   }
 
   function normalizePreferences(raw) {
@@ -121,181 +113,6 @@
     return document.querySelector('video');
   }
 
-  function getPlayer() {
-    return document.getElementById('movie_player');
-  }
-
-  function setMuted(targetMuted, reason) {
-    const video = getVideo();
-    if (!video) return false;
-
-    const player = getPlayer();
-    try {
-      if (player && typeof player.isMuted === 'function') {
-        const before = Boolean(player.isMuted());
-        if (targetMuted && !before && typeof player.mute === 'function') player.mute();
-        if (!targetMuted && before && typeof player.unMute === 'function') player.unMute();
-        if (Boolean(player.isMuted()) === Boolean(targetMuted)) {
-          console.log(LOG, 'mute control', { method: 'player_api', targetMuted, reason });
-          return true;
-        }
-      }
-    } catch (_) {}
-
-    const button = document.querySelector('.ytp-mute-button');
-    if (button && Boolean(video.muted) !== Boolean(targetMuted)) {
-      try { button.click(); } catch (_) {}
-    }
-    if (Boolean(video.muted) === Boolean(targetMuted)) {
-      console.log(LOG, 'mute control', { method: 'youtube_button', targetMuted, reason });
-      return true;
-    }
-
-    video.muted = Boolean(targetMuted);
-    const success = Boolean(video.muted) === Boolean(targetMuted);
-    if (success) {
-      console.log(LOG, 'mute control', { method: 'video_property', targetMuted, reason });
-    }
-    return success;
-  }
-
-  function clearRestoreTimers() {
-    if (restoreTimer) clearTimeout(restoreTimer);
-    if (hardRestoreTimer) clearTimeout(hardRestoreTimer);
-    restoreTimer = null;
-    hardRestoreTimer = null;
-  }
-
-  function restoreMute(reason) {
-    if (!activeMute) return;
-    const state = activeMute;
-    activeMute = null;
-    clearRestoreTimers();
-
-    setMuted(state.wasMuted === true, `restore:${reason}`);
-    console.log('[ISWEEP][WORD_MUTE]', 'mute end', {
-      reason,
-      matched_word: state.phrase,
-      restore_to_muted: state.wasMuted === true,
-    });
-  }
-
-  function dynamicMuteDurationMs(phrase) {
-    const words = tokenize(phrase);
-    const chars = words.join('').length;
-    const estimated = 260 + (chars * 30) + (Math.max(words.length - 1, 0) * 120);
-    return Math.max(320, Math.min(900, estimated));
-  }
-
-  function estimatedDelayToWordMs(tokens, matchStart, wasAppended) {
-    if (wasAppended || matchStart <= 0) return 0;
-    const estimatedWordMs = 290;
-    return Math.min(matchStart * estimatedWordMs, 1400);
-  }
-
-  function findPhraseMatches(tokens, selectedPhrases) {
-    const matches = [];
-
-    selectedPhrases.forEach((phrase) => {
-      const phraseTokens = tokenize(phrase);
-      if (!phraseTokens.length || phraseTokens.length > tokens.length) return;
-
-      for (let start = 0; start <= tokens.length - phraseTokens.length; start += 1) {
-        const slice = tokens.slice(start, start + phraseTokens.length);
-        if (slice.every((token, index) => token === phraseTokens[index])) {
-          matches.push({
-            phrase,
-            start,
-            end: start + phraseTokens.length - 1,
-          });
-        }
-      }
-    });
-
-    return matches;
-  }
-
-  function commonPrefixLength(a, b) {
-    const max = Math.min(a.length, b.length);
-    let index = 0;
-    while (index < max && a[index] === b[index]) index += 1;
-    return index;
-  }
-
-  function beginMute(match, tokens, prefixLength) {
-    if (settings.cleanCaptionWordMuteMode !== 'captions_word_mute') return;
-    if (!preferences?.enabled || !preferences.words.length) return;
-
-    const video = getVideo();
-    if (!video) return;
-
-    const matchWasAlreadyVisible = match.end < prefixLength;
-    if (matchWasAlreadyVisible) return;
-
-    const signature = `${match.phrase}|${tokens.join(' ')}`;
-    if (activeMute?.signature === signature) return;
-
-    const wasAppended = prefixLength > 0 && match.start >= prefixLength;
-    const delayMs = estimatedDelayToWordMs(tokens, match.start, wasAppended);
-    const durationMs = dynamicMuteDurationMs(match.phrase);
-
-    const scheduleStart = () => {
-      const currentVideo = getVideo();
-      if (!currentVideo) return;
-
-      const currentCaption = tokenize(extractCaptionText());
-      const currentMatches = findPhraseMatches(currentCaption, [match.phrase]);
-      if (!currentMatches.length) return;
-
-      if (activeMute) restoreMute('new_selected_word');
-
-      const wasMuted = Boolean(currentVideo.muted);
-      if (wasMuted) {
-        console.log(LOG, 'selected word detected but viewer already muted', { phrase: match.phrase });
-        return;
-      }
-
-      if (!setMuted(true, `selected_word:${match.phrase}`)) return;
-
-      activeMute = {
-        signature,
-        phrase: match.phrase,
-        wasMuted,
-        tokenCountAtStart: currentCaption.length,
-        startedAtMs: Date.now(),
-      };
-
-      restoreTimer = setTimeout(() => restoreMute('dynamic_word_window'), durationMs);
-      hardRestoreTimer = setTimeout(() => restoreMute('hard_timeout'), Math.min(durationMs + 450, 1350));
-
-      console.log('[ISWEEP][WORD_MUTE]', 'mute start', {
-        matched_word: match.phrase,
-        delay_ms: delayMs,
-        duration_ms: durationMs,
-        source: 'youtube_caption_dom',
-      });
-    };
-
-    if (delayMs > 0) {
-      setTimeout(scheduleStart, delayMs);
-    } else {
-      scheduleStart();
-    }
-  }
-
-  function maybeRestoreOnCleanWord(tokens) {
-    if (!activeMute) return;
-    if (tokens.length <= activeMute.tokenCountAtStart) return;
-
-    const appended = tokens.slice(activeMute.tokenCountAtStart);
-    const selected = new Set((preferences?.words || []).flatMap(tokenize));
-    const hasCleanWord = appended.some((token) => token && !selected.has(token));
-
-    if (hasCleanWord && (Date.now() - activeMute.startedAtMs) >= 180) {
-      setTimeout(() => restoreMute('next_clean_caption_word'), 60);
-    }
-  }
-
   function extractCaptionText() {
     return Array.from(document.querySelectorAll('.ytp-caption-segment'))
       .map((node) => String(node.textContent || '').trim())
@@ -362,25 +179,15 @@
   function processCaption() {
     const text = extractCaptionText();
     if (!text) {
-      previousCaptionText = '';
-      previousTokens = [];
       updateCleanOverlay('');
       return;
     }
-
-    const tokens = tokenize(text);
-    const prefixLength = commonPrefixLength(previousTokens, tokens);
-    const matches = findPhraseMatches(tokens, preferences?.words || []);
-
-    maybeRestoreOnCleanWord(tokens);
 
     // youtube_captions.js is the single playback-mute owner. This observer
     // remains responsible for fast caption masking/style repair, but must not
     // create a second mute window for the same DOM mutation.
 
     updateCleanOverlay(text);
-    previousCaptionText = text;
-    previousTokens = tokens;
   }
 
   async function loadState() {

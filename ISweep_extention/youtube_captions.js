@@ -121,7 +121,9 @@
     muteStateVideo = video;
     muteStateVolumeHandler = () => {
       if (muteControlInProgress > 0 || Date.now() <= suppressMuteChangeEventsUntilMs) return;
-      if (isweepMuteActive) {
+      // volumechange also fires for ordinary volume-slider changes. Only
+      // release ISweep's ownership when the user actually unmutes the video.
+      if (isweepMuteActive && !Boolean(video.muted)) {
         userChangedMuteDuringWindow = true;
         lastMuteOwner = 'user';
         console.log('[ISWEEP][WORD_MUTE] user changed mute during ISweep window; playback ownership released');
@@ -4213,6 +4215,10 @@
       : 0;
 
     if (captionChanged) {
+      if (pageSelectedWordMuteTimer) {
+        clearTimeout(pageSelectedWordMuteTimer);
+        pageSelectedWordMuteTimer = null;
+      }
       lastPageCaptionText = cleanText;
       lastPageCaptionVideoTime = nowSec;
     }
@@ -4519,6 +4525,7 @@
       shouldFireMarker, resolveOverlayDisplayState, getEntryTimingBounds,
       normalizePreAnalyzedCaptions, buildAudioResponseCaptions, shouldDedupAudioMarker,
       markerSourcePriority, buildSelectedWordMuteWindows, deriveWordMatches,
+      estimatePageWordDurationSec, estimatePageSelectedWordMuteDurationSec,
       isSelectedWordMuteModeEnabled, scheduleSelectedWordMutesFromAudioPayload,
       extractTimedWordsFromAudioPayload, fuseCaptionWithEvidence,
       evaluateReferenceAlignmentCandidate, resolveCaptionAlignment,
