@@ -34,15 +34,24 @@ from dvd.playback.disc import find_inserted_dvds
 class ISweepPlayerApp:
     """Small Windows desktop player built around the ISweep playback API."""
 
+    NAVY = "#102a36"
+    BLUE = "#2f80ed"
+    TEAL = "#16b8ad"
+    SKY = "#eaf8fc"
+    PANEL = "#ffffff"
+    MUTED_TEXT = "#607783"
+
     def __init__(self, root: tk.Tk, controller: VLCPlaybackController) -> None:
         self.root = root
         self.controller = controller
         self.current_source: MediaSource | None = None
 
         self.root.title("ISweep Player")
-        self.root.geometry("1100x720")
-        self.root.minsize(760, 500)
+        self.root.geometry("1180x780")
+        self.root.minsize(860, 580)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        self._configure_style()
 
         self._build_ui()
 
@@ -52,77 +61,156 @@ class ISweepPlayerApp:
 
         self._poll_player()
 
+    def _configure_style(self) -> None:
+        """Configure the branded ttk theme without adding UI dependencies."""
+
+        style = ttk.Style(self.root)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+
+        style.configure("App.TFrame", background=self.SKY)
+        style.configure("Card.TFrame", background=self.PANEL)
+        style.configure("Header.TFrame", background=self.PANEL)
+        style.configure("Title.TLabel", background=self.PANEL, foreground=self.NAVY,
+                        font=("Segoe UI", 19, "bold"))
+        style.configure("Subtitle.TLabel", background=self.PANEL, foreground=self.MUTED_TEXT,
+                        font=("Segoe UI", 9))
+        style.configure("Section.TLabel", background=self.PANEL, foreground=self.NAVY,
+                        font=("Segoe UI", 10, "bold"))
+        style.configure("Status.TLabel", background=self.SKY, foreground=self.MUTED_TEXT,
+                        font=("Segoe UI", 9))
+        style.configure("Primary.TButton", background=self.BLUE, foreground="white",
+                        borderwidth=0, padding=(14, 8), font=("Segoe UI", 9, "bold"))
+        style.map("Primary.TButton", background=[("active", "#1769d1")])
+        style.configure("Action.TButton", background="#f3f7fa", foreground=self.NAVY,
+                        borderwidth=0, padding=(12, 8), font=("Segoe UI", 9, "bold"))
+        style.map("Action.TButton", background=[("active", "#dcecf5")])
+        style.configure("Pill.TLabel", background="#e5f8f5", foreground="#087f75",
+                        padding=(10, 5), font=("Segoe UI", 9, "bold"))
+
     def _build_ui(self) -> None:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
 
-        shell = ttk.Frame(self.root, padding=10)
+        shell = ttk.Frame(self.root, padding=(18, 16), style="App.TFrame")
         shell.grid(row=0, column=0, sticky="nsew")
-        shell.columnconfigure(0, weight=1)
+        shell.columnconfigure(1, weight=1)
         shell.rowconfigure(1, weight=1)
 
-        top = ttk.Frame(shell)
-        top.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-        top.columnconfigure(2, weight=1)
+        top = ttk.Frame(shell, padding=(18, 14), style="Header.TFrame")
+        top.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        top.columnconfigure(4, weight=1)
 
-        ttk.Label(top, text="ISweep Player", font=("Segoe UI", 16, "bold")).grid(
-            row=0, column=0, padx=(0, 14)
+        brand = tk.Canvas(top, width=38, height=38, highlightthickness=0, bg=self.PANEL)
+        brand.create_oval(3, 3, 35, 35, fill=self.TEAL, outline="")
+        brand.create_text(19, 19, text="I", fill="white", font=("Segoe UI", 18, "bold"))
+        brand.grid(row=0, column=0, rowspan=2, padx=(0, 12))
+        ttk.Label(top, text="ISweep Player", style="Title.TLabel").grid(
+            row=0, column=1, sticky="w"
         )
-        ttk.Button(top, text="Open Video", command=self.open_file).grid(
-            row=0, column=1, padx=(0, 8)
+        ttk.Label(top, text="Playback that follows your boundaries", style="Subtitle.TLabel").grid(
+            row=1, column=1, sticky="w"
         )
-        ttk.Button(top, text="Load DVD", command=self.open_detected_dvd).grid(
-            row=0, column=2, sticky="w"
+        ttk.Button(top, text="Open Video", style="Primary.TButton", command=self.open_file).grid(
+            row=0, column=2, rowspan=2, padx=(28, 8)
+        )
+        ttk.Button(top, text="Load DVD", style="Action.TButton", command=self.open_detected_dvd).grid(
+            row=0, column=3, rowspan=2, sticky="w"
         )
 
-        self.source_label = ttk.Label(top, text="No media loaded", anchor="e")
-        self.source_label.grid(row=0, column=3, sticky="e")
+        self.source_label = ttk.Label(top, text="No media loaded", style="Subtitle.TLabel", anchor="e")
+        self.source_label.grid(row=0, column=4, rowspan=2, sticky="e", padx=(18, 0))
 
-        # A plain Tk frame gives VLC a stable native window handle on Windows.
-        self.video_frame = tk.Frame(shell, bg="black")
-        self.video_frame.grid(row=1, column=0, sticky="nsew")
+        # The library rail makes the app feel like a player, while the video
+        # surface remains a plain native window for libVLC rendering.
+        library = tk.Frame(shell, bg=self.NAVY, width=220, highlightthickness=0)
+        library.grid(row=1, column=0, sticky="nsw", padx=(0, 10))
+        library.grid_propagate(False)
+        tk.Label(
+            library, text="YOUR LIBRARY", bg=self.NAVY, fg="#9cc7d6",
+            font=("Segoe UI", 9, "bold"), anchor="w",
+        ).pack(fill="x", padx=18, pady=(22, 12))
+        tk.Label(
+            library, text="▣  Playlist", bg=self.NAVY, fg="white",
+            font=("Segoe UI", 15, "bold"), anchor="w",
+        ).pack(fill="x", padx=18, pady=(0, 18))
+        self.playlist = tk.Listbox(
+            library, height=8, bd=0, relief="flat", highlightthickness=0,
+            bg="#173b49", fg="white", selectbackground=self.BLUE,
+            selectforeground="white", activestyle="none",
+            font=("Segoe UI", 10), exportselection=False,
+        )
+        self.playlist.insert("end", "  No media loaded")
+        self.playlist.pack(fill="x", padx=12)
+        tk.Label(
+            library,
+            text="ISweep will analyze upcoming speech\nand apply your saved filters during playback.",
+            bg=self.NAVY, fg="#9cc7d6", justify="left", anchor="w",
+            font=("Segoe UI", 9),
+        ).pack(fill="x", padx=18, pady=(22, 0))
 
-        controls = ttk.Frame(shell, padding=(0, 10, 0, 0))
-        controls.grid(row=2, column=0, sticky="ew")
-        controls.columnconfigure(9, weight=1)
+        stage = tk.Frame(shell, bg="#07151d", highlightthickness=0)
+        stage.grid(row=1, column=1, sticky="nsew")
+        stage.grid_rowconfigure(0, weight=1)
+        stage.grid_columnconfigure(0, weight=1)
+        self.video_frame = tk.Frame(stage, bg="#07151d", highlightthickness=0)
+        self.video_frame.grid(row=0, column=0, sticky="nsew")
 
-        ttk.Button(controls, text="Play", command=self.play).grid(row=0, column=0, padx=3)
-        ttk.Button(controls, text="Pause", command=self.pause).grid(row=0, column=1, padx=3)
-        ttk.Button(controls, text="Stop", command=self.stop).grid(row=0, column=2, padx=3)
+        controls = ttk.Frame(shell, padding=(18, 14), style="Card.TFrame")
+        controls.grid(row=2, column=0, columnspan=2, sticky="ew")
+        controls.columnconfigure(10, weight=1)
+        ttk.Label(controls, text="PLAYBACK CONTROLS", style="Section.TLabel").grid(
+            row=0, column=0, columnspan=3, sticky="w", pady=(0, 8)
+        )
+        ttk.Label(controls, text="SHARED FILTERS", style="Section.TLabel").grid(
+            row=0, column=8, columnspan=2, sticky="e", pady=(0, 8)
+        )
+
+        ttk.Button(controls, text="Play", style="Primary.TButton", command=self.play).grid(row=1, column=0, padx=(0, 5))
+        ttk.Button(controls, text="Pause", style="Action.TButton", command=self.pause).grid(row=1, column=1, padx=5)
+        ttk.Button(controls, text="Stop", style="Action.TButton", command=self.stop).grid(row=1, column=2, padx=5)
         ttk.Separator(controls, orient="vertical").grid(
-            row=0, column=3, sticky="ns", padx=8
+            row=1, column=3, sticky="ns", padx=12
         )
-        ttk.Button(controls, text="-15 sec", command=lambda: self.seek(-15)).grid(
-            row=0, column=4, padx=3
+        ttk.Button(controls, text="−15 sec", style="Action.TButton", command=lambda: self.seek(-15)).grid(
+            row=1, column=4, padx=5
         )
-        ttk.Button(controls, text="+15 sec", command=lambda: self.seek(15)).grid(
-            row=0, column=5, padx=3
+        ttk.Button(controls, text="+15 sec", style="Action.TButton", command=lambda: self.seek(15)).grid(
+            row=1, column=5, padx=5
         )
         ttk.Separator(controls, orient="vertical").grid(
-            row=0, column=6, sticky="ns", padx=8
+            row=1, column=6, sticky="ns", padx=12
         )
-        ttk.Button(controls, text="Mute", command=self.controller.mute).grid(
-            row=0, column=7, padx=3
+        ttk.Button(controls, text="Mute", style="Action.TButton", command=self.controller.mute).grid(
+            row=1, column=7, padx=5
         )
-        ttk.Button(controls, text="Unmute", command=self.controller.unmute).grid(
-            row=0, column=8, padx=3
+        ttk.Button(controls, text="Unmute", style="Action.TButton", command=self.controller.unmute).grid(
+            row=1, column=8, padx=5
         )
 
-        self.clock_label = ttk.Label(controls, text="00:00 / --:--", anchor="e")
-        self.clock_label.grid(row=0, column=9, sticky="e")
+        self.filter_badge = ttk.Label(controls, text="FILTERING READY", style="Pill.TLabel")
+        self.filter_badge.grid(row=1, column=9, padx=(16, 10), sticky="e")
+        self.clock_label = ttk.Label(controls, text="00:00 / --:--", style="Section.TLabel", anchor="e")
+        self.clock_label.grid(row=1, column=10, sticky="e")
 
         self.status_label = ttk.Label(
             shell,
             text="Ready. ISweep filtering will connect to this same playback clock.",
             anchor="w",
+            style="Status.TLabel",
         )
-        self.status_label.grid(row=3, column=0, sticky="ew", pady=(6, 0))
+        self.status_label.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(10, 0))
 
     def load_source(self, source: MediaSource, *, autoplay: bool = True) -> None:
         try:
             self.controller.load(source)
             self.current_source = source
             self.source_label.config(text=source.title or source.location)
+            self.playlist.delete(0, "end")
+            self.playlist.insert("end", f"  {source.title or source.location}")
+            self.playlist.selection_set(0)
             self.status_label.config(text=f"Loaded {source.kind.value}: {source.location}")
             if autoplay:
                 self.controller.play()
