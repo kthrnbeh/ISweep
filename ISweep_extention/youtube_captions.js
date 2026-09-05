@@ -4471,13 +4471,42 @@
   if (typeof __ISWEEP_TEST_MODE__ === 'undefined' || !__ISWEEP_TEST_MODE__) {
     setInterval(pollVisibleCaptions, 100);
     document.addEventListener('yt-navigate-finish', () => handleVideoIdChange(getCurrentVideoId()));
-    chrome?.storage?.local?.get?.([STORAGE_KEYS.PREFS, STORAGE_KEYS.CLEAN_CAPTION_SETTINGS, STORAGE_KEYS.LOCAL_REFERENCES])
-      ?.then?.((values) => {
-        setCachedPreferences(values?.[STORAGE_KEYS.PREFS]);
-        cleanCaptionSettings = normalizeCleanCaptionSettings(values?.[STORAGE_KEYS.CLEAN_CAPTION_SETTINGS]);
-        setCachedLocalReferences(values?.[STORAGE_KEYS.LOCAL_REFERENCES]);
-      })
-      .catch(() => {});
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      chrome.storage.local.get?.([
+        STORAGE_KEYS.PREFS,
+        STORAGE_KEYS.CLEAN_CAPTION_SETTINGS,
+        STORAGE_KEYS.LOCAL_REFERENCES,
+      ])
+        ?.then?.((values) => {
+          setCachedPreferences(values?.[STORAGE_KEYS.PREFS]);
+          cleanCaptionSettings = normalizeCleanCaptionSettings(values?.[STORAGE_KEYS.CLEAN_CAPTION_SETTINGS]);
+          setCachedLocalReferences(values?.[STORAGE_KEYS.LOCAL_REFERENCES]);
+        })
+        .catch(() => {});
+
+      chrome.storage.onChanged?.addListener?.((changes, areaName) => {
+        if (areaName !== 'local') return;
+        if (changes[STORAGE_KEYS.PREFS]) {
+          setCachedPreferences(changes[STORAGE_KEYS.PREFS].newValue);
+          lastPageSelectedWordMuteSignature = '';
+          lastPageSelectedWordMuteAtMs = 0;
+        }
+        if (changes[STORAGE_KEYS.CLEAN_CAPTION_SETTINGS]) {
+          cleanCaptionSettings = normalizeCleanCaptionSettings(
+            changes[STORAGE_KEYS.CLEAN_CAPTION_SETTINGS].newValue,
+          );
+          if (!cleanCaptionSettings.cleanCaptionsEnabled
+            || !isSelectedWordMuteModeEnabled()) {
+            if (isweepMuteActive) restoreMuteState('caption_settings_changed');
+            if (pageSelectedWordMuteTimer) {
+              clearTimeout(pageSelectedWordMuteTimer);
+              pageSelectedWordMuteTimer = null;
+            }
+          }
+          updateCleanOverlay(lastCaptionText, findVideo()?.currentTime || 0);
+        }
+      });
+    }
   }
 
   if (typeof globalThis !== 'undefined' && globalThis.__ISWEEP_TEST_MODE__) {
