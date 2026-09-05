@@ -4200,6 +4200,7 @@
   function observePageCaption(text, source = 'page_caption_dom') {
     const cleanText = String(text || '').replace(/\s+/g, ' ').trim();
     if (!cleanText) return;
+    if (!cleanCaptionSettings.cleanCaptionsEnabled || !isSelectedWordMuteModeEnabled()) return;
     const video = findVideo();
     const nowSec = Number(video?.currentTime || 0);
     const signature = `${activeVideoId || getCurrentVideoId()}|${normalizeCaptionText(cleanText)}`;
@@ -4407,7 +4408,7 @@
 
   function resolveOverlayDisplayState(current, previous, nowMs, bridgeGapMs, options = {}) {
     if (current?.stale) {
-      return { ...current, text: '', visible: false, stale: true };
+      return { ...current, text: '', source: 'stale', visible: false, stale: true };
     }
     const next = current && current.text ? current : null;
     if (next) return { ...next, visible: true, bridged: false };
@@ -4424,7 +4425,7 @@
     if (options.cleanCaptionsEnabled === true) {
       return { text: options.placeholderText || CLEAN_CC_PLACEHOLDER_TEXT, source: 'waiting_audio_text', visible: true, waiting: true };
     }
-    return { text: '', source: null, visible: false };
+    return { text: '', source: 'disabled', visible: false };
   }
 
   function estimatePlaceholderWordWindow(text, captionStartSec, captionDurationSec, currentVideoTime, source) {

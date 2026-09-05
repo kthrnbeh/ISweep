@@ -13,7 +13,7 @@
   let preferences = null;
   let settings = {
     cleanCaptionsEnabled: true,
-    cleanCaptionStyle: 'transparent_white',
+    cleanCaptionStyle: 'black_white',
     cleanCaptionTextSize: 'medium',
     cleanCaptionWordMuteMode: 'captions_only',
     cleanCaptionPosition: { x: 0.5, y: 0.8 },
@@ -67,7 +67,9 @@
 
     return {
       cleanCaptionsEnabled: data.cleanCaptionsEnabled !== false,
-      cleanCaptionStyle: data.cleanCaptionStyle === 'white_black' ? 'white_black' : 'transparent_white',
+      cleanCaptionStyle: ['black_white', 'white_black', 'transparent_white'].includes(data.cleanCaptionStyle)
+        ? data.cleanCaptionStyle
+        : 'black_white',
       cleanCaptionTextSize: ['small', 'medium', 'large'].includes(data.cleanCaptionTextSize)
         ? data.cleanCaptionTextSize
         : 'medium',
@@ -104,6 +106,12 @@
         background: rgba(255, 255, 255, 0.94) !important;
         border: 1px solid rgba(17, 17, 17, 0.9) !important;
         text-shadow: none !important;
+      }
+      [data-isweep-clean-captions="true"][data-isweep-remote-style="black_white"] > div {
+        color: #fff !important;
+        background: #000 !important;
+        border: 1px solid rgba(255, 255, 255, 0.9) !important;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9) !important;
       }
     `;
     (document.head || document.documentElement).appendChild(style);
@@ -366,12 +374,9 @@
 
     maybeRestoreOnCleanWord(tokens);
 
-    if (settings.cleanCaptionWordMuteMode === 'captions_word_mute') {
-      const newlyRelevant = matches.filter((match) => match.end >= prefixLength);
-      if (newlyRelevant.length) {
-        beginMute(newlyRelevant[newlyRelevant.length - 1], tokens, prefixLength);
-      }
-    }
+    // youtube_captions.js is the single playback-mute owner. This observer
+    // remains responsible for fast caption masking/style repair, but must not
+    // create a second mute window for the same DOM mutation.
 
     updateCleanOverlay(text);
     previousCaptionText = text;
