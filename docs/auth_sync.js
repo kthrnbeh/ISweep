@@ -210,7 +210,10 @@
       const target = event.target instanceof Element
         ? event.target.closest('[data-logout]')
         : null;
-      if (target) localStorage.removeItem(SHARED_TOKEN_KEY);
+      if (target) {
+        localStorage.removeItem(TOKEN_KEY);
+        localStorage.removeItem(SHARED_TOKEN_KEY);
+      }
     },
     true
   );

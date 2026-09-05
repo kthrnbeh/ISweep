@@ -94,6 +94,17 @@ if (!localStorage.getItem(userIdStorageKey) && localStorage.getItem('isweepUserI
   localStorage.setItem(userIdStorageKey, localStorage.getItem('isweepUserId'));
 }
 
+// Keep the website's legacy token key and the shared extension/DVD key aligned.
+// Prefer the shared key when both exist so a stale legacy value cannot switch
+// the Filters page to a different account.
+const sharedTokenAtLoad = localStorage.getItem(TOKEN_KEY);
+const legacyTokenAtLoad = localStorage.getItem(tokenStorageKey);
+if (sharedTokenAtLoad) {
+  localStorage.setItem(tokenStorageKey, sharedTokenAtLoad);
+} else if (legacyTokenAtLoad) {
+  localStorage.setItem(TOKEN_KEY, legacyTokenAtLoad);
+}
+
 const authModal = document.getElementById('authModal');
 const authBackdrop = authModal ? authModal.querySelector('.auth-backdrop') : null;
 const authPanels = authModal ? authModal.querySelectorAll('[data-auth-panel]') : [];
@@ -256,6 +267,7 @@ function persistSession({ token, userId, email, name, initials }) {
 
 function clearSession() {
   localStorage.removeItem(tokenStorageKey);
+  localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(userIdStorageKey);
   authState.clear();
 }
@@ -1122,6 +1134,10 @@ function preferencesToFilterSettings(
             .filter(Boolean)
         : [];
 
+  const hasExplicitLanguageSelection =
+    Array.isArray(prefs?.blocklist?.items)
+    || Array.isArray(prefs?.categories?.language?.items);
+
   const languageLists =
     wordLibrary.language || {};
 
@@ -1205,6 +1221,12 @@ function preferencesToFilterSettings(
           selectedIds:
             selection.selectedIds,
         };
+      } else if (hasExplicitLanguageSelection) {
+        // An explicit empty blocklist is an intentional user choice. Do not
+        // turn it back into the library defaults during restore.
+        next.predefined_words.language[subKey] = {
+          selectedIds: [],
+        };
       } else if (items.length) {
         next.predefined_words.language[subKey] = {
           selectedIds:
@@ -1216,7 +1238,9 @@ function preferencesToFilterSettings(
     }
   );
 
-  if (remaining.length) {
+  if (hasExplicitLanguageSelection) {
+    next.custom_words.language = remaining;
+  } else if (remaining.length) {
     next.custom_words.language =
       remaining;
   }
@@ -1561,6 +1585,33 @@ async function persistPreferences(preferences) {
     status:
       res.status,
   };
+}
+
+function setFilterSaveStatus(message, isError = false) {
+  let status = document.getElementById('isweepFilterSyncStatus');
+  if (!status) {
+    const actions = document.querySelector('.filters-actions');
+    if (!actions) return;
+    status = document.createElement('div');
+    status.id = 'isweepFilterSyncStatus';
+    status.setAttribute('role', 'status');
+    status.style.marginTop = '8px';
+    status.style.fontSize = '0.9rem';
+    status.style.width = '100%';
+    actions.insertAdjacentElement('afterend', status);
+  }
+  status.textContent = message;
+  status.style.color = isError ? '#b42318' : 'var(--muted)';
+}
+
+function getSavedLanguageWordCount(preferences) {
+  if (Array.isArray(preferences?.blocklist?.items)) {
+    return preferences.blocklist.items.length;
+  }
+  if (Array.isArray(preferences?.categories?.language?.items)) {
+    return preferences.categories.language.items.length;
+  }
+  return 0;
 }
 
 async function fetchAndCachePreferences() {
@@ -2905,8 +2956,12 @@ document.addEventListener(
                 settings
               );
 
-            await persistPreferences(
+            const saveResult = await persistPreferences(
               prefsPayload
+            );
+
+            setFilterSaveStatus(
+              `Saved to ISweep account/backend — ${getSavedLanguageWordCount(saveResult.prefs)} selected language words.`
             );
 
             localStorage.setItem(
@@ -2918,11 +2973,11 @@ document.addEventListener(
               '[ISWEEP][FE] Failed to persist filters to backend; kept local copy',
               error
             );
+            setFilterSaveStatus(
+              `Saved locally only — backend sync failed: ${error.message || error}`,
+              true
+            );
           }
-
-          alert(
-            'Filters saved locally.'
-          );
         }
       );
     }

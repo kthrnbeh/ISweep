@@ -17,6 +17,7 @@ const STORAGE_KEYS = {
   TOKEN: 'isweep_auth_token',
   USER_ID: 'isweepUserId',
   PREFS: 'isweepPreferences',
+  PREFS_META: 'isweepPreferencesMeta',
   BACKEND_URL: 'isweepBackendUrl',
   CLEAN_CAPTION_SETTINGS: 'isweepCleanCaptionSettings',
   DEV_LOCAL_AUTH: 'devLocalAuthEnabled',
@@ -708,12 +709,20 @@ async function getActiveTabCaptionRuntimeStatus() {
 }
 
 async function getCaptionModeSnapshot() {
-  const store = await chrome.storage.local.get([STORAGE_KEYS.CLEAN_CAPTION_SETTINGS, STORAGE_KEYS.PREFS]);
+  const store = await chrome.storage.local.get([
+    STORAGE_KEYS.CLEAN_CAPTION_SETTINGS,
+    STORAGE_KEYS.PREFS,
+    STORAGE_KEYS.PREFS_META,
+  ]);
   const settings = normalizeCleanCaptionSettings(store[STORAGE_KEYS.CLEAN_CAPTION_SETTINGS] || CLEAN_CAPTION_DEFAULTS);
   const prefs = normalizePreferences(store[STORAGE_KEYS.PREFS] || {});
   const words = Array.isArray(prefs?.blocklist?.items) ? prefs.blocklist.items : [];
   const token = await getAuthToken();
-  const selectedWordSource = words.length > 0
+  const rawPrefs = store[STORAGE_KEYS.PREFS];
+  const hasExplicitWordList = store[STORAGE_KEYS.PREFS_META]?.hasExplicitWordList === true
+    || Array.isArray(rawPrefs?.blocklist?.items)
+    || Array.isArray(rawPrefs?.categories?.language?.items);
+  const selectedWordSource = hasExplicitWordList
     ? (token ? 'synced' : 'cached')
     : 'missing';
   return {
@@ -1557,8 +1566,19 @@ async function fetchPreferences(token, backendUrl) {
   }
   const prefs = await res.json();
   const normalized = normalizePreferences(prefs); // Ensure blocklist/items always present
-  await chrome.storage.local.set({ [STORAGE_KEYS.PREFS]: normalized });
-  return { prefs: normalized, status: res.status };
+  await chrome.storage.local.set({
+    [STORAGE_KEYS.PREFS]: normalized,
+    [STORAGE_KEYS.PREFS_META]: {
+      hasExplicitWordList: Array.isArray(prefs?.blocklist?.items)
+        || Array.isArray(prefs?.categories?.language?.items),
+      syncedAt: Date.now(),
+    },
+  });
+  return {
+    prefs: normalized,
+    status: res.status,
+    selectedWordCount: normalized.blocklist.items.length,
+  };
 }
 
 // Icon paths (will use emoji/text as fallback if actual icons don't exist)
@@ -2885,7 +2905,13 @@ async function handleSyncPrefs() {
     const devLocal = await getDevLocalAuthContext();
     if (devLocal.enabled) {
       console.log('[ISWEEP][AUTH] using local preferences fallback');
-      return { ok: true, status: 'local_prefs_fallback' };
+      const cached = await chrome.storage.local.get([STORAGE_KEYS.PREFS]);
+      const prefs = normalizePreferences(cached[STORAGE_KEYS.PREFS] || {});
+      return {
+        ok: true,
+        status: 'local_prefs_fallback',
+        selectedWordCount: prefs.blocklist.items.length,
+      };
     }
     console.warn(LOG_PREFIX, 'sync prefs missing token');
     return { ok: false, error: 'missing token' };
@@ -2894,7 +2920,11 @@ async function handleSyncPrefs() {
   try {
     const result = await fetchPreferences(token, backendUrl);
     console.log(LOG_PREFIX, 'prefs sync success', result.status);
-    return { ok: true, status: result.status };
+    return {
+      ok: true,
+      status: result.status,
+      selectedWordCount: result.selectedWordCount,
+    };
   } catch (err) {
     console.warn(LOG_PREFIX, 'prefs sync failed', err?.message || err);
     return { ok: false, error: err?.message || 'sync failed' };

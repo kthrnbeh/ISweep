@@ -49,9 +49,9 @@
   function currentToken() {
     const auth = safeJson(localStorage.getItem(AUTH_STATE_KEY), null);
     return String(
-      auth?.token
+      localStorage.getItem(SHARED_TOKEN_KEY)
       || localStorage.getItem(LEGACY_TOKEN_KEY)
-      || localStorage.getItem(SHARED_TOKEN_KEY)
+      || auth?.token
       || ''
     ).trim();
   }
@@ -188,6 +188,22 @@
     return 0;
   }
 
+  function getWordItems(prefs) {
+    if (Array.isArray(prefs?.blocklist?.items)) {
+      return prefs.blocklist.items.map((word) => String(word).trim().toLowerCase());
+    }
+    if (Array.isArray(prefs?.categories?.language?.items)) {
+      return prefs.categories.language.items.map((word) => String(word).trim().toLowerCase());
+    }
+    return null;
+  }
+
+  function sameWordItems(left, right) {
+    if (!Array.isArray(left) || !Array.isArray(right)) return false;
+    const normalize = (items) => Array.from(new Set(items)).sort();
+    return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
+  }
+
   function ensureStatusElement() {
     let status = document.getElementById('isweepFilterSyncStatus');
     if (status) return status;
@@ -252,14 +268,16 @@
     }
 
     const expectedCount = getWordCount(expected);
+    const expectedItems = getWordItems(expected);
 
     await new Promise((resolve) => setTimeout(resolve, 650));
 
     const cached = safeJson(localStorage.getItem(PREFS_CACHE_KEY), null);
     const cachedCount = getWordCount(cached);
+    const cachedItems = getWordItems(cached);
 
-    if (cached && cachedCount === expectedCount) {
-      setStatus(`Synced to your ISweep account: ${cachedCount} selected language words.`);
+    if (cached && sameWordItems(cachedItems, expectedItems)) {
+      setStatus(`Saved to ISweep account/backend — ${cachedCount} selected language words.`);
       console.log(LOG, 'normal save verified', { selectedWordCount: cachedCount });
       return;
     }
@@ -275,7 +293,7 @@
       if (savedCount !== expectedCount) {
         throw new Error(`backend returned ${savedCount} words; expected ${expectedCount}`);
       }
-      setStatus(`Synced to your ISweep account: ${savedCount} selected language words.`);
+      setStatus(`Saved to ISweep account/backend — ${savedCount} selected language words.`);
       console.log(LOG, 'repair save verified', { selectedWordCount: savedCount });
     } catch (error) {
       setStatus(`Saved locally, but account sync failed: ${error.message}`, true);
