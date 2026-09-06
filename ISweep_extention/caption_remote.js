@@ -136,6 +136,32 @@
     return masked;
   }
 
+  function limitCaptionText(text) {
+    const normalized = String(text || '')
+      .replace(/\s*>>+\s*/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!normalized) return '';
+
+    const sentences = normalized.match(/[^.!?]+(?:[.!?]+|$)/g)
+      ?.map((sentence) => sentence.trim())
+      .filter(Boolean)
+      || [];
+
+    if (sentences.length > 2) {
+      return sentences.slice(-2).join(' ');
+    }
+
+    // Keep an in-progress caption from growing into a transcript when the
+    // page does not provide punctuation yet.
+    if (sentences.length === 1 && !/[.!?]\s*$/.test(normalized)) {
+      const tokens = normalized.split(/\s+/).filter(Boolean);
+      if (tokens.length > 32) return tokens.slice(-32).join(' ');
+    }
+
+    return normalized;
+  }
+
   function updateCleanOverlay(nativeCaptionText) {
     ensureRemoteStyles();
 
@@ -148,7 +174,7 @@
       return;
     }
 
-    const cleanText = maskSelectedText(nativeCaptionText);
+    const cleanText = limitCaptionText(maskSelectedText(nativeCaptionText));
     if (cleanText && textNode.textContent !== cleanText) {
       textNode.textContent = cleanText;
     }
@@ -164,8 +190,8 @@
     }
 
     textNode.style.fontSize = settings.cleanCaptionTextSize === 'large'
-      ? '1.8rem'
-      : settings.cleanCaptionTextSize === 'small' ? '1rem' : '1.4rem';
+      ? '1.45rem'
+      : settings.cleanCaptionTextSize === 'small' ? '0.95rem' : '1.15rem';
     textNode.style.fontWeight = '600';
     textNode.style.lineHeight = '1.3';
     textNode.style.padding = '0.18em 0.4em';

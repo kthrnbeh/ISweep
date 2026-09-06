@@ -838,7 +838,7 @@
     );
   }
 
-  function getCleanCaptionDisplayText(entry) {
+  function getCleanCaptionDisplayText(entry, nowSec = null) {
     if (!entry || typeof entry !== 'object') return '';
 
     const cleanCandidates = [
@@ -851,7 +851,11 @@
     );
 
     if (cleanMatch) {
-      return stripCategoryLabelsFromCaption(cleanMatch.trim());
+      return limitCaptionText(
+        stripCategoryLabelsFromCaption(cleanMatch.trim()),
+        entry,
+        nowSec
+      );
     }
 
     const rawCandidates = [
@@ -865,8 +869,10 @@
 
     if (!rawMatch) return '';
 
-    return stripCategoryLabelsFromCaption(
-      toCleanCaptionText(rawMatch.trim())
+    return limitCaptionText(
+      stripCategoryLabelsFromCaption(toCleanCaptionText(rawMatch.trim())),
+      entry,
+      nowSec
     );
   }
 
@@ -899,6 +905,77 @@
       })
       .filter(Boolean)
       .sort((a, b) => a.start - b.start);
+  }
+
+  const CLEAN_CAPTION_MAX_SENTENCES = 2;
+  const CLEAN_CAPTION_MAX_UNPUNCTUATED_WORDS = 32;
+
+  function normalizeCaptionDisplaySpacing(text) {
+    return String(text || '')
+      // The backend/ASR stream uses >> as a chunk separator. It is not spoken
+      // text and should never consume space in the visible caption box.
+      .replace(/\s*>>+\s*/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function splitCaptionSentences(text) {
+    return normalizeCaptionDisplaySpacing(text)
+      .match(/[^.!?]+(?:[.!?]+|$)/g)
+      ?.map((sentence) => sentence.trim())
+      .filter(Boolean)
+      || [];
+  }
+
+  function trimCaptionToSpokenWords(text, entry, nowSec) {
+    const words = normalizeTimedWords(entry?.words);
+    const now = Number(nowSec);
+
+    if (!words.length || !Number.isFinite(now)) return text;
+
+    const firstWord = words[0];
+    const lastWord = words[words.length - 1];
+    // Only clip entries while they are the active timed caption. This avoids
+    // cutting a complete caption when the overlay is briefly bridging a gap.
+    if (now < firstWord.start - CLEAN_CAPTION_LOOKAHEAD_SEC || now > lastWord.end + CLEAN_CAPTION_BRIDGE_GAP_MS / 1000) {
+      return text;
+    }
+
+    const tokens = text.split(/\s+/).filter(Boolean);
+    if (tokens.length !== words.length) return text;
+
+    const spokenCount = words.filter(
+      (word) => word.start <= now + WORD_LATENCY_COMPENSATION_MS / 1000
+    ).length;
+
+    if (spokenCount <= 0 || spokenCount >= tokens.length) return text;
+    return tokens.slice(0, spokenCount).join(' ');
+  }
+
+  function limitCaptionText(text, entry = null, nowSec = null) {
+    let normalized = normalizeCaptionDisplaySpacing(text);
+    if (!normalized) return '';
+
+    normalized = trimCaptionToSpokenWords(normalized, entry, nowSec);
+    const sentences = splitCaptionSentences(normalized);
+
+    if (sentences.length > CLEAN_CAPTION_MAX_SENTENCES) {
+      normalized = sentences
+        .slice(-CLEAN_CAPTION_MAX_SENTENCES)
+        .join(' ');
+    } else if (
+      sentences.length === 1
+      && !/[.!?]\s*$/.test(normalized)
+    ) {
+      const tokens = normalized.split(/\s+/).filter(Boolean);
+      if (tokens.length > CLEAN_CAPTION_MAX_UNPUNCTUATED_WORDS) {
+        normalized = tokens
+          .slice(-CLEAN_CAPTION_MAX_UNPUNCTUATED_WORDS)
+          .join(' ');
+      }
+    }
+
+    return normalized;
   }
 
   function getEntryTimingBounds(entry) {
@@ -1235,7 +1312,7 @@
 
     if (preAnalyzedEntry) {
       return {
-        text: getCleanCaptionDisplayText(preAnalyzedEntry),
+        text: getCleanCaptionDisplayText(preAnalyzedEntry, nowSec),
         source: 'pre_analyzed',
         stale: false,
         cleanResumeTime: Number.isFinite(Number(preAnalyzedEntry.clean_resume_time))
@@ -1252,7 +1329,7 @@
 
     if (markerTextEntry) {
       return {
-        text: getCleanCaptionDisplayText(markerTextEntry),
+        text: getCleanCaptionDisplayText(markerTextEntry, nowSec),
         source: 'marker_text',
         stale: false,
         cleanResumeTime: Number.isFinite(Number(markerTextEntry.clean_resume_time))
@@ -1261,7 +1338,11 @@
       };
     }
 
-    const maskedLiveText = toCleanCaptionText(String(liveText || ''));
+    const maskedLiveText = limitCaptionText(
+      stripCategoryLabelsFromCaption(toCleanCaptionText(String(liveText || ''))),
+      null,
+      nowSec
+    );
 
     if (ISWEEP_YOUTUBE_DOM_FALLBACK_ENABLED && maskedLiveText) {
       const isStale =
@@ -1297,7 +1378,7 @@
 
       if (isApprovedAudioCaptionSource(entrySource)) {
         return {
-          text: getCleanCaptionDisplayText(preCachedAudioEntry),
+          text: getCleanCaptionDisplayText(preCachedAudioEntry, nowSec),
           source: entrySource,
           stale: false,
           cleanResumeTime: Number.isFinite(
@@ -1322,7 +1403,7 @@
 
       if (isApprovedAudioCaptionSource(entrySource)) {
         return {
-          text: getCleanCaptionDisplayText(liveAudioEntry),
+          text: getCleanCaptionDisplayText(liveAudioEntry, nowSec),
           source: entrySource,
           stale: false,
           cleanResumeTime: Number.isFinite(
@@ -1337,8 +1418,11 @@
     const normalizedAudioSource =
       String(audioCaptionSource || '').toLowerCase();
 
-    const freshAudioText =
-      String(audioCaptionText || '').trim();
+    const freshAudioText = limitCaptionText(
+      stripCategoryLabelsFromCaption(toCleanCaptionText(String(audioCaptionText || '').trim())),
+      null,
+      nowSec
+    );
 
     const audioAgeMs =
       audioCaptionObservedAtMs > 0
@@ -4395,8 +4479,8 @@
     setNativeCaptionVisualHidden(hasValidCleanText);
     cleanCaptionTextEl.textContent = text;
     cleanCaptionTextEl.style.fontSize = cleanCaptionSettings.cleanCaptionTextSize === 'large'
-      ? '1.8rem'
-      : cleanCaptionSettings.cleanCaptionTextSize === 'small' ? '1rem' : '1.4rem';
+      ? '1.45rem'
+      : cleanCaptionSettings.cleanCaptionTextSize === 'small' ? '0.95rem' : '1.15rem';
     cleanCaptionTextEl.style.color = cleanCaptionSettings.cleanCaptionStyle === 'white_black' ? '#111' : '#fff';
     cleanCaptionTextEl.style.background = cleanCaptionSettings.cleanCaptionStyle === 'transparent_white'
       ? 'transparent'
@@ -4519,7 +4603,7 @@
     globalThis.__ISWEEP_YT_TEST_HOOKS__ = {
       constants: { CLEAN_CAPTION_STALE_MS, CLEAN_CC_BRIDGE_GAP_MS, CLEAN_CC_STT_DISABLED_TEXT, AUDIO_CHUNK_SEC, AUDIO_CHUNK_OVERLAP_SEC, AUDIO_STT_HOLD_MS },
       normalizeCleanCaptionSettings, setCachedPreferences, setCachedLocalReferences,
-      toCleanCaptionText, stripCategoryLabelsFromCaption, getBestCleanCaptionText,
+      toCleanCaptionText, stripCategoryLabelsFromCaption, limitCaptionText, getBestCleanCaptionText,
       getMuteWindowFromMarker, shouldISweepUnmute, shouldSkipMuteBecauseUserMuted,
       estimatePlaceholderWordWindow, hasNearbyAudioMuteMarker, getMarkerEarlyWindowSec,
       shouldFireMarker, resolveOverlayDisplayState, getEntryTimingBounds,

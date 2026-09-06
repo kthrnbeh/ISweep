@@ -59,6 +59,39 @@ function loadYoutubeTimingHooks() {
   return context.__ISWEEP_YT_TEST_HOOKS__;
 }
 
+test('clean caption display keeps only the latest two sentences', () => {
+  const hooks = loadYoutubeTimingHooks();
+
+  assert.equal(
+    hooks.limitCaptionText('First sentence. Second sentence. Third sentence.'),
+    'Second sentence. Third sentence.'
+  );
+  assert.equal(
+    hooks.limitCaptionText('First chunk >> Second chunk >> Third chunk.'),
+    'First chunk Second chunk Third chunk.'
+  );
+});
+
+test('clean caption display stops at the currently spoken timed word', () => {
+  const hooks = loadYoutubeTimingHooks();
+
+  assert.equal(
+    hooks.limitCaptionText(
+      'one two three four',
+      {
+        words: [
+          { word: 'one', start: 10.0, end: 10.3 },
+          { word: 'two', start: 10.4, end: 10.7 },
+          { word: 'three', start: 10.8, end: 11.1 },
+          { word: 'four', start: 11.2, end: 11.5 },
+        ],
+      },
+      10.55
+    ),
+    'one two'
+  );
+});
+
 test('placeholder timing estimates hidden word position, not line start', () => {
   const hooks = loadYoutubeTimingHooks();
   const result = hooks.estimatePlaceholderWordWindow(
