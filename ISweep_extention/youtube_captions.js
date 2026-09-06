@@ -937,7 +937,7 @@
     const lastWord = words[words.length - 1];
     // Only clip entries while they are the active timed caption. This avoids
     // cutting a complete caption when the overlay is briefly bridging a gap.
-    if (now < firstWord.start - CLEAN_CAPTION_LOOKAHEAD_SEC || now > lastWord.end + CLEAN_CAPTION_BRIDGE_GAP_MS / 1000) {
+    if (now < firstWord.start - CLEAN_CAPTION_LOOKAHEAD_SEC || now > lastWord.end + CLEAN_CC_BRIDGE_GAP_MS / 1000) {
       return text;
     }
 
