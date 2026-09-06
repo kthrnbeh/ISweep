@@ -175,8 +175,14 @@
     }
 
     const cleanText = limitCaptionText(maskSelectedText(nativeCaptionText));
-    if (cleanText && textNode.textContent !== cleanText) {
+    const mainRendererOwnsText = Boolean(
+      overlay.dataset.isweepCaptionSource
+      && overlay.dataset.isweepCaptionSource !== 'remote'
+      && textNode.textContent.trim()
+    );
+    if (cleanText && !mainRendererOwnsText && textNode.textContent !== cleanText) {
       textNode.textContent = cleanText;
+      overlay.dataset.isweepCaptionSource = 'remote';
     }
 
     overlay.dataset.isweepRemoteStyle = settings.cleanCaptionStyle;
@@ -191,7 +197,7 @@
 
     textNode.style.fontSize = settings.cleanCaptionTextSize === 'large'
       ? '1.65rem'
-      : settings.cleanCaptionTextSize === 'small' ? '1rem' : '1.35rem';
+      : settings.cleanCaptionTextSize === 'small' ? '1rem' : '1.4rem';
     textNode.style.fontWeight = '600';
     textNode.style.lineHeight = '1.3';
     textNode.style.padding = '0.18em 0.4em';

@@ -4477,10 +4477,11 @@
     const text = result.text || '';
     const hasValidCleanText = Boolean(text.trim()) && result.stale !== true && result.waiting !== true;
     setNativeCaptionVisualHidden(hasValidCleanText);
+    cleanCaptionOverlayEl.dataset.isweepCaptionSource = result.source || '';
     cleanCaptionTextEl.textContent = text;
     cleanCaptionTextEl.style.fontSize = cleanCaptionSettings.cleanCaptionTextSize === 'large'
       ? '1.65rem'
-      : cleanCaptionSettings.cleanCaptionTextSize === 'small' ? '1rem' : '1.35rem';
+      : cleanCaptionSettings.cleanCaptionTextSize === 'small' ? '1rem' : '1.4rem';
     cleanCaptionTextEl.style.color = cleanCaptionSettings.cleanCaptionStyle === 'white_black' ? '#111' : '#fff';
     cleanCaptionTextEl.style.background = cleanCaptionSettings.cleanCaptionStyle === 'transparent_white'
       ? 'transparent'
