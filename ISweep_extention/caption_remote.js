@@ -190,8 +190,8 @@
     }
 
     textNode.style.fontSize = settings.cleanCaptionTextSize === 'large'
-      ? '1.45rem'
-      : settings.cleanCaptionTextSize === 'small' ? '0.95rem' : '1.15rem';
+      ? '1.65rem'
+      : settings.cleanCaptionTextSize === 'small' ? '1rem' : '1.35rem';
     textNode.style.fontWeight = '600';
     textNode.style.lineHeight = '1.3';
     textNode.style.padding = '0.18em 0.4em';
