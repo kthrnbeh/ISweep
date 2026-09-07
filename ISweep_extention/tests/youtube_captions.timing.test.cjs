@@ -315,7 +315,7 @@ test('clean caption settings normalization applies defaults safely', () => {
     cleanCaptionTextSize: 'huge',
   });
   assert.equal(fallback.cleanCaptionsEnabled, true);
-  assert.equal(fallback.cleanCaptionStyle, 'transparent_white');
+  assert.equal(fallback.cleanCaptionStyle, 'black_white');
   assert.equal(fallback.cleanCaptionTextSize, 'medium');
   assert.equal(fallback.cleanCaptionPosition.x, 0.5);
   assert.equal(fallback.cleanCaptionPosition.y, 0.8);
