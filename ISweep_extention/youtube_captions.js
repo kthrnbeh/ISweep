@@ -55,6 +55,11 @@
     sex: ['sexx', 'sexxx', 'sexy', 'sexual'],
   };
 
+  // Do not render raw page/STT text through the ISweep overlay until the
+  // extension preference snapshot has arrived. Native captions remain
+  // visible during this initialization window and are hidden only after a
+  // filtered replacement is ready.
+  let cachedPreferencesReady = typeof chrome === 'undefined' || !chrome.storage?.local;
   let cachedPreferences = null;
   let cachedLocalReferences = {};
 
@@ -1397,7 +1402,18 @@
     }
 
     return false;
-  }   function getBestCleanCaptionText(liveText, nowSec, options = {}) {
+  }
+
+  function getBestCleanCaptionText(liveText, nowSec, options = {}) {
+    if (!cachedPreferencesReady) {
+      return {
+        text: '',
+        source: 'preferences_pending',
+        stale: false,
+        cleanResumeTime: null,
+      };
+    }
+
     // Priority order after recovery:
     // 1) pre-analyzed/reference captions, 2) visible page captions, 3) approved STT only.
     // Raw STT that disagrees with the page is not shown because it causes hallucinated captions.
@@ -4074,6 +4090,7 @@
 
   function setCachedPreferences(prefs) {
     cachedPreferences = normalizePreferences(prefs);
+    cachedPreferencesReady = true;
     return cachedPreferences;
   }
 

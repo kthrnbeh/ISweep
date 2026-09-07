@@ -250,7 +250,7 @@
     return body;
   }
 
-  async function getPreferences(token) {
+  async function getPreferences(token, options = {}) {
     const response = await fetch(`${backendUrl()}/preferences`, {
       method: 'GET',
       headers: { Authorization: `Bearer ${token}` },
@@ -266,7 +266,9 @@
       throw new Error(`HTTP ${response.status}${bodyText ? `: ${bodyText.slice(0, 160)}` : ''}`);
     }
 
-    localStorage.setItem(PREFS_CACHE_KEY, JSON.stringify(body));
+    if (options.cache !== false) {
+      localStorage.setItem(PREFS_CACHE_KEY, JSON.stringify(body));
+    }
     return body;
   }
 
@@ -290,11 +292,15 @@
     const expectedCount = getWordCount(expected);
     const expectedItems = getWordItems(expected);
 
+    // Keep the exact saved Filter selection available while verification is
+    // in flight. A stale backend read must not overwrite it.
+    localStorage.setItem(PREFS_CACHE_KEY, JSON.stringify(expected));
+
     await new Promise((resolve) => setTimeout(resolve, 650));
 
     let cached;
     try {
-      cached = await getPreferences(token);
+      cached = await getPreferences(token, { cache: false });
     } catch (error) {
       setStatus(`Saved locally, but account verification failed: ${error.message}`, true);
       console.warn(LOG, 'could not verify saved preferences from backend', error);
@@ -305,6 +311,7 @@
     const cachedItems = getWordItems(cached);
 
     if (cached && sameWordItems(cachedItems, expectedItems)) {
+      localStorage.setItem(PREFS_CACHE_KEY, JSON.stringify(cached));
       setStatus(`Saved to ISweep account/backend — ${cachedCount} selected language words.`);
       console.log(LOG, 'normal save verified', { selectedWordCount: cachedCount });
       return;
