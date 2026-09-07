@@ -93,6 +93,73 @@ test('caption sizes use the exact configured pixel values', () => {
   assert.equal(remoteSource.includes("? '20px' : '18px'"), true);
 });
 
+test('AI captions remain independent when native YouTube captions are off', () => {
+  const hooks = loadYoutubeTimingHooks();
+  const nowMs = Date.now();
+
+  assert.equal(hooks.constants.ISWEEP_YOUTUBE_DOM_FALLBACK_ENABLED, false);
+  assert.equal(hooks.constants.AUDIO_STT_DISPLAY_REQUIRES_ALIGNMENT, false);
+
+  const nativeOnly = hooks.getBestCleanCaptionText('native caption text', 20, {
+    preAnalyzedCaptions: [],
+    markerEntries: [],
+    liveAudioCaptions: [],
+    preCachedAudioCaptions: [],
+    liveCaptionObservedAtMs: nowMs,
+    nowMs,
+  });
+  assert.equal(nativeOnly.text, '');
+  assert.equal(nativeOnly.source, null);
+
+  const audioCaption = hooks.getBestCleanCaptionText('native caption text', 20.5, {
+    preAnalyzedCaptions: [],
+    markerEntries: [],
+    liveAudioCaptions: [{
+      start_seconds: 20,
+      end_seconds: 21,
+      text: 'what the ___',
+      clean_text: 'what the ___',
+      words: [
+        { word: 'what', start: 20.0, end: 20.2 },
+        { word: 'the', start: 20.25, end: 20.4 },
+        { word: '___', start: 20.45, end: 20.8 },
+      ],
+    }],
+    preCachedAudioCaptions: [],
+    liveCaptionObservedAtMs: nowMs,
+    nowMs,
+  });
+  assert.equal(audioCaption.source, 'audio_stt_live');
+  assert.equal(audioCaption.text.includes('___'), true);
+  assert.equal(audioCaption.text.includes('hell'), false);
+});
+
+test('native caption remote engine is not loaded by the extension', () => {
+  const extensionRoot = path.resolve(__dirname, '..');
+  const manifest = JSON.parse(fs.readFileSync(path.join(extensionRoot, 'manifest.json'), 'utf8'));
+  const youtubeScripts = manifest.content_scripts
+    .filter((entry) => entry.matches?.some((match) => String(match).includes('youtube.com/watch')))
+    .flatMap((entry) => entry.js || []);
+
+  assert.equal(youtubeScripts.includes('youtube_captions.js'), true);
+  assert.equal(youtubeScripts.includes('caption_remote.js'), false);
+});
+
+test('filtered caption words use whole-word matching and render as underscores', () => {
+  const hooks = loadYoutubeTimingHooks();
+  hooks.setCachedPreferences({
+    enabled: true,
+    blocklist: { enabled: true, items: ['hell'] },
+    categories: { language: { enabled: true, items: ['hell'] } },
+  });
+
+  const masked = hooks.toCleanCaptionText('What the hell, hello shell.');
+  assert.equal(masked.includes('hell,'), false);
+  assert.equal(masked.includes('___'), true);
+  assert.equal(masked.includes('hello'), true);
+  assert.equal(masked.includes('shell'), true);
+});
+
 test('audio word timestamps stay on the source video timeline', () => {
   const hooks = loadYoutubeTimingHooks();
   const entries = hooks.buildAudioResponseCaptions({
@@ -873,6 +940,14 @@ test('overlay drag save helper returns normalized position', () => {
   const pos = hooks.getNormalizedCaptionPosition(320, 360, 200, 60);
   assert.ok(pos.x > 0 && pos.x < 1);
   assert.ok(pos.y > 0 && pos.y < 1);
+});
+
+test('caption position stays inside the player and away from controls', () => {
+  const hooks = loadYoutubeTimingHooks();
+  const pos = hooks.getNormalizedCaptionPosition(1000, 600, 400, 80, -100, 1000);
+
+  assert.equal(pos.x, 0.2);
+  assert.equal(pos.y, (600 - 40 - 46) / 600);
 });
 
 test('audio capture path does not use microphone getUserMedia', () => {

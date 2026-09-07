@@ -388,8 +388,10 @@
 
   // Recovery rule: visible/timed page captions are allowed to drive the overlay.
   // Raw live STT is only displayed after it agrees with page evidence or a local reference.
-  const ISWEEP_YOUTUBE_DOM_FALLBACK_ENABLED = true;
-  const AUDIO_STT_DISPLAY_REQUIRES_ALIGNMENT = true;
+  // Native YouTube captions remain evidence only. Clean captions are rendered
+  // from the timed ISweep audio/AI pipeline so CC can stay disabled.
+  const ISWEEP_YOUTUBE_DOM_FALLBACK_ENABLED = false;
+  const AUDIO_STT_DISPLAY_REQUIRES_ALIGNMENT = false;
   const ISWEEP_CONTENT_SCRIPT_AUDIO_AHEAD_ENABLED = false;
   const AUDIO_STT_MIN_VISIBLE_MS = 1200;
   const AUDIO_STT_HOLD_MS = 2500;
@@ -423,6 +425,8 @@
     medium: '18px',
     large: '20px',
   });
+  const CLEAN_CAPTION_CONTROL_SAFE_BOTTOM_PX = 46;
+  const CLEAN_CAPTION_DRAG_THRESHOLD_PX = 3;
   let cleanCaptionSettings = { ...CLEAN_CAPTION_DEFAULTS };
   let cleanCaptionOverlayEl = null;
   let cleanCaptionTextEl = null;
@@ -1217,9 +1221,11 @@
         caption_text: typeof payload.caption_text === 'string'
           ? payload.caption_text
           : null,
-        source: typeof payload.source === 'string'
-          ? payload.source
-          : null,
+        source: ['audio', 'audio_stt'].includes(payload.source)
+          ? 'audio_stt_live'
+          : typeof payload.source === 'string'
+            ? payload.source
+            : null,
         words: normalizedWords,
       },
     ]);
@@ -1395,8 +1401,8 @@
     return false;
   }   function getBestCleanCaptionText(liveText, nowSec, options = {}) {
     // Priority order after recovery:
-    // 1) pre-analyzed/reference captions, 2) visible page captions, 3) approved STT only.
-    // Raw STT that disagrees with the page is not shown because it causes hallucinated captions.
+    // 1) pre-analyzed/reference captions, 2) timed AI captions, 3) fresh AI text.
+    // Native YouTube captions are evidence only and never the clean-caption source.
     const preCachedAudioCaptions = Array.isArray(options.preCachedAudioCaptions)
       ? options.preCachedAudioCaptions
       : preCachedAudioCleanCaptions;
@@ -4273,10 +4279,10 @@
     return [
       { source: 'pre_analyzed', class: 'timed_text', role: 'primary_when_available' },
       { source: 'text_track', class: 'timed', role: 'primary_when_available' },
-      { source: 'page_caption_dom', class: 'current_visible', role: 'primary_visible_caption' },
-      { source: 'audio_stt_plus_page_evidence', class: 'timed', role: 'approved_stt_after_alignment' },
-      { source: 'audio_stt_plus_reference', class: 'timed', role: 'approved_stt_after_alignment' },
-      { source: 'audio_stt', class: 'timed', role: 'draft_hidden_until_aligned' },
+      { source: 'audio_stt_live', class: 'timed', role: 'primary_live_caption' },
+      { source: 'audio_stt_plus_page_evidence', class: 'timed', role: 'timed_ai_with_optional_evidence' },
+      { source: 'audio_stt_plus_reference', class: 'timed', role: 'timed_ai_with_optional_reference' },
+      { source: 'page_caption_dom', class: 'current_visible', role: 'evidence_only' },
       { source: 'visible_transcript', class: 'context_only', role: 'context_only' },
     ];
   }
@@ -4513,6 +4519,7 @@
       observePageCaption(text, 'page_caption_dom');
       updateCleanOverlay(text, video.currentTime || 0);
     }
+    if (cleanCaptionOverlayEl) positionCleanCaptionOverlay(video);
   }
 
   function normalizeCleanCaptionSettings(settings) {
@@ -4522,6 +4529,8 @@
     const position = raw.cleanCaptionPosition && typeof raw.cleanCaptionPosition === 'object'
       ? raw.cleanCaptionPosition
       : {};
+    const positionX = Number(position.x);
+    const positionY = Number(position.y);
     return {
       ...CLEAN_CAPTION_DEFAULTS,
       ...raw,
@@ -4529,8 +4538,8 @@
       cleanCaptionStyle: styles.has(raw.cleanCaptionStyle) ? raw.cleanCaptionStyle : CLEAN_CAPTION_DEFAULTS.cleanCaptionStyle,
       cleanCaptionTextSize: sizes.has(raw.cleanCaptionTextSize) ? raw.cleanCaptionTextSize : CLEAN_CAPTION_DEFAULTS.cleanCaptionTextSize,
       cleanCaptionPosition: {
-        x: Math.min(Math.max(Number(position.x) || 0.5, 0), 1),
-        y: Math.min(Math.max(Number(position.y) || 0.8, 0), 1),
+        x: Math.min(Math.max(Number.isFinite(positionX) ? positionX : CLEAN_CAPTION_DEFAULTS.cleanCaptionPosition.x, 0), 1),
+        y: Math.min(Math.max(Number.isFinite(positionY) ? positionY : CLEAN_CAPTION_DEFAULTS.cleanCaptionPosition.y, 0), 1),
       },
     };
   }
@@ -4593,6 +4602,154 @@
     });
   }
 
+  function getNormalizedCaptionPosition(
+    width,
+    height,
+    overlayWidth,
+    overlayHeight,
+    centerX = Number(width) / 2,
+    centerY = Number(height) / 2,
+  ) {
+    const safeWidth = Math.max(Number(width) || 0, 1);
+    const safeHeight = Math.max(Number(height) || 0, 1);
+    const safeOverlayWidth = Math.min(
+      Math.max(Number(overlayWidth) || 0, 0),
+      safeWidth,
+    );
+    const safeOverlayHeight = Math.min(
+      Math.max(Number(overlayHeight) || 0, 0),
+      safeHeight,
+    );
+    const minX = safeOverlayWidth / 2;
+    const maxX = Math.max(minX, safeWidth - (safeOverlayWidth / 2));
+    const minY = safeOverlayHeight / 2;
+    const maxY = Math.max(
+      minY,
+      safeHeight - (safeOverlayHeight / 2) - CLEAN_CAPTION_CONTROL_SAFE_BOTTOM_PX,
+    );
+    const requestedX = Number.isFinite(Number(centerX)) ? Number(centerX) : safeWidth / 2;
+    const requestedY = Number.isFinite(Number(centerY)) ? Number(centerY) : safeHeight / 2;
+
+    return {
+      x: Math.min(Math.max(requestedX, minX), maxX) / safeWidth,
+      y: Math.min(Math.max(requestedY, minY), maxY) / safeHeight,
+    };
+  }
+
+  function getCaptionVideoRect(video = findVideo()) {
+    const rect = video?.getBoundingClientRect?.();
+    if (!rect || !(rect.width > 0) || !(rect.height > 0)) return null;
+    return rect;
+  }
+
+  function positionCleanCaptionOverlay(
+    video = findVideo(),
+    requestedPosition = cleanCaptionSettings.cleanCaptionPosition,
+  ) {
+    if (!cleanCaptionOverlayEl) return null;
+    const videoRect = getCaptionVideoRect(video);
+    if (!videoRect) return null;
+
+    cleanCaptionOverlayEl.style.maxWidth = `${Math.max(videoRect.width * 0.82, 1)}px`;
+    const overlayRect = cleanCaptionOverlayEl.getBoundingClientRect?.();
+    const overlayWidth = Number(overlayRect?.width) || 0;
+    const overlayHeight = Number(overlayRect?.height) || 0;
+    const position = getNormalizedCaptionPosition(
+      videoRect.width,
+      videoRect.height,
+      overlayWidth,
+      overlayHeight,
+      Number(requestedPosition?.x) * videoRect.width,
+      Number(requestedPosition?.y) * videoRect.height,
+    );
+
+    cleanCaptionOverlayEl.style.left = `${videoRect.left + (position.x * videoRect.width)}px`;
+    cleanCaptionOverlayEl.style.top = `${videoRect.top + (position.y * videoRect.height)}px`;
+    cleanCaptionOverlayEl.style.transform = 'translate(-50%, -50%)';
+    return position;
+  }
+
+  function persistCleanCaptionPosition(position) {
+    const normalized = normalizeCleanCaptionSettings({
+      ...cleanCaptionSettings,
+      cleanCaptionPosition: position,
+    });
+    cleanCaptionSettings = normalized;
+    if (typeof chrome === 'undefined' || !chrome.storage?.local?.set) return;
+    chrome.storage.local.set({
+      [STORAGE_KEYS.CLEAN_CAPTION_SETTINGS]: normalized,
+    }).catch(() => {});
+  }
+
+  function handleCaptionPointerDown(event) {
+    if (!cleanCaptionOverlayEl || cleanCaptionOverlayEl.style.display === 'none') return;
+    if (typeof event.button === 'number' && event.button !== 0) return;
+
+    const video = findVideo();
+    const videoRect = getCaptionVideoRect(video);
+    const overlayRect = cleanCaptionOverlayEl.getBoundingClientRect?.();
+    if (!videoRect || !overlayRect) return;
+
+    cleanCaptionDragState = {
+      pointerId: event.pointerId,
+      video,
+      videoRect,
+      overlayWidth: Number(overlayRect.width) || 0,
+      overlayHeight: Number(overlayRect.height) || 0,
+      startClientX: Number(event.clientX) || 0,
+      startClientY: Number(event.clientY) || 0,
+      startPosition: { ...cleanCaptionSettings.cleanCaptionPosition },
+      moved: false,
+    };
+
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+      cleanCaptionOverlayEl.setPointerCapture?.(event.pointerId);
+    } catch (_) {}
+  }
+
+  function handleCaptionPointerMove(event) {
+    const state = cleanCaptionDragState;
+    if (!state || state.pointerId !== event.pointerId) return;
+
+    const deltaX = (Number(event.clientX) || 0) - state.startClientX;
+    const deltaY = (Number(event.clientY) || 0) - state.startClientY;
+    if (!state.moved && Math.hypot(deltaX, deltaY) < CLEAN_CAPTION_DRAG_THRESHOLD_PX) return;
+
+    state.moved = true;
+    const centerX = (state.startPosition.x * state.videoRect.width) + deltaX;
+    const centerY = (state.startPosition.y * state.videoRect.height) + deltaY;
+    const nextPosition = getNormalizedCaptionPosition(
+      state.videoRect.width,
+      state.videoRect.height,
+      state.overlayWidth,
+      state.overlayHeight,
+      centerX,
+      centerY,
+    );
+
+    cleanCaptionSettings.cleanCaptionPosition = nextPosition;
+    positionCleanCaptionOverlay(state.video, nextPosition);
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function handleCaptionPointerEnd(event) {
+    const state = cleanCaptionDragState;
+    if (!state || state.pointerId !== event.pointerId) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    if (state.moved) {
+      persistCleanCaptionPosition(cleanCaptionSettings.cleanCaptionPosition);
+    }
+    try {
+      cleanCaptionOverlayEl.releasePointerCapture?.(event.pointerId);
+    } catch (_) {}
+    cleanCaptionDragState = null;
+  }
+
   function updateCleanOverlay(liveText = lastCaptionText, nowSec = 0) {
     if (!cleanCaptionSettings.cleanCaptionsEnabled || typeof document === 'undefined') {
       setNativeCaptionVisualHidden(false);
@@ -4607,8 +4764,15 @@
       cleanCaptionOverlayEl.style.position = 'fixed';
       cleanCaptionOverlayEl.style.zIndex = '2147483647';
       cleanCaptionOverlayEl.style.maxWidth = '80vw';
-      cleanCaptionOverlayEl.style.pointerEvents = 'none';
+      cleanCaptionOverlayEl.style.pointerEvents = 'auto';
       cleanCaptionOverlayEl.style.textAlign = 'center';
+      cleanCaptionOverlayEl.style.cursor = 'move';
+      cleanCaptionOverlayEl.style.userSelect = 'none';
+      cleanCaptionOverlayEl.style.touchAction = 'none';
+      cleanCaptionOverlayEl.addEventListener('pointerdown', handleCaptionPointerDown, { passive: false });
+      cleanCaptionOverlayEl.addEventListener('pointermove', handleCaptionPointerMove, { passive: false });
+      cleanCaptionOverlayEl.addEventListener('pointerup', handleCaptionPointerEnd, { passive: false });
+      cleanCaptionOverlayEl.addEventListener('pointercancel', handleCaptionPointerEnd, { passive: false });
       cleanCaptionOverlayEl.appendChild(cleanCaptionTextEl);
       (document.body || document.documentElement).appendChild(cleanCaptionOverlayEl);
     }
@@ -4616,7 +4780,7 @@
     const result = getBestCleanCaptionText(liveText, nowSec);
     const text = result.text || '';
     const hasValidCleanText = Boolean(text.trim()) && result.stale !== true && result.waiting !== true;
-    setNativeCaptionVisualHidden(hasValidCleanText);
+    setNativeCaptionVisualHidden(true);
     cleanCaptionOverlayEl.dataset.isweepCaptionSource = result.source || '';
     cleanCaptionTextEl.textContent = text;
     cleanCaptionTextEl.style.fontSize = CLEAN_CAPTION_SIZE_PX[
@@ -4631,10 +4795,9 @@
       : '0 1px 3px #000, 0 1px 8px #000';
     cleanCaptionTextEl.style.padding = '0.15em 0.35em';
     cleanCaptionTextEl.style.borderRadius = '3px';
-    cleanCaptionOverlayEl.style.left = `${cleanCaptionSettings.cleanCaptionPosition.x * 100}%`;
-    cleanCaptionOverlayEl.style.top = `${cleanCaptionSettings.cleanCaptionPosition.y * 100}%`;
-    cleanCaptionOverlayEl.style.transform = 'translate(-50%, -50%)';
+    cleanCaptionOverlayEl.style.pointerEvents = hasValidCleanText ? 'auto' : 'none';
     cleanCaptionOverlayEl.style.display = hasValidCleanText ? 'block' : 'none';
+    if (hasValidCleanText) positionCleanCaptionOverlay();
   }
 
   function resolveOverlayDisplayState(current, previous, nowMs, bridgeGapMs, options = {}) {
@@ -4692,13 +4855,6 @@
       && Math.abs(Number(event.start_seconds) - Number(anchorSec)) <= 0.35);
   }
 
-  function getNormalizedCaptionPosition(width, height, overlayWidth, overlayHeight) {
-    return {
-      x: Math.max(0, Math.min(1, (width - overlayWidth) / Math.max(width, 1))),
-      y: Math.max(0, Math.min(1, (height - overlayHeight) / Math.max(height, 1))),
-    };
-  }
-
   if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage?.addListener) {
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message?.type === 'isweep_get_video_clock') {
@@ -4727,6 +4883,8 @@
   if (typeof __ISWEEP_TEST_MODE__ === 'undefined' || !__ISWEEP_TEST_MODE__) {
     setInterval(pollVisibleCaptions, 100);
     document.addEventListener('yt-navigate-finish', () => handleVideoIdChange(getCurrentVideoId()));
+    window.addEventListener('resize', () => positionCleanCaptionOverlay());
+    document.addEventListener('fullscreenchange', () => positionCleanCaptionOverlay());
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       chrome.storage.local.get?.([
         STORAGE_KEYS.PREFS,
@@ -4768,7 +4926,7 @@
 
   if (typeof globalThis !== 'undefined' && globalThis.__ISWEEP_TEST_MODE__) {
     globalThis.__ISWEEP_YT_TEST_HOOKS__ = {
-      constants: { CLEAN_CAPTION_STALE_MS, CLEAN_CC_BRIDGE_GAP_MS, CLEAN_CC_STT_DISABLED_TEXT, AUDIO_CHUNK_SEC, AUDIO_CHUNK_OVERLAP_SEC, AUDIO_STT_HOLD_MS, WATCH_AHEAD_SECONDS, CLEAN_CAPTION_SIZE_PX },
+      constants: { CLEAN_CAPTION_STALE_MS, CLEAN_CC_BRIDGE_GAP_MS, CLEAN_CC_STT_DISABLED_TEXT, AUDIO_CHUNK_SEC, AUDIO_CHUNK_OVERLAP_SEC, AUDIO_STT_HOLD_MS, WATCH_AHEAD_SECONDS, CLEAN_CAPTION_SIZE_PX, ISWEEP_YOUTUBE_DOM_FALLBACK_ENABLED, AUDIO_STT_DISPLAY_REQUIRES_ALIGNMENT },
       normalizeCleanCaptionSettings, setCachedPreferences, setCachedLocalReferences,
       toCleanCaptionText, stripCategoryLabelsFromCaption, limitCaptionText, getBestCleanCaptionText,
       getMuteWindowFromMarker, shouldISweepUnmute, shouldSkipMuteBecauseUserMuted,
