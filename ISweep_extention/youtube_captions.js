@@ -905,7 +905,7 @@
 
     if (cleanMatch) {
       return limitCaptionText(
-        stripCategoryLabelsFromCaption(cleanMatch.trim()),
+        stripCategoryLabelsFromCaption(toCleanCaptionText(cleanMatch.trim())),
         entry,
         nowSec
       );
@@ -4571,12 +4571,17 @@
     const filters = getFilterWords();
     if (!filters.enabled || !filters.words.length) return value;
     return value.split(/(\s+)/).map((part) => {
-      const word = normalizeCaptionWord(part);
-      return filters.words.some((filter) => (
+      const tokenMatch = part.match(/^([^a-z0-9']*)([a-z0-9']+)([^a-z0-9']*)$/i);
+      const word = normalizeCaptionWord(tokenMatch ? tokenMatch[2] : part);
+      const isBlocked = filters.words.some((filter) => (
         maskToRegex(filter).test(word)
         || buildStretchRegex(filter).test(word)
         || expandWordFamily(filter).some((variant) => maskToRegex(variant).test(word))
-      )) ? '___' : part;
+      ));
+      if (!isBlocked) return part;
+      return tokenMatch
+        ? `${tokenMatch[1]}___${tokenMatch[3]}`
+        : '___';
     }).join('');
   }
 
@@ -4955,7 +4960,7 @@
     globalThis.__ISWEEP_YT_TEST_HOOKS__ = {
       constants: { CLEAN_CAPTION_STALE_MS, CLEAN_CC_BRIDGE_GAP_MS, CLEAN_CC_STT_DISABLED_TEXT, AUDIO_CHUNK_SEC, AUDIO_CHUNK_OVERLAP_SEC, AUDIO_STT_HOLD_MS, WATCH_AHEAD_SECONDS, CLEAN_CAPTION_SIZE_PX, ISWEEP_YOUTUBE_DOM_FALLBACK_ENABLED, AUDIO_STT_DISPLAY_REQUIRES_ALIGNMENT },
       normalizeCleanCaptionSettings, setCachedPreferences, setCachedLocalReferences,
-      toCleanCaptionText, stripCategoryLabelsFromCaption, limitCaptionText, getBestCleanCaptionText,
+      toCleanCaptionText, stripCategoryLabelsFromCaption, limitCaptionText, getCleanCaptionDisplayText, getBestCleanCaptionText,
       getMuteWindowFromMarker, shouldISweepUnmute, shouldSkipMuteBecauseUserMuted,
       estimatePlaceholderWordWindow, hasNearbyAudioMuteMarker, getMarkerEarlyWindowSec,
       shouldFireMarker, shouldAllowMarkerAction, resolveOverlayDisplayState, getEntryTimingBounds,

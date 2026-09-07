@@ -130,6 +130,29 @@ test('preference sync reports explicit empty selections as synced, not missing',
   assert.equal(snapshot.selectedWordSource, 'synced');
 });
 
+test('preference sync carries selected hell into extension storage and reports its count', async () => {
+  const bg = loadBackgroundContext();
+  bg.getAuthToken = async () => 'token';
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      enabled: true,
+      categories: { language: { enabled: true, items: ['hell'] } },
+      blocklist: { enabled: true, items: ['hell'] },
+    }),
+  });
+
+  const result = await bg.handleSyncPrefs();
+  assert.equal(result.ok, true);
+  assert.equal(result.selectedWordCount, 1);
+
+  const snapshot = await bg.getCaptionModeSnapshot();
+  assert.equal(snapshot.selectedWordCount, 1);
+  assert.equal(snapshot.selectedWordSource, 'synced');
+});
+
 test('caption runtime status reports listening when health has stt_enabled true and no transcript yet', async () => {
   const bg = loadBackgroundContext();
   bg.getCaptionBackendStatus = async () => ({

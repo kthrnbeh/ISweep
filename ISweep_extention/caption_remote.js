@@ -11,6 +11,7 @@
     CLEAN_CAPTION_SETTINGS: 'isweepCleanCaptionSettings',
   };
 
+  let preferencesReady = typeof chrome === 'undefined' || !chrome.storage?.local;
   let preferences = null;
   let settings = {
     cleanCaptionsEnabled: true,
@@ -169,6 +170,17 @@
     const textNode = overlay?.firstElementChild;
     const nativeContainer = document.querySelector('.ytp-caption-window-container');
 
+    if (!preferencesReady) {
+      // Never leave a raw remote overlay visible while the shared preference
+      // snapshot is loading. Native captions remain visible until the main
+      // renderer has a filtered replacement.
+      if (overlay?.dataset.isweepCaptionSource === 'remote') {
+        overlay.style.display = 'none';
+      }
+      if (nativeContainer) nativeContainer.style.visibility = '';
+      return;
+    }
+
     if (!settings.cleanCaptionsEnabled || !overlay || !textNode) {
       if (nativeContainer) nativeContainer.style.visibility = '';
       return;
@@ -228,6 +240,7 @@
       STORAGE_KEYS.CLEAN_CAPTION_SETTINGS,
     ]);
     preferences = normalizePreferences(values[STORAGE_KEYS.PREFS]);
+    preferencesReady = true;
     settings = normalizeSettings(values[STORAGE_KEYS.CLEAN_CAPTION_SETTINGS]);
 
     console.log(LOG, 'ready', {
@@ -253,6 +266,7 @@
 
     if (changes[STORAGE_KEYS.PREFS]) {
       preferences = normalizePreferences(changes[STORAGE_KEYS.PREFS].newValue);
+      preferencesReady = true;
       console.log(LOG, 'preferences updated live', {
         selectedWordCount: preferences.words.length,
       });
@@ -268,6 +282,18 @@
       processCaption();
     }
   });
+
+  if (typeof globalThis !== 'undefined' && globalThis.__ISWEEP_TEST_MODE__) {
+    globalThis.__ISWEEP_CAPTION_REMOTE_TEST_HOOKS__ = {
+      normalizePreferences,
+      maskSelectedText,
+      limitCaptionText,
+      setPreferencesForTest(raw) {
+        preferences = normalizePreferences(raw);
+        preferencesReady = true;
+      },
+    };
+  }
 
   loadState()
     .then(() => {

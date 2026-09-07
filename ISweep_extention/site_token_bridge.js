@@ -64,6 +64,12 @@
     };
   }
 
+  if (globalThis.__ISWEEP_TEST_MODE__) {
+    globalThis.__ISWEEP_SITE_TOKEN_BRIDGE_TEST_HOOKS__ = {
+      normalizeSavedPreferences,
+    };
+  }
+
   function readLastSavedBackendPreferences() {
     const cached = safeParseJson(
       window.localStorage.getItem(SITE_PREFS_CACHE_KEY),

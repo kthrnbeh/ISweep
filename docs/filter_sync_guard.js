@@ -204,6 +204,14 @@
     return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
   }
 
+  if (globalThis.__ISWEEP_TEST_MODE__) {
+    globalThis.__ISWEEP_FILTER_SYNC_TEST_HOOKS__ = {
+      buildPreferencesFromSavedSettings,
+      getWordCount,
+      getWordItems,
+    };
+  }
+
   function ensureStatusElement() {
     let status = document.getElementById('isweepFilterSyncStatus');
     if (status) return status;
