@@ -2061,6 +2061,8 @@
             videoId,
           force_refresh:
             forceRefresh,
+          lookahead_seconds:
+            WATCH_AHEAD_SECONDS,
         });
 
       // Ignore stale results after YouTube SPA navigation.
