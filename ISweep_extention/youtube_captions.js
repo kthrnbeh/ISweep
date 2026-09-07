@@ -388,10 +388,8 @@
 
   // Recovery rule: visible/timed page captions are allowed to drive the overlay.
   // Raw live STT is only displayed after it agrees with page evidence or a local reference.
-  // Native YouTube captions remain evidence only. Clean captions are rendered
-  // from the timed ISweep audio/AI pipeline so CC can stay disabled.
-  const ISWEEP_YOUTUBE_DOM_FALLBACK_ENABLED = false;
-  const AUDIO_STT_DISPLAY_REQUIRES_ALIGNMENT = false;
+  const ISWEEP_YOUTUBE_DOM_FALLBACK_ENABLED = true;
+  const AUDIO_STT_DISPLAY_REQUIRES_ALIGNMENT = true;
   const ISWEEP_CONTENT_SCRIPT_AUDIO_AHEAD_ENABLED = false;
   const AUDIO_STT_MIN_VISIBLE_MS = 1200;
   const AUDIO_STT_HOLD_MS = 2500;
@@ -1401,8 +1399,8 @@
     return false;
   }   function getBestCleanCaptionText(liveText, nowSec, options = {}) {
     // Priority order after recovery:
-    // 1) pre-analyzed/reference captions, 2) timed AI captions, 3) fresh AI text.
-    // Native YouTube captions are evidence only and never the clean-caption source.
+    // 1) pre-analyzed/reference captions, 2) visible page captions, 3) approved STT only.
+    // Raw STT that disagrees with the page is not shown because it causes hallucinated captions.
     const preCachedAudioCaptions = Array.isArray(options.preCachedAudioCaptions)
       ? options.preCachedAudioCaptions
       : preCachedAudioCleanCaptions;
@@ -4279,10 +4277,10 @@
     return [
       { source: 'pre_analyzed', class: 'timed_text', role: 'primary_when_available' },
       { source: 'text_track', class: 'timed', role: 'primary_when_available' },
-      { source: 'audio_stt_live', class: 'timed', role: 'primary_live_caption' },
-      { source: 'audio_stt_plus_page_evidence', class: 'timed', role: 'timed_ai_with_optional_evidence' },
-      { source: 'audio_stt_plus_reference', class: 'timed', role: 'timed_ai_with_optional_reference' },
-      { source: 'page_caption_dom', class: 'current_visible', role: 'evidence_only' },
+      { source: 'page_caption_dom', class: 'current_visible', role: 'primary_visible_caption' },
+      { source: 'audio_stt_plus_page_evidence', class: 'timed', role: 'approved_stt_after_alignment' },
+      { source: 'audio_stt_plus_reference', class: 'timed', role: 'approved_stt_after_alignment' },
+      { source: 'audio_stt', class: 'timed', role: 'draft_hidden_until_aligned' },
       { source: 'visible_transcript', class: 'context_only', role: 'context_only' },
     ];
   }
@@ -4665,6 +4663,18 @@
 
     cleanCaptionOverlayEl.style.left = `${videoRect.left + (position.x * videoRect.width)}px`;
     cleanCaptionOverlayEl.style.top = `${videoRect.top + (position.y * videoRect.height)}px`;
+    cleanCaptionOverlayEl.style.setProperty(
+      '--isweep-caption-left',
+      `${videoRect.left + (position.x * videoRect.width)}px`,
+    );
+    cleanCaptionOverlayEl.style.setProperty(
+      '--isweep-caption-top',
+      `${videoRect.top + (position.y * videoRect.height)}px`,
+    );
+    cleanCaptionOverlayEl.style.setProperty(
+      '--isweep-caption-max-width',
+      `${Math.max(videoRect.width * 0.82, 1)}px`,
+    );
     cleanCaptionOverlayEl.style.transform = 'translate(-50%, -50%)';
     return position;
   }
@@ -4780,7 +4790,7 @@
     const result = getBestCleanCaptionText(liveText, nowSec);
     const text = result.text || '';
     const hasValidCleanText = Boolean(text.trim()) && result.stale !== true && result.waiting !== true;
-    setNativeCaptionVisualHidden(true);
+    setNativeCaptionVisualHidden(hasValidCleanText);
     cleanCaptionOverlayEl.dataset.isweepCaptionSource = result.source || '';
     cleanCaptionTextEl.textContent = text;
     cleanCaptionTextEl.style.fontSize = CLEAN_CAPTION_SIZE_PX[

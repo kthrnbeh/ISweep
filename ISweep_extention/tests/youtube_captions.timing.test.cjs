@@ -93,12 +93,12 @@ test('caption sizes use the exact configured pixel values', () => {
   assert.equal(remoteSource.includes("? '20px' : '18px'"), true);
 });
 
-test('AI captions remain independent when native YouTube captions are off', () => {
+test('native captions remain available as the restored fallback', () => {
   const hooks = loadYoutubeTimingHooks();
   const nowMs = Date.now();
 
-  assert.equal(hooks.constants.ISWEEP_YOUTUBE_DOM_FALLBACK_ENABLED, false);
-  assert.equal(hooks.constants.AUDIO_STT_DISPLAY_REQUIRES_ALIGNMENT, false);
+  assert.equal(hooks.constants.ISWEEP_YOUTUBE_DOM_FALLBACK_ENABLED, true);
+  assert.equal(hooks.constants.AUDIO_STT_DISPLAY_REQUIRES_ALIGNMENT, true);
 
   const nativeOnly = hooks.getBestCleanCaptionText('native caption text', 20, {
     preAnalyzedCaptions: [],
@@ -108,8 +108,8 @@ test('AI captions remain independent when native YouTube captions are off', () =
     liveCaptionObservedAtMs: nowMs,
     nowMs,
   });
-  assert.equal(nativeOnly.text, '');
-  assert.equal(nativeOnly.source, null);
+  assert.equal(nativeOnly.text, 'native caption text');
+  assert.equal(nativeOnly.source, 'live_masked');
 
   const audioCaption = hooks.getBestCleanCaptionText('native caption text', 20.5, {
     preAnalyzedCaptions: [],
@@ -129,12 +129,11 @@ test('AI captions remain independent when native YouTube captions are off', () =
     liveCaptionObservedAtMs: nowMs,
     nowMs,
   });
-  assert.equal(audioCaption.source, 'audio_stt_live');
-  assert.equal(audioCaption.text.includes('___'), true);
-  assert.equal(audioCaption.text.includes('hell'), false);
+  assert.equal(audioCaption.source, 'live_masked');
+  assert.equal(audioCaption.text, 'native caption text');
 });
 
-test('native caption remote engine is not loaded by the extension', () => {
+test('native caption remote engine remains loaded as the fallback renderer', () => {
   const extensionRoot = path.resolve(__dirname, '..');
   const manifest = JSON.parse(fs.readFileSync(path.join(extensionRoot, 'manifest.json'), 'utf8'));
   const youtubeScripts = manifest.content_scripts
@@ -142,7 +141,7 @@ test('native caption remote engine is not loaded by the extension', () => {
     .flatMap((entry) => entry.js || []);
 
   assert.equal(youtubeScripts.includes('youtube_captions.js'), true);
-  assert.equal(youtubeScripts.includes('caption_remote.js'), false);
+  assert.equal(youtubeScripts.includes('caption_remote.js'), true);
 });
 
 test('filtered caption words use whole-word matching and render as underscores', () => {
