@@ -2977,6 +2977,13 @@ document.addEventListener(
                 settings
               );
 
+            // Publish the exact saved Filter payload immediately. The
+            // extension bridge can consume this cache while the backend
+            // request is in flight; a successful response replaces it.
+            cachePreferences(
+              prefsPayload
+            );
+
             const saveResult = await persistPreferences(
               prefsPayload
             );
