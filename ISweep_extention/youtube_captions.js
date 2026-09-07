@@ -418,6 +418,11 @@
     cleanCaptionWordMuteMode: 'captions_only',
     cleanCaptionPosition: { x: 0.5, y: 0.8 },
   };
+  const CLEAN_CAPTION_SIZE_PX = Object.freeze({
+    small: '14px',
+    medium: '18px',
+    large: '20px',
+  });
   let cleanCaptionSettings = { ...CLEAN_CAPTION_DEFAULTS };
   let cleanCaptionOverlayEl = null;
   let cleanCaptionTextEl = null;
@@ -490,6 +495,7 @@
     referenceLineIndex: null,
     referenceLineId: null,
     referenceVideoTime: null,
+    lastObservedVideoTimeSec: null,
   };
 
   let lastAudioRelaySignature = '';
@@ -694,6 +700,9 @@
     captionTimelineState.referenceLineIndex = null;
     captionTimelineState.referenceLineId = null;
     captionTimelineState.referenceVideoTime = null;
+    captionTimelineState.lastObservedVideoTimeSec = null;
+
+    liveAudioCleanCaptions = [];
 
     updateCleanOverlay('', findVideo()?.currentTime || 0);
 
@@ -837,6 +846,20 @@
       marker
       && ['mute', 'skip', 'fast_forward'].includes(marker.action)
     );
+  }
+
+  function getVideoClockSnapshot() {
+    const video = findVideo();
+    const currentTime = Number(video?.currentTime);
+    return {
+      ok: Boolean(video) && Number.isFinite(currentTime),
+      video_id: getCurrentVideoId(),
+      current_time: Number.isFinite(currentTime) ? currentTime : null,
+      paused: video?.paused === true,
+      playback_rate: Number.isFinite(Number(video?.playbackRate))
+        ? Number(video.playbackRate)
+        : null,
+    };
   }
 
   function shouldAllowMarkerAction(marker, nowSec = 0, settings = cleanCaptionSettings) {
