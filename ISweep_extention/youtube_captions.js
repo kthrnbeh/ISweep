@@ -378,6 +378,7 @@
   const PAGE_SELECTED_WORD_MUTE_RETRIGGER_MS = 900;
 
   const MARKER_SCHEDULER_INTERVAL_MS = 100;
+  const WATCH_AHEAD_SECONDS = 30;
   const AUDIO_PREROLL_MS = 120;
   // Audio-derived mute markers already include backend pre-roll, so keep the
   // scheduler lead short and specific to profanity muting.
@@ -836,6 +837,28 @@
       marker
       && ['mute', 'skip', 'fast_forward'].includes(marker.action)
     );
+  }
+
+  function shouldAllowMarkerAction(marker, nowSec = 0, settings = cleanCaptionSettings) {
+    if (!isActionableMarker(marker)) return false;
+
+    // Clean captions may use the transcript watch-ahead data for captions and
+    // temporary mutes, but never for seeking or playback-rate changes.
+    if (settings?.cleanCaptionsEnabled === true) {
+      if (!isSelectedWordMuteModeEnabled(settings) || marker.action !== 'mute') {
+        return false;
+      }
+
+      const markerStart = Number(marker.start_seconds);
+      const currentTime = Number(nowSec);
+      if (!Number.isFinite(markerStart) || !Number.isFinite(currentTime)) {
+        return false;
+      }
+
+      return markerStart <= currentTime + WATCH_AHEAD_SECONDS;
+    }
+
+    return true;
   }
 
   function getCleanCaptionDisplayText(entry, nowSec = null) {
@@ -1871,19 +1894,10 @@
       nowSec
     );
 
-    // [CC] mode is captions-only.
-    // Do not fire marker-based mute/skip/fast-forward actions.
-    if (
-      cleanCaptionSettings
-        .cleanCaptionsEnabled
-    ) {
-      return;
-    }
-
     if (!markerEvents.length) return;
 
     markerEvents.forEach((marker) => {
-      if (!isActionableMarker(marker)) {
+      if (!shouldAllowMarkerAction(marker, nowSec)) {
         return;
       }
 
@@ -1983,9 +1997,15 @@
     if (
       cleanCaptionSettings
         .cleanCaptionsEnabled
+      && !isSelectedWordMuteModeEnabled()
     ) {
+      if (markerSchedulerInterval) {
+        clearInterval(markerSchedulerInterval);
+        markerSchedulerInterval = null;
+      }
+
       markerFallbackReason =
-        'caption_mode_no_markers';
+        'caption_mode_mute_disabled';
 
       return;
     }
@@ -2012,19 +2032,6 @@
   async function analyzeCurrentVideoMarkers(
     forceRefresh = false
   ) {
-    if (
-      cleanCaptionSettings
-        .cleanCaptionsEnabled
-    ) {
-      resetMarkerEngine(
-        'caption_mode_no_markers'
-      );
-
-      preAnalyzedCleanCaptions = [];
-
-      return;
-    }
-
     const videoId =
       getCurrentVideoId();
 
@@ -3776,17 +3783,9 @@
       'video changed'
     );
 
-    if (
-      !cleanCaptionSettings
-        .cleanCaptionsEnabled
-    ) {
-      analyzeCurrentVideoMarkers(
-        false
-      );
-    } else {
-      markerFallbackReason =
-        'caption_mode_no_markers';
-    }
+    analyzeCurrentVideoMarkers(false);
+
+    ensureMarkerSchedulerRunning();
 
     if (
       ISWEEP_CONTENT_SCRIPT_AUDIO_AHEAD_ENABLED
@@ -4479,9 +4478,10 @@
     setNativeCaptionVisualHidden(hasValidCleanText);
     cleanCaptionOverlayEl.dataset.isweepCaptionSource = result.source || '';
     cleanCaptionTextEl.textContent = text;
-    cleanCaptionTextEl.style.fontSize = cleanCaptionSettings.cleanCaptionTextSize === 'large'
-      ? '1.65rem'
-      : cleanCaptionSettings.cleanCaptionTextSize === 'small' ? '1rem' : '1.4rem';
+    // Medium matches Large at an approximately 18pt document size (about 24px).
+    cleanCaptionTextEl.style.fontSize = cleanCaptionSettings.cleanCaptionTextSize === 'small'
+      ? '1rem'
+      : '1.5rem';
     cleanCaptionTextEl.style.color = cleanCaptionSettings.cleanCaptionStyle === 'white_black' ? '#111' : '#fff';
     cleanCaptionTextEl.style.background = cleanCaptionSettings.cleanCaptionStyle === 'transparent_white'
       ? 'transparent'
@@ -4595,6 +4595,7 @@
             }
           }
           updateCleanOverlay(lastCaptionText, findVideo()?.currentTime || 0);
+          ensureMarkerSchedulerRunning();
         }
       });
     }
@@ -4602,12 +4603,12 @@
 
   if (typeof globalThis !== 'undefined' && globalThis.__ISWEEP_TEST_MODE__) {
     globalThis.__ISWEEP_YT_TEST_HOOKS__ = {
-      constants: { CLEAN_CAPTION_STALE_MS, CLEAN_CC_BRIDGE_GAP_MS, CLEAN_CC_STT_DISABLED_TEXT, AUDIO_CHUNK_SEC, AUDIO_CHUNK_OVERLAP_SEC, AUDIO_STT_HOLD_MS },
+      constants: { CLEAN_CAPTION_STALE_MS, CLEAN_CC_BRIDGE_GAP_MS, CLEAN_CC_STT_DISABLED_TEXT, AUDIO_CHUNK_SEC, AUDIO_CHUNK_OVERLAP_SEC, AUDIO_STT_HOLD_MS, WATCH_AHEAD_SECONDS },
       normalizeCleanCaptionSettings, setCachedPreferences, setCachedLocalReferences,
       toCleanCaptionText, stripCategoryLabelsFromCaption, limitCaptionText, getBestCleanCaptionText,
       getMuteWindowFromMarker, shouldISweepUnmute, shouldSkipMuteBecauseUserMuted,
       estimatePlaceholderWordWindow, hasNearbyAudioMuteMarker, getMarkerEarlyWindowSec,
-      shouldFireMarker, resolveOverlayDisplayState, getEntryTimingBounds,
+      shouldFireMarker, shouldAllowMarkerAction, resolveOverlayDisplayState, getEntryTimingBounds,
       normalizePreAnalyzedCaptions, buildAudioResponseCaptions, shouldDedupAudioMarker,
       markerSourcePriority, buildSelectedWordMuteWindows, deriveWordMatches,
       estimatePageWordDurationSec, estimatePageSelectedWordMuteDurationSec,

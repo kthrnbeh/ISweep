@@ -42,6 +42,7 @@ const CLEAN_CAPTION_DEFAULTS = {
   cleanCaptionsEnabled: true,
   cleanCaptionWordMuteMode: 'captions_only',
 };
+const WATCH_AHEAD_SECONDS = 30;
 
 const captionReadinessState = {
   lastCaptionAt: null,
@@ -1698,7 +1699,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     handleSyncPrefs().then(sendResponse);
     return true; // async
   } else if (message.type === 'isweep_markers_analyze') {
-    handleMarkerAnalyze(message.video_id, message.force_refresh === true).then(sendResponse);
+    handleMarkerAnalyze(message.video_id, message.force_refresh === true, message.lookahead_seconds).then(sendResponse);
     return true; // async
   } else if (message.type === 'isweep_audio_chunk') {
     handleAudioAhead(
@@ -2190,21 +2191,10 @@ function shouldApplyWordMute(decision, transcriptText, source) {
   return true;
 }
 
-async function handleMarkerAnalyze(videoId, forceRefresh = false) {
+async function handleMarkerAnalyze(videoId, forceRefresh = false, lookaheadSeconds = WATCH_AHEAD_SECONDS) {
   const cleanVideoId = (videoId || '').trim();
   if (!cleanVideoId) {
     return { status: 'error', source: null, events: [], failure_reason: 'missing_video_id' };
-  }
-
-  const modeSnapshot = await getCaptionModeSnapshot();
-  if (modeSnapshot.cleanCaptionsEnabled) {
-    return {
-      status: 'unavailable',
-      source: null,
-      events: [],
-      failure_reason: 'caption_mode_no_markers',
-      mode: modeSnapshot.mode,
-    };
   }
 
   if (!forceRefresh && markerCacheByVideoId.has(cleanVideoId)) {
@@ -2227,14 +2217,23 @@ async function handleMarkerAnalyze(videoId, forceRefresh = false) {
   let responseBody = '';
   try {
     const requestUrl = `${backendUrl}/videos/analyze`;
-    console.log(MARKER_LOG_PREFIX, 'analyze start', { videoId: cleanVideoId });
+    const requestedLookaheadSeconds = Number.isFinite(Number(lookaheadSeconds))
+      ? Math.max(0, Number(lookaheadSeconds))
+      : WATCH_AHEAD_SECONDS;
+    console.log(MARKER_LOG_PREFIX, 'analyze start', {
+      videoId: cleanVideoId,
+      lookaheadSeconds: requestedLookaheadSeconds,
+    });
     res = await fetch(requestUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ video_id: cleanVideoId }),
+      body: JSON.stringify({
+        video_id: cleanVideoId,
+        lookahead_seconds: requestedLookaheadSeconds,
+      }),
     });
 
     responseBody = await res.text();

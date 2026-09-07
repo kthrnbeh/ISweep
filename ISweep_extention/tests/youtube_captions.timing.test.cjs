@@ -72,6 +72,34 @@ test('clean caption display keeps only the latest two sentences', () => {
   );
 });
 
+test('caption sizes keep medium and large at an 18pt-equivalent size', () => {
+  const extensionRoot = path.resolve(__dirname, '..');
+  const source = fs.readFileSync(path.join(extensionRoot, 'youtube_captions.js'), 'utf8');
+  const remoteSource = fs.readFileSync(path.join(extensionRoot, 'caption_remote.js'), 'utf8');
+
+  assert.equal(source.includes(": '1.5rem';"), true);
+  assert.equal(remoteSource.includes(": '1.5rem';"), true);
+  assert.equal(source.includes("cleanCaptionTextSize === 'small'"), true);
+});
+
+test('clean caption watch-ahead permits only mute markers within 30 seconds', () => {
+  const hooks = loadYoutubeTimingHooks();
+  const settings = {
+    cleanCaptionsEnabled: true,
+    cleanCaptionWordMuteMode: 'captions_word_mute',
+  };
+
+  assert.equal(hooks.constants.WATCH_AHEAD_SECONDS, 30);
+  assert.equal(hooks.shouldAllowMarkerAction({ action: 'mute', start_seconds: 129 }, 100, settings), true);
+  assert.equal(hooks.shouldAllowMarkerAction({ action: 'mute', start_seconds: 131 }, 100, settings), false);
+  assert.equal(hooks.shouldAllowMarkerAction({ action: 'skip', start_seconds: 101 }, 100, settings), false);
+  assert.equal(hooks.shouldAllowMarkerAction({ action: 'fast_forward', start_seconds: 101 }, 100, settings), false);
+  assert.equal(hooks.shouldAllowMarkerAction({ action: 'mute', start_seconds: 101 }, 100, {
+    cleanCaptionsEnabled: true,
+    cleanCaptionWordMuteMode: 'captions_only',
+  }), false);
+});
+
 test('clean caption display stops at the currently spoken timed word', () => {
   const hooks = loadYoutubeTimingHooks();
 

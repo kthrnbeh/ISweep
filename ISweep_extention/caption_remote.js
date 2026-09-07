@@ -195,9 +195,10 @@
       overlay.style.setProperty('--isweep-caption-max-width', `${Math.max(rect.width * 0.82, 220)}px`);
     }
 
-    textNode.style.fontSize = settings.cleanCaptionTextSize === 'large'
-      ? '1.65rem'
-      : settings.cleanCaptionTextSize === 'small' ? '1rem' : '1.4rem';
+    // Medium matches Large at an approximately 18pt document size (about 24px).
+    textNode.style.fontSize = settings.cleanCaptionTextSize === 'small'
+      ? '1rem'
+      : '1.5rem';
     textNode.style.fontWeight = '600';
     textNode.style.lineHeight = '1.3';
     textNode.style.padding = '0.18em 0.4em';
