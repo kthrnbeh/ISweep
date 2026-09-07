@@ -16,7 +16,12 @@ function loadYoutubeTimingHooks() {
   const context = {
     console: { log() {}, warn() {}, error() {} },
     globalThis: {},
-    window: { innerWidth: 1280, innerHeight: 720 },
+    window: {
+      innerWidth: 1280,
+      innerHeight: 720,
+      location: { href: 'https://www.youtube.com/watch?v=current-video' },
+    },
+    URL,
     document: {
       querySelector(selector) {
         if (selector === 'video') return fakeVideo;
@@ -72,14 +77,54 @@ test('clean caption display keeps only the latest two sentences', () => {
   );
 });
 
-test('caption sizes keep medium and large at an 18pt-equivalent size', () => {
+test('caption sizes use the exact configured pixel values', () => {
+  const hooks = loadYoutubeTimingHooks();
   const extensionRoot = path.resolve(__dirname, '..');
   const source = fs.readFileSync(path.join(extensionRoot, 'youtube_captions.js'), 'utf8');
   const remoteSource = fs.readFileSync(path.join(extensionRoot, 'caption_remote.js'), 'utf8');
 
-  assert.equal(source.includes(": '1.5rem';"), true);
-  assert.equal(remoteSource.includes(": '1.5rem';"), true);
-  assert.equal(source.includes("cleanCaptionTextSize === 'small'"), true);
+  assert.equal(hooks.constants.CLEAN_CAPTION_SIZE_PX.small, '14px');
+  assert.equal(hooks.constants.CLEAN_CAPTION_SIZE_PX.medium, '18px');
+  assert.equal(hooks.constants.CLEAN_CAPTION_SIZE_PX.large, '20px');
+  assert.equal(source.includes("small: '14px'"), true);
+  assert.equal(source.includes("medium: '18px'"), true);
+  assert.equal(source.includes("large: '20px'"), true);
+  assert.equal(remoteSource.includes("? '14px'"), true);
+  assert.equal(remoteSource.includes("? '20px' : '18px'"), true);
+});
+
+test('audio word timestamps stay on the source video timeline', () => {
+  const hooks = loadYoutubeTimingHooks();
+  const entries = hooks.buildAudioResponseCaptions({
+    source: 'audio_stt_live',
+    start_seconds: 60,
+    end_seconds: 63,
+    text: 'hello world',
+    words: [
+      { word: 'hello', start: 60.4, end: 60.8 },
+      { word: 'world', start: 61.1, end: 61.5 },
+    ],
+  }, 60, 63);
+
+  assert.equal(entries.length, 1);
+  const bounds = hooks.getEntryTimingBounds(entries[0]);
+  assert.equal(bounds.start_seconds, 60.4);
+  assert.equal(bounds.end_seconds, 61.5);
+  assert.notEqual(bounds.start_seconds, 30.4);
+  assert.notEqual(bounds.start_seconds, 90.4);
+});
+
+test('audio captions from an earlier video are rejected', () => {
+  const hooks = loadYoutubeTimingHooks();
+
+  assert.equal(hooks.acceptAudioCaptionRelay({
+    video_id: 'previous-video',
+    session_id: 'old-session',
+    sequence_number: 1,
+    start_seconds: 60,
+    end_seconds: 63,
+    text: 'stale caption',
+  }), false);
 });
 
 test('clean caption watch-ahead permits only mute markers within 30 seconds', () => {

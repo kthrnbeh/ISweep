@@ -938,6 +938,24 @@ async function postTabCaptureStatusToTab(tabId, state, failureReason = null) {
   }
 }
 
+async function getTabVideoClock(tabId) {
+  try {
+    const response = await chrome.tabs.sendMessage(Number(tabId), {
+      type: 'isweep_get_video_clock',
+    });
+    const currentTime = Number(response?.current_time);
+    if (response?.ok === true && Number.isFinite(currentTime)) {
+      return {
+        current_time: Math.max(currentTime, 0),
+        video_id: String(response.video_id || '').trim() || null,
+      };
+    }
+  } catch (_) {
+    // A newly navigated YouTube document may not have its content script ready.
+  }
+  return { current_time: 0, video_id: null };
+}
+
 function classifyTabCaptureError(error) {
   const name = String(error?.name || '').trim();
   const message = String(error?.message || error || '').trim();
@@ -972,7 +990,7 @@ async function requestTabCaptureStreamId(tabId) {
   }
 }
 
-async function startTabAudioCapture(tabId, videoId) {
+async function startTabAudioCapture(tabId, videoId, sourceStartSeconds = 0) {
   audioCaptionDebug.offscreenStartCount += 1;
   audioCaptionDebug.lastTabId = tabId;
   audioCaptionDebug.lastVideoId = videoId || null;
@@ -996,6 +1014,9 @@ async function startTabAudioCapture(tabId, videoId) {
     tab_id: tabId,
     video_id: videoId,
     stream_id: stream.streamId,
+    source_start_seconds: Number.isFinite(Number(sourceStartSeconds))
+      ? Math.max(Number(sourceStartSeconds), 0)
+      : 0,
   });
 
   if (!response?.ok) {
@@ -1381,6 +1402,35 @@ async function handleCaptionCaptureControl(enabled) {
   return handleStopTabAudioCaptions();
 }
 
+async function handleAudioCaptureVideoChanged(tabId, videoId, sourceStartSeconds = 0) {
+  const cleanVideoId = String(videoId || '').trim();
+  const active = activeTabAudioCapture;
+  if (!active || Number(active.tabId) !== Number(tabId) || !cleanVideoId) {
+    return { ok: true, ignored: true };
+  }
+
+  if (active.videoId === cleanVideoId) {
+    return { ok: true, ignored: true };
+  }
+
+  clearCaptionTranscribeQueue(Number(tabId));
+  await postTabCaptureStatusToTab(Number(tabId), 'starting', null);
+  await stopTabAudioCapture('video_changed');
+
+  const start = await startTabAudioCapture(
+    Number(tabId),
+    cleanVideoId,
+    sourceStartSeconds,
+  );
+  if (!start.ok) {
+    await postTabCaptureStatusToTab(Number(tabId), 'unavailable', start.failure_reason || 'audio_capture_unavailable');
+    return start;
+  }
+
+  await postTabCaptureStatusToTab(Number(tabId), 'ready', null);
+  return { ok: true, tabId: Number(tabId), video_id: cleanVideoId, source: 'tab_capture' };
+}
+
 async function handleStartTabAudioCaptions() {
   const activeTab = await getActiveYouTubeTab();
   if (!activeTab?.id) {
@@ -1388,10 +1438,14 @@ async function handleStartTabAudioCaptions() {
   }
   const tabId = Number(activeTab.id);
   const videoId = getYouTubeVideoIdFromUrl(activeTab.url);
+  const videoClock = await getTabVideoClock(tabId);
+  const sourceStartSeconds = videoClock.video_id === videoId
+    ? videoClock.current_time
+    : 0;
   clearCaptionTranscribeQueue(tabId);
   await postTabCaptureStatusToTab(tabId, 'starting', null);
 
-  const start = await startTabAudioCapture(tabId, videoId);
+  const start = await startTabAudioCapture(tabId, videoId, sourceStartSeconds);
   if (!start.ok) {
     await postTabCaptureStatusToTab(tabId, 'unavailable', start.failure_reason || 'audio_capture_unavailable');
     return start;
@@ -1718,6 +1772,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // async
   } else if (message.type === 'isweep_get_caption_readiness_status') {
     buildCaptionReadinessStatus().then(sendResponse);
+    return true; // async
+  } else if (message.type === 'isweep_audio_capture_video_changed') {
+    const senderTabId = Number(sender?.tab?.id);
+    handleAudioCaptureVideoChanged(
+      senderTabId,
+      message.video_id,
+      message.source_start_seconds,
+    ).then(sendResponse);
     return true; // async
   } else if (message.type === 'isweep_start_audio_captions') {
     audioCaptionDebug.ccStartCount += 1;
