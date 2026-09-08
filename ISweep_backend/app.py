@@ -83,6 +83,7 @@ def add_cors_headers(response):
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
     response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, OPTIONS'
+    response.headers['Access-Control-Allow-Private-Network'] = 'true'
     return response
 
 
@@ -93,6 +94,7 @@ def handle_options():
         resp.headers['Access-Control-Allow-Origin'] = '*'
         resp.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
         resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, OPTIONS'
+        resp.headers['Access-Control-Allow-Private-Network'] = 'true'
         return resp
 
 # Initialize database and content analyzer

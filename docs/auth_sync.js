@@ -26,6 +26,25 @@
     return localStorage.getItem(BACKEND_URL_KEY) || BACKEND_DEFAULT;
   }
 
+  function alignTokenKeys() {
+    let auth = null;
+    try {
+      auth = JSON.parse(localStorage.getItem(AUTH_STATE_KEY) || 'null');
+    } catch (_) {}
+
+    const token = String(
+      localStorage.getItem(SHARED_TOKEN_KEY)
+      || localStorage.getItem(TOKEN_KEY)
+      || auth?.token
+      || ''
+    ).trim();
+    if (!token) return '';
+
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(SHARED_TOKEN_KEY, token);
+    return token;
+  }
+
   function deriveInitials(name, email) {
     const source = name || email || '';
     const parts = source.split(/[^A-Za-z0-9]+/).filter(Boolean);
@@ -147,7 +166,7 @@
     const filtersPage = document.querySelector('[data-filters-page]');
     if (!filtersPage) return;
 
-    const token = localStorage.getItem(TOKEN_KEY);
+    const token = alignTokenKeys();
     const account = (() => {
       try {
         return JSON.parse(localStorage.getItem(AUTH_STATE_KEY) || 'null');

@@ -141,6 +141,28 @@ const authState = {
   },
 };
 
+function resolveStoredAuthToken() {
+  const state = authState.get();
+  return String(
+    localStorage.getItem(TOKEN_KEY)
+    || localStorage.getItem(tokenStorageKey)
+    || state?.token
+    || ''
+  ).trim();
+}
+
+function alignStoredAuthToken() {
+  const token = resolveStoredAuthToken();
+  if (!token) return '';
+  if (localStorage.getItem(TOKEN_KEY) !== token) {
+    localStorage.setItem(TOKEN_KEY, token);
+  }
+  if (localStorage.getItem(tokenStorageKey) !== token) {
+    localStorage.setItem(tokenStorageKey, token);
+  }
+  return token;
+}
+
 function deriveInitials(name, email) {
   const source = name || email || '';
   const parts = source.split(/[^A-Za-z0-9]+/).filter(Boolean);
@@ -203,7 +225,8 @@ function closeAuth() {
 
 function syncAuthUI() {
   const state = authState.get();
-  const isSignedIn = Boolean(state);
+  const token = alignStoredAuthToken();
+  const isSignedIn = Boolean(token);
 
   if (signedInBlock && signedOutBlock) {
     signedInBlock.style.display = isSignedIn ? 'block' : 'none';
@@ -269,6 +292,7 @@ function persistSession({ token, userId, email, name, initials }) {
 function clearSession() {
   localStorage.removeItem(tokenStorageKey);
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem('isweepToken');
   localStorage.removeItem(userIdStorageKey);
   authState.clear();
 }
@@ -1477,10 +1501,7 @@ function uiToPreferences(saved) {
 }
 
 async function fetchPreferencesFromBackend() {
-  const token =
-    localStorage.getItem(
-      tokenStorageKey
-    );
+  const token = alignStoredAuthToken();
 
   if (!token) {
     return null;
@@ -1553,14 +1574,20 @@ async function persistPreferences(preferences) {
     preferences,
     'Filter.html'
   );
-  const token =
-    localStorage.getItem(
-      tokenStorageKey
-    );
+  const token = alignStoredAuthToken();
+  const authStateSnapshot = authState.get();
+  const authDiagnostic = {
+    authenticated: Boolean(token),
+    hasAuthState: Boolean(authStateSnapshot),
+    hasAuthStateToken: Boolean(authStateSnapshot?.token),
+    accountHint: localStorage.getItem(userIdStorageKey) || null,
+  };
+  console.log('[ISWEEP][FE][AUTH] preference save auth state', authDiagnostic);
 
   if (!token) {
     console.warn(
-      '[ISWEEP][FE] missing auth token; saved locally'
+      '[ISWEEP][FE] missing auth token; saved locally',
+      authDiagnostic
     );
 
     throw new Error(
@@ -1570,7 +1597,11 @@ async function persistPreferences(preferences) {
 
   console.log(
     '[ISWEEP][FE] saving preferences...',
-    getBackendUrl()
+    {
+      url: `${getBackendUrl()}/preferences`,
+      method: 'PUT',
+      ...authDiagnostic,
+    }
   );
 
   const res =
