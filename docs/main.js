@@ -18,6 +18,7 @@ const backendUrlKey = 'isweep-backend-url'; // Allows overriding the backend URL
 const tokenStorageKey = 'isweep-token'; // Stores auth token from backend.
 const userIdStorageKey = 'isweep-user-id'; // Stores user id returned by backend.
 const preferencesCacheKey = 'isweep-preferences'; // Caches preferences for offline fallback.
+const preferencesCacheUserIdKey = 'isweep-preferences-user-id'; // Binds cached preferences to their account.
 const TOKEN_KEY = 'isweep_auth_token'; // Unified token key shared with extension bridge.
 const LANGUAGE_WORDLIST_URL = 'wordlists/language_words.json'; // Predefined language words per subfilter.
 const LANGUAGE_WORDLIST_MIGRATION_KEY = 'isweep-language-wordlist-v2'; // One-time migration so newly added default language words become selected for existing users.
@@ -1334,6 +1335,12 @@ function cachePreferences(prefs) {
       preferencesCacheKey,
       JSON.stringify(prefs)
     );
+    const userId = String(localStorage.getItem(userIdStorageKey) || '').trim();
+    if (userId) {
+      localStorage.setItem(preferencesCacheUserIdKey, userId);
+    } else {
+      localStorage.removeItem(preferencesCacheUserIdKey);
+    }
   } catch (err) {
     console.error(
       '[ISWEEP] Failed to cache preferences',
@@ -1521,6 +1528,12 @@ async function fetchPreferencesFromBackend() {
       res.status
     );
 
+    logFrontendPreferenceDiagnostics(
+      'backend response received',
+      prefs,
+      'backend'
+    );
+
     cachePreferences(prefs);
 
     return prefs;
@@ -1535,6 +1548,11 @@ async function fetchPreferencesFromBackend() {
 }
 
 async function persistPreferences(preferences) {
+  const requestDiagnostic = logFrontendPreferenceDiagnostics(
+    'preference save request',
+    preferences,
+    'Filter.html'
+  );
   const token =
     localStorage.getItem(
       tokenStorageKey
@@ -1590,6 +1608,19 @@ async function persistPreferences(preferences) {
   const prefs =
     await res.json();
 
+  const responseDiagnostic = logFrontendPreferenceDiagnostics(
+    'preference save response received',
+    prefs,
+    'backend'
+  );
+
+  const requestedWords = [...requestDiagnostic.normalizedWords].sort();
+  const returnedWords = [...responseDiagnostic.normalizedWords].sort();
+  if (requestDiagnostic.normalizedSelectedWordCount > 0
+    && JSON.stringify(requestedWords) !== JSON.stringify(returnedWords)) {
+    throw new Error('backend_preference_response_dropped_selected_words');
+  }
+
   console.log(
     '[ISWEEP][FE] /preferences success',
     res.status
@@ -1629,6 +1660,48 @@ function getSavedLanguageWordCount(preferences) {
     return preferences.categories.language.items.length;
   }
   return 0;
+}
+
+function inspectFrontendPreferencePayload(preferences) {
+  const prefs = preferences && typeof preferences === 'object' ? preferences : null;
+  const language = prefs?.categories?.language && typeof prefs.categories.language === 'object'
+    ? prefs.categories.language
+    : {};
+  const rawLists = [
+    prefs?.blocklist?.items,
+    language.items,
+    language.words,
+    language.customWords,
+    prefs?.customWords,
+  ];
+  const rawWords = rawLists.flatMap((items) => Array.isArray(items) ? items : []);
+  const normalizedWords = Array.from(new Set(
+    rawWords
+      .map((word) => typeof word === 'string' ? word.trim().toLowerCase() : '')
+      .filter(Boolean)
+  ));
+  return {
+    propertyNames: prefs ? Object.keys(prefs).sort() : [],
+    rawSelectedWordCount: rawWords.length,
+    normalizedSelectedWordCount: normalizedWords.length,
+    hasExplicitWordList: rawLists.some((items) => Array.isArray(items)),
+    hasHell: normalizedWords.includes('hell'),
+    normalizedWords,
+  };
+}
+
+function logFrontendPreferenceDiagnostics(stage, preferences, source = 'unknown') {
+  const diagnostic = inspectFrontendPreferencePayload(preferences);
+  console.log('[ISWEEP][PREF_SYNC]', stage, {
+    source,
+    accountHint: localStorage.getItem(userIdStorageKey) || null,
+    propertyNames: diagnostic.propertyNames,
+    rawSelectedWordCount: diagnostic.rawSelectedWordCount,
+    normalizedSelectedWordCount: diagnostic.normalizedSelectedWordCount,
+    hasExplicitWordList: diagnostic.hasExplicitWordList,
+    hasHell: diagnostic.hasHell,
+  });
+  return diagnostic;
 }
 
 async function fetchAndCachePreferences() {
@@ -2982,6 +3055,11 @@ document.addEventListener(
             // request is in flight; a successful response replaces it.
             cachePreferences(
               prefsPayload
+            );
+            logFrontendPreferenceDiagnostics(
+              'shared preference cache updated before backend save',
+              prefsPayload,
+              'Filter.html'
             );
 
             const saveResult = await persistPreferences(

@@ -454,7 +454,12 @@ function shouldSuppressDuplicateCaption(text, source, windowMs = AUDIO_CAPTION_D
 
 // Normalize preferences into a stable shape with blocklist.items always present.
 function normalizePreferences(raw) {
-  const prefs = raw && typeof raw === 'object' ? raw : {};
+  const prefs = raw && typeof raw === 'object'
+    ? (raw.preferences && typeof raw.preferences === 'object'
+      && !raw.blocklist && !raw.categories
+      ? raw.preferences
+      : raw)
+    : {};
   const categories = prefs.categories && typeof prefs.categories === 'object' ? prefs.categories : {};
   const lang = categories.language && typeof categories.language === 'object' ? categories.language : {};
 
@@ -505,6 +510,68 @@ function normalizePreferences(raw) {
     },
     blocklist,
   };
+}
+
+function inspectPreferencePayload(raw) {
+  const payload = raw && typeof raw === 'object'
+    ? (raw.preferences && typeof raw.preferences === 'object'
+      && !raw.blocklist && !raw.categories
+      ? raw.preferences
+      : raw)
+    : null;
+  const categories = payload?.categories && typeof payload.categories === 'object'
+    ? payload.categories
+    : {};
+  const language = categories.language && typeof categories.language === 'object'
+    ? categories.language
+    : {};
+  const rawLists = [
+    ['blocklist.items', payload?.blocklist?.items],
+    ['categories.language.items', language.items],
+    ['categories.language.words', language.words],
+    ['categories.language.customWords', language.customWords],
+    ['customWords', payload?.customWords],
+  ];
+  const rawWords = rawLists.flatMap(([, values]) => Array.isArray(values) ? values : []);
+  const normalized = normalizePreferences(payload || {});
+  const normalizedWords = Array.isArray(normalized.blocklist?.items)
+    ? normalized.blocklist.items
+    : [];
+  const explicitPaths = rawLists
+    .filter(([, values]) => Array.isArray(values))
+    .map(([path]) => path);
+  const explicitWordLists = rawLists
+    .filter(([, values]) => Array.isArray(values))
+    .map(([, values]) => Array.from(new Set(
+      values
+        .map((word) => String(word || '').trim().toLowerCase())
+        .filter(Boolean)
+    )).sort());
+  const hasConflictingWordLists = explicitWordLists.some((items) =>
+    JSON.stringify(items) !== JSON.stringify(explicitWordLists[0] || [])
+  );
+
+  return {
+    validObject: Boolean(payload && typeof payload === 'object' && !Array.isArray(payload)),
+    propertyNames: payload && typeof payload === 'object' ? Object.keys(payload).sort() : [],
+    rawSelectedWordCount: rawWords.length,
+    normalizedSelectedWordCount: normalizedWords.length,
+    normalizedWords,
+    hasExplicitWordList: explicitPaths.length > 0,
+    hasConflictingWordLists,
+    explicitWordListPaths: explicitPaths,
+    hasHell: normalizedWords.includes('hell'),
+    normalized,
+  };
+}
+
+function samePreferenceWordItems(left, right) {
+  const normalize = (items) => Array.from(new Set(
+    (Array.isArray(items) ? items : [])
+      .map((word) => String(word || '').trim().toLowerCase())
+      .filter(Boolean)
+  )).sort();
+  return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
 }
 
 // Auth/debug helpers (never log full token)
@@ -1610,29 +1677,180 @@ async function refreshLocalDevCaptionToken(backendUrl) {
   return token;
 }
 
-async function fetchPreferences(token, backendUrl) {
-  const res = await fetch(`${backendUrl}/preferences`, {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`status ${res.status} ${body}`);
+async function readPreferenceResponse(response) {
+  if (typeof response.text !== 'function' && typeof response.json === 'function') {
+    return {
+      body: await response.json().catch(() => null),
+      bodyText: '',
+    };
   }
-  const prefs = await res.json();
-  const normalized = normalizePreferences(prefs); // Ensure blocklist/items always present
+  const bodyText = typeof response.text === 'function'
+    ? await response.text().catch(() => '')
+    : '';
+  let body = null;
+  try {
+    body = bodyText ? JSON.parse(bodyText) : null;
+  } catch (_) {
+    body = null;
+  }
+  return { body, bodyText };
+}
+
+async function requestPreferencePayload(token, backendUrl, method = 'GET', preferences = null) {
+  const response = await fetch(`${backendUrl}/preferences`, {
+    method,
+    headers: {
+      ...(method === 'PUT' ? { 'Content-Type': 'application/json' } : {}),
+      Authorization: `Bearer ${token}`,
+    },
+    ...(method === 'PUT' ? { body: JSON.stringify(preferences) } : {}),
+  });
+  const { body, bodyText } = await readPreferenceResponse(response);
+  if (!response.ok) {
+    throw new Error(`status ${response.status}${bodyText ? ` ${bodyText.slice(0, 180)}` : ''}`);
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new Error('invalid preference response object');
+  }
+  return { body, status: response.status };
+}
+
+async function storeVerifiedPreferences(diagnostic, source = 'backend') {
+  const normalized = diagnostic.normalized;
   await chrome.storage.local.set({
     [STORAGE_KEYS.PREFS]: normalized,
     [STORAGE_KEYS.PREFS_META]: {
-      hasExplicitWordList: Array.isArray(prefs?.blocklist?.items)
-        || Array.isArray(prefs?.categories?.language?.items),
+      hasExplicitWordList: diagnostic.hasExplicitWordList,
+      explicitWordListPaths: diagnostic.explicitWordListPaths,
+      rawSelectedWordCount: diagnostic.rawSelectedWordCount,
+      normalizedSelectedWordCount: diagnostic.normalizedSelectedWordCount,
+      hasHell: diagnostic.hasHell,
+      source,
       syncedAt: Date.now(),
     },
   });
+}
+
+async function fetchPreferences(token, backendUrl, options = {}) {
+  const expectedDiagnostic = options.expectedPreferences
+    ? inspectPreferencePayload(options.expectedPreferences)
+    : null;
+  const expectedWords = expectedDiagnostic?.normalizedWords || [];
+  const expectedHasExplicitWordList = expectedDiagnostic?.hasExplicitWordList === true;
+  const accountHint = String(options.expectedUserId || '').trim() || null;
+
+  console.log('[ISWEEP][PREF_SYNC] refresh start', {
+    source: options.expectedSource || 'backend',
+    accountHint,
+    hasExpectedPreferences: Boolean(expectedDiagnostic),
+    expectedRawSelectedWordCount: expectedDiagnostic?.rawSelectedWordCount ?? null,
+    expectedNormalizedSelectedWordCount: expectedDiagnostic?.normalizedSelectedWordCount ?? null,
+    expectedHasHell: expectedDiagnostic?.hasHell ?? false,
+  });
+
+  const response = await requestPreferencePayload(token, backendUrl, 'GET');
+  let diagnostic = inspectPreferencePayload(response.body);
+  console.log('[ISWEEP][PREF_SYNC] backend response', {
+    status: response.status,
+    propertyNames: diagnostic.propertyNames,
+    rawSelectedWordCount: diagnostic.rawSelectedWordCount,
+    normalizedSelectedWordCount: diagnostic.normalizedSelectedWordCount,
+    hasExplicitWordList: diagnostic.hasExplicitWordList,
+    hasHell: diagnostic.hasHell,
+    accountHint,
+  });
+
+  const needsExpectedRepair = expectedDiagnostic
+    && expectedHasExplicitWordList
+    && !samePreferenceWordItems(diagnostic.normalizedWords, expectedWords);
+  let repairedBackend = false;
+
+  if (!diagnostic.hasExplicitWordList
+    || diagnostic.hasConflictingWordLists
+    || needsExpectedRepair) {
+    if (!expectedDiagnostic || !expectedHasExplicitWordList) {
+      const reason = !diagnostic.hasExplicitWordList
+        ? 'preference_word_list_missing'
+        : diagnostic.hasConflictingWordLists
+          ? 'preference_word_list_conflict'
+          : 'backend_word_list_empty_or_mismatched';
+      console.error('[ISWEEP][PREF_SYNC] refusing unverified preference response', {
+        reason,
+        status: response.status,
+        propertyNames: diagnostic.propertyNames,
+        rawSelectedWordCount: diagnostic.rawSelectedWordCount,
+        normalizedSelectedWordCount: diagnostic.normalizedSelectedWordCount,
+        hasHell: diagnostic.hasHell,
+        hasConflictingWordLists: diagnostic.hasConflictingWordLists,
+        accountHint,
+      });
+      throw new Error(reason);
+    }
+
+    console.warn('[ISWEEP][PREF_SYNC] repairing backend from hosted Filter selection', {
+      reason: diagnostic.hasConflictingWordLists
+        ? 'backend_word_list_conflict'
+        : needsExpectedRepair
+          ? 'backend_word_list_mismatch'
+          : 'backend_word_list_missing',
+      expectedNormalizedSelectedWordCount: expectedWords.length,
+      expectedHasHell: expectedDiagnostic.hasHell,
+      backendNormalizedSelectedWordCount: diagnostic.normalizedSelectedWordCount,
+      accountHint,
+    });
+
+    const repairedResponse = await requestPreferencePayload(
+      token,
+      backendUrl,
+      'PUT',
+      expectedDiagnostic.normalized,
+    );
+    repairedBackend = true;
+    diagnostic = inspectPreferencePayload(repairedResponse.body);
+    console.log('[ISWEEP][PREF_SYNC] backend repair response', {
+      status: repairedResponse.status,
+      propertyNames: diagnostic.propertyNames,
+      rawSelectedWordCount: diagnostic.rawSelectedWordCount,
+      normalizedSelectedWordCount: diagnostic.normalizedSelectedWordCount,
+      hasHell: diagnostic.hasHell,
+      accountHint,
+    });
+
+    if (!diagnostic.hasExplicitWordList
+      || diagnostic.hasConflictingWordLists
+      || !samePreferenceWordItems(diagnostic.normalizedWords, expectedWords)) {
+      throw new Error('backend_preference_repair_not_verified');
+    }
+  }
+
+  const source = repairedBackend
+    ? 'hosted_filter_repaired_backend'
+    : (options.expectedSource || 'backend');
+  await storeVerifiedPreferences(diagnostic, source);
+
+  console.log('[ISWEEP][PREF_SYNC] extension storage updated', {
+    source,
+    finalSelectedWordCount: diagnostic.normalizedSelectedWordCount,
+    finalSelectedWordPreview: diagnostic.normalizedWords.slice(0, 10),
+    finalHasHell: diagnostic.hasHell,
+    accountHint,
+  });
+
   return {
-    prefs: normalized,
-    status: res.status,
-    selectedWordCount: normalized.blocklist.items.length,
+    prefs: diagnostic.normalized,
+    status: response.status,
+    selectedWordCount: diagnostic.normalizedSelectedWordCount,
+    selectedWordPreview: diagnostic.normalizedWords.slice(0, 10),
+    preferenceSource: source,
+    diagnostic: {
+      propertyNames: diagnostic.propertyNames,
+      rawSelectedWordCount: diagnostic.rawSelectedWordCount,
+      normalizedSelectedWordCount: diagnostic.normalizedSelectedWordCount,
+      hasExplicitWordList: diagnostic.hasExplicitWordList,
+      hasConflictingWordLists: diagnostic.hasConflictingWordLists,
+      hasHell: diagnostic.hasHell,
+      accountHint,
+    },
   };
 }
 
@@ -1750,7 +1968,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     handleLogin(message.email, message.password).then(sendResponse);
     return true; // async
   } else if (message.type === 'isweep_sync_prefs') {
-    handleSyncPrefs().then(sendResponse);
+    handleSyncPrefs(message).then(sendResponse);
     return true; // async
   } else if (message.type === 'isweep_markers_analyze') {
     handleMarkerAnalyze(message.video_id, message.force_refresh === true, message.lookahead_seconds).then(sendResponse);
@@ -2959,9 +3177,24 @@ async function handleLogin(email, password) {
   }
 }
 
-async function handleSyncPrefs() {
+async function handleSyncPrefs(syncRequest = {}) {
   const backendUrl = await getBackendUrl();
   const token = await getAuthToken();
+  const expectedPreferences = syncRequest?.expectedPreferences
+    && typeof syncRequest.expectedPreferences === 'object'
+    ? syncRequest.expectedPreferences
+    : null;
+  const expectedSource = String(syncRequest?.expectedSource || '').trim() || null;
+  const expectedUserId = String(syncRequest?.expectedUserId || '').trim() || null;
+
+  console.log('[ISWEEP][PREF_SYNC] request received', {
+    backendUrl,
+    source: expectedSource || 'backend',
+    hasToken: Boolean(token),
+    accountHint: expectedUserId,
+    hasExpectedPreferences: Boolean(expectedPreferences),
+  });
+
   if (!token) {
     const devLocal = await getDevLocalAuthContext();
     if (devLocal.enabled) {
@@ -2972,22 +3205,48 @@ async function handleSyncPrefs() {
         ok: true,
         status: 'local_prefs_fallback',
         selectedWordCount: prefs.blocklist.items.length,
+        selectedWordPreview: prefs.blocklist.items.slice(0, 10),
+        preferenceSource: 'local_extension_cache',
       };
     }
-    console.warn(LOG_PREFIX, 'sync prefs missing token');
-    return { ok: false, error: 'missing token' };
+    console.warn('[ISWEEP][PREF_SYNC] failed', {
+      reason: 'missing_token',
+      source: expectedSource || 'backend',
+      accountHint: expectedUserId,
+    });
+    return { ok: false, error: 'missing token', reason: 'missing_token' };
   }
-  console.log(LOG_PREFIX, 'prefs sync start');
   try {
-    const result = await fetchPreferences(token, backendUrl);
-    console.log(LOG_PREFIX, 'prefs sync success', result.status);
+    const result = await fetchPreferences(token, backendUrl, {
+      expectedPreferences,
+      expectedSource,
+      expectedUserId,
+    });
+    console.log('[ISWEEP][PREF_SYNC] success', {
+      status: result.status,
+      source: result.preferenceSource,
+      selectedWordCount: result.selectedWordCount,
+      selectedWordPreview: result.selectedWordPreview,
+      hasHell: result.diagnostic?.hasHell === true,
+      accountHint: expectedUserId,
+    });
     return {
       ok: true,
       status: result.status,
       selectedWordCount: result.selectedWordCount,
+      selectedWordPreview: result.selectedWordPreview,
+      preferenceSource: result.preferenceSource,
+      prefs: result.prefs,
+      diagnostic: result.diagnostic,
     };
   } catch (err) {
-    console.warn(LOG_PREFIX, 'prefs sync failed', err?.message || err);
-    return { ok: false, error: err?.message || 'sync failed' };
+    const reason = err?.message || 'sync_failed';
+    console.warn('[ISWEEP][PREF_SYNC] failed', {
+      reason,
+      source: expectedSource || 'backend',
+      accountHint: expectedUserId,
+      hasExpectedPreferences: Boolean(expectedPreferences),
+    });
+    return { ok: false, error: reason, reason };
   }
 }

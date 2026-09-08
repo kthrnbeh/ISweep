@@ -596,7 +596,7 @@ async function notifyActiveYouTubeTabCleanCaptionSettings(settings) {
 
 async function handleSyncPrefs(e) {
   if (e) e.preventDefault();
-  console.log(LOG_PREFIX, 'prefs sync start');
+  console.log('[ISWEEP][PREF_SYNC] popup refresh start');
   try {
     const preStore = await chrome.storage.local.get([
       TOKEN_KEY,
@@ -652,24 +652,37 @@ async function handleSyncPrefs(e) {
         return { ok: false, error: 'background not available' };
       });
     if (!res || !res.ok) {
-      console.warn(LOG_PREFIX, 'prefs sync failed', res?.error || 'unknown');
-      alert('Sync failed. Are you logged in?');
+      const reason = res?.reason || res?.error || 'unknown';
+      console.warn('[ISWEEP][PREF_SYNC] popup refresh failed', {
+        reason,
+        status: res?.status || null,
+        diagnostic: res?.diagnostic || null,
+      });
+      if (signedInStatus) signedInStatus.textContent = `Preference sync failed: ${reason}`;
+      alert(`Preference sync failed: ${reason}`);
       return;
     }
     const selectedWordCount = Number.isFinite(Number(res.selectedWordCount))
       ? Number(res.selectedWordCount)
       : 0;
-    console.log(LOG_PREFIX, 'prefs sync success', {
+    await refreshCaptionRuntimeStatus();
+    console.log('[ISWEEP][PREF_SYNC] popup refresh success', {
       status: res.status || '',
       selectedWordCount,
+      selectedWordPreview: res.selectedWordPreview || [],
+      preferenceSource: res.preferenceSource || 'unknown',
+      diagnostic: res.diagnostic || null,
     });
     if (signedInStatus) {
       signedInStatus.textContent = `Preferences synced — ${selectedWordCount} selected language words.`;
     }
     alert(`Preferences synced — ${selectedWordCount} selected language words.`);
   } catch (err) {
-    console.error(LOG_PREFIX, 'prefs sync failed', err);
-    alert('Sync failed.');
+    console.error('[ISWEEP][PREF_SYNC] popup refresh failed', {
+      reason: err?.message || String(err),
+    });
+    if (signedInStatus) signedInStatus.textContent = `Preference sync failed: ${err?.message || err}`;
+    alert(`Preference sync failed: ${err?.message || err}`);
   }
 }
 

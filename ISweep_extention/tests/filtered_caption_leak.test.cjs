@@ -53,18 +53,25 @@ function loadFilterSyncHooks(settings) {
   return context.__ISWEEP_FILTER_SYNC_TEST_HOOKS__;
 }
 
-function loadSiteBridgeHooks() {
+function loadSiteBridgeHooks(initialLocalStorage = {}) {
   const source = fs.readFileSync(
     path.join(workspaceRoot, 'ISweep_extention', 'site_token_bridge.js'),
     'utf8',
   );
-  const localStorage = makeLocalStorage();
+  const localStorage = makeLocalStorage(initialLocalStorage);
+  const wordlist = JSON.parse(fs.readFileSync(
+    path.join(workspaceRoot, 'docs', 'wordlists', 'language_words.json'),
+    'utf8',
+  ));
   const extensionStore = {};
   const context = {
     console: { log() {}, warn() {}, error() {} },
     globalThis: null,
     __ISWEEP_TEST_MODE__: true,
     window: { localStorage, location: { href: 'http://localhost:5500/docs/Filter.html' } },
+    URL,
+    atob,
+    fetch: async () => ({ ok: true, json: async () => wordlist }),
     chrome: {
       storage: {
         local: {
@@ -188,6 +195,36 @@ test('site bridge preserves selected words and normalizes case without broad mat
 
   assert.deepEqual(Array.from(normalized.blocklist.items), ['hell', 'shell']);
   assert.deepEqual(Array.from(normalized.categories.language.items), ['hell', 'shell']);
+});
+
+test('site bridge can expand the saved Filter selection when backend cache is absent', async () => {
+  const hooks = loadSiteBridgeHooks({
+    'isweep-settings': JSON.stringify({
+      filters_enabled: { language: true },
+      predefined_words: { language: { profanity: { selectedIds: ['profanity-15'] } } },
+      custom_words: { language: [] },
+    }),
+  });
+
+  const snapshot = await hooks.readExpectedPreferenceSnapshot();
+  assert.equal(snapshot.source, 'saved_filter_settings');
+  assert.deepEqual(Array.from(snapshot.prefs.blocklist.items), ['hell']);
+  assert.equal(snapshot.prefs.blocklist.items.includes('hell'), true);
+});
+
+test('site bridge ignores an explicit cache owned by another account', async () => {
+  const hooks = loadSiteBridgeHooks({
+    'isweep-user-id': 'current-account',
+    'isweep-preferences-user-id': 'previous-account',
+    'isweep-preferences': JSON.stringify({
+      enabled: true,
+      blocklist: { enabled: true, items: ['hell'] },
+    }),
+  });
+
+  const snapshot = await hooks.readExpectedPreferenceSnapshot();
+  assert.equal(snapshot.source, 'none');
+  assert.equal(snapshot.prefs, null);
 });
 
 test('main and remote caption renderers mask hell but leave shell and empty filters alone', () => {
