@@ -20,7 +20,8 @@ Key vars:
 ```
 python app.py
 ```
-Default: http://127.0.0.1:5000 (CORS open for http://127.0.0.1:5500, http://localhost:5500, and the extension during dev).
+Default: http://127.0.0.1:5000 (CORS open for the local `docs/` site at
+`http://127.0.0.1:5500` and `http://localhost:5500`, plus the extension during dev).
 
 ## Auth & tokens (dev)
 - Passwords hashed with Werkzeug.
@@ -39,16 +40,21 @@ Default: http://127.0.0.1:5000 (CORS open for http://127.0.0.1:5500, http://loca
 {
   "enabled": true,
   "categories": {
-    "language": {"enabled": true, "action": "mute", "duration": 4},
-    "sexual":   {"enabled": true, "action": "skip", "duration": 12},
-    "violence": {"enabled": true, "action": "fast_forward", "duration": 8}
+    "language": {"items": []},
+    "intimacy": {"items": []},
+    "violence": {"items": []},
+    "substances": {"items": []},
+    "horror": {"items": []}
   },
-  "sensitivity": 0.7
+  "blocklist": {"items": []}
 }
 ```
-- Action defaults: mute=4s, skip=12s, fast_forward=8s.
-- Priority order: sexual > violence > language.
-- If `enabled` is false or category is disabled, the response is `none`.
+
+`blocklist.items` is the canonical normalized selected-word list consumed by
+the backend and extension. The API preserves the complete list on
+`GET /preferences` and `PUT /preferences`; an unavailable list is a sync
+failure, not an equivalent empty selection. Legacy optional category/action
+fields may still be accepted for compatibility.
 
 ## Decision logic (POST /event)
 1) If filtering disabled → `none`.

@@ -2,5 +2,12 @@
 /isweep_backend.log
 /isweep_backend_error.log
 
+# Python bytecode and local backend runtime state.
+/__pycache__/
+**/__pycache__/
+*.py[cod]
+/isweep.db
+/ISweep_backend/isweep.db
+
 # Local IR remote codes learned from the user's own equipment.
 /dvd/config/ir_codes.json

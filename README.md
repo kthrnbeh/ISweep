@@ -94,6 +94,16 @@ Important files:
 
 The backend provides APIs for caption/transcript processing and persistent application data.
 
+### Repository structure
+
+- `docs/` — hosted/static Filter, account, settings, and help pages.
+- `ISweep_backend/` — Flask API, preference persistence, caption/STT processing, and tests.
+- `ISweep_extention/` — Chrome extension source, popup, background/offscreen audio plumbing, and tests.
+- `dvd/` — separate DVD playback/control system; it is intentionally outside the browser-extension work.
+
+The repository does not contain an `ISweep_frontend/` directory. Local website links
+use `http://127.0.0.1:5500/docs/` or `http://localhost:5500/docs/`.
+
 ---
 
 ## Filtering
@@ -110,6 +120,27 @@ The filter system should support:
 - audio muting
 
 The user's preferences are intended to be the single source of truth.
+
+The normalized selected-word contract is:
+
+```json
+{
+  "categories": {
+    "language": { "items": [] },
+    "intimacy": { "items": [] },
+    "violence": { "items": [] },
+    "substances": { "items": [] },
+    "horror": { "items": [] }
+  },
+  "blocklist": { "items": [] }
+}
+```
+
+`blocklist.items` is the authoritative selected-word list. The site uses the
+canonical `isweep_auth_token` for new bridge traffic while migrating compatible
+legacy keys (`isweep-token` and `auth-state`) when present. Tokens must not be
+printed in diagnostics; sync diagnostics should report only account identity,
+preference source/schema, word count/preview, result, and failure reason.
 
 ---
 
@@ -131,6 +162,12 @@ Current caption styles include:
 - white background with black text
 
 The caption overlay should eventually become the primary visual filtering layer.
+
+Caption recognition is not guaranteed to be exact. Music, noise, accents,
+overlapping speakers, recognition delay, missing word timestamps, and caption
+source differences can affect masking and mute alignment. Visible YouTube
+captions currently use a configurable caption-window fallback when exact word
+timing is unavailable; timed STT data uses its source-video timeline.
 
 ---
 
