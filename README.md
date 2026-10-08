@@ -1,243 +1,1087 @@
-ISweep (Monorepo)
+# ISweep
 
-ISweep is an AI-driven media content filtering system that helps users watch content with their own boundaries — without editing the original media.
+## What Is ISweep?
 
-ISweep observes captions/transcripts in real time and sends playback-control decisions to the client (extension/app), such as:
+ISweep is a personal content-filtering system.
 
-mute (temporarily mute audio)
+The goal is simple:
 
-skip (jump forward past a scene)
+> **Let people choose what they do not want to hear or see, while leaving the original media completely unchanged.**
 
-fast_forward (speed through a segment)
+ISweep controls playback instead of editing the movie, video, audio, or DVD.
 
-none (do nothing)
+For example:
 
-The original video/audio file is never modified. Playback control only.
+```text
+Video says: "What the hell are you doing?"
 
-What’s in this repo
-ISweep/
-├─ ISweep_backend/     # API + preferences + decision engine (Flask/FastAPI-style backend)
-├─ ISweep_frontend/    # Website UI prototype (static HTML/Tailwind/JS)
-└─ ISweep_extention/   # Chrome extension (controls playback, reads settings, applies filters)
+ISweep detects "hell"
 
+Caption becomes:
 
-Frontend = website UX: create account, choose plan, set filters, parental PIN, etc. (currently a static prototype using LocalStorage) 
+"What the ___ are you doing?"
 
-README
+Audio:
 
-Extension = runs in the browser and actually controls playback (mute/skip/ff) based on settings and backend decisions 
+MUTE
+   ↓
+"hell" passes
+   ↓
+UNMUTE
 
-README
+The Big Goal
 
-Backend = stores user preferences + makes deterministic decisions from caption/transcript events 
+ISweep should eventually work with:
 
-README
+YouTube
+Streaming websites
+HTML5 video
+Other websites
+Local media
+DVDs
+Blu-rays
+TVs
+Other playback devices
 
-End-to-end user flow (the goal)
+YouTube is our first testing environment because it lets us prove the system before expanding it to the rest of the web and physical media.
 
-User visits the ISweep website
+The Core Idea
 
-Creates an account (email + profile)
+The most important idea in ISweep is:
 
-Picks a plan (Free / Flexible / Ownership)
+MEDIA EVENT
+     ↓
+ISWEEP HEARS THE EVENT
+     ↓
+FILTER THE CONTENT
+     ↓
+MATCH USER PREFERENCES?
+     ↓
+YES
+     ↓
+TAKE ACTION
 
-Gets an “Enable Code” (or signs into the extension)
+The action could eventually be:
 
-Installs the ISweep extension
+MUTE
+SKIP
+FAST FORWARD
+NONE
 
-When the user plays anything:
+The original media remains untouched.
 
-the extension observes captions/transcript text
+The Event-Driven Architecture
 
-sends events to the backend
+ISweep should work like a simple JavaScript event listener:
 
-receives a decision: mute | skip | fast_forward | none
+Something happens
+      ↓
+ISweep detects it
+      ↓
+A function handles it
+      ↓
+The function decides what to do
+      ↓
+An action is performed
 
-applies the action seamlessly in the player without editing the content
+The desired caption flow is:
 
-Future: same idea across mobile, TV, streaming devices, etc. (client app changes, backend stays the brain).
+Caption appears
+      ↓
+onCaption(caption)
+      ↓
+filterCaption(caption.text)
+      ↓
+No match?
+      ↓
+Do nothing
 
-How “working together” should be wired
-Source of truth (event → decision)
+OR
 
-The backend is the decision engine. Clients (extension/apps) send text and receive an action.
+Match found
+      ↓
+Mask the selected word
+      ↓
+Request mute
+      ↓
+Mute during the unwanted word
+      ↓
+Restore the previous audio state
 
-Request (client → backend)
-POST /event
+Conceptually:
 
-{
-  "user_id": "string",
-  "text": "caption or transcript text",
-  "confidence": 0.0
+function onCaption(caption) {
+    const matches = filterCaption(caption.text);
+
+    if (!matches.length) {
+        return;
+    }
+
+    renderMaskedCaption(caption, matches);
+
+    for (const match of matches) {
+        requestMute({
+            start: match.start,
+            end: match.end
+        });
+    }
 }
 
+This is the architecture we are moving toward.
 
-Response (backend → client)
+Important Separation of Responsibilities
 
-{
-  "action": "mute | skip | fast_forward | none",
-  "duration_seconds": 4,
-  "matched_category": "language | sexual | violence | null",
-  "reason": "short explanation"
-}
+ISweep should eventually have clear responsibilities.
 
-Preferences (website → backend → clients)
+1. Content Source
 
-Website saves user preferences (filters, actions, sensitivity, blocked words, parental lock)
+Finds captions, subtitles, speech, or other content.
 
-Backend stores them per user
+Examples:
 
-Extension fetches/syncs them and uses them in real time
+YouTube captions
+HTML5 captions
+WebVTT
+Speech-to-text
+Future website adapters
 
-Important: if backend is down, the extension should still have a “local fallback” ruleset so filtering still works.
+The source should NOT decide what is inappropriate.
 
-Local dev: run all 3 parts
-1) Frontend (website prototype)
+It simply reports:
 
-This is static HTML/JS/Tailwind.
+"What the hell"
+2. Filter Engine
 
-Recommended: VS Code → Live Server
+The filter engine receives text and compares it with the user's selected words/preferences.
 
-Right-click ISweep_frontend/docs/index.html → Open with Live Server
+Example:
 
-You’ll get something like:
+Input:
 
-http://127.0.0.1:5500/docs/
+"What the hell"
 
-Frontend details live here: ISweep_frontend/README.md 
+Selected words:
 
-README
+["hell", "damn"]
 
-2) Backend API
+Result:
 
-From inside ISweep_backend/:
+"hell" matched
 
-Create/activate a virtual environment
+The filter engine should not know anything about YouTube.
 
-Install dependencies
+3. Caption Renderer
 
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
+The renderer displays the cleaned caption.
 
+Example:
 
-Backend dependency notes here: ISweep_backend/README.md 
+Original:
 
-README
+What the hell are you doing?
 
-Run the server (example patterns)
+ISweep:
 
-If your entrypoint is app.py:
+What the ___ are you doing?
 
-python app.py
+The renderer should not decide whether a word is inappropriate.
 
+The filter engine makes that decision.
 
-Or if it’s Flask:
+4. Mute Controller
 
-flask run
+The mute controller handles audio.
 
+Example:
 
-Expected: backend running at something like:
+Selected word detected
+        ↓
+requestMute()
+        ↓
+YouTube audio muted
+        ↓
+word passes
+        ↓
+audio restored
 
-http://127.0.0.1:8000 or http://127.0.0.1:5000
+There should be ONE authoritative mute controller.
 
-Quick HOW TO RUN LOCALLY
-- Backend: in ISweep_backend/ `python app.py` (uses SQLite file isweep.db and .env SECRET_KEY/DATABASE_PATH if set)
-- Frontend: open ISweep_frontend/docs/index.html with Live Server → http://127.0.0.1:5500/ISweep_frontend/docs/
-- Extension: chrome://extensions → Load unpacked → ISweep_extention/; set backend URL to http://127.0.0.1:5000 in Options; login via popup with the same email/password as backend.
+We should not have several different systems fighting over mute/unmute.
 
-End-to-end smoke test checklist
-- Backend up at http://127.0.0.1:5000 and /health returns healthy.
-- Frontend signup/login works; preferences save via PUT /preferences and reload via GET /preferences.
-- Extension configured with backend URL; popup login succeeds and stores token/user id.
-- Open YouTube with captions on; console shows [ISWEEP][YT] caption captured → [ISWEEP][BG] calling /event → [ISWEEP][BG] decision received → [ISWEEP][YT] applying action.
-- Observe mute/skip/fast_forward applied for matching captions; no console errors.
+Timing
 
-3) Chrome Extension
+The first proof-of-concept uses approximately:
 
-Open Chrome → chrome://extensions/
+0.85 seconds
 
-Enable Developer mode
+as a temporary fallback mute duration.
 
-Click Load unpacked
+This is NOT the final solution.
 
-Select the ISweep_extention/ folder
+The long-term goal is:
 
-Extension details live here: ISweep_extention/README.md 
+Selected word begins
+        ↓
+MUTE
 
-README
+Selected word ends
+        ↓
+UNMUTE
 
-The 3 key “connection settings” you need
+If exact word-level timing is available from speech recognition, ISweep should use it.
 
-To make everything actually talk to each other, you need these to be consistent:
+If exact timing is unavailable, ISweep can temporarily use caption timing as a fallback.
 
-FRONTEND URL (where the website is running)
+The timing system must remain easy to tune.
 
-Example: http://127.0.0.1:5500/ISweep_frontend/docs/
+Caption Sources
 
-BACKEND URL (where the API is running)
+ISweep should eventually support multiple sources.
 
-Example: http://127.0.0.1:8000
+The architecture should be:
 
-User identity
+                 YouTube captions
+                       │
+                 HTML5 captions
+                       │
+                    WebVTT
+                       │
+                      STT
+                       │
+                       ▼
+              NORMALIZED EVENT
+                       │
+                       ▼
+                FILTER ENGINE
+                       │
+              ┌────────┴────────┐
+              ▼                 ▼
+       Caption Renderer    Mute Controller
 
-A real user_id or token that the extension can send to the backend on every /event
+This allows us to use YouTube now without permanently designing ISweep around YouTube.
 
-If any one of these is wrong, you’ll see things like:
+YouTube Is the First Proof of Concept
 
-settings page works but extension does nothing
+YouTube is currently our testing environment.
 
-extension loads but can’t reach backend
+The immediate goal is:
 
-backend works but has no preferences for that user
+YouTube video playing
+       ↓
+YouTube caption appears
+       ↓
+ISweep receives caption
+       ↓
+Selected word detected
+       ↓
+Caption displays ___
+       ↓
+Audio mutes
+       ↓
+Selected word passes
+       ↓
+Audio unmutes
 
-Why your Account page shows “connection refused” sometimes
+Once this works reliably, the same filtering engine can be reused elsewhere.
 
-In your screenshot you have:
+Universal Web Goal
 
-127.0.0.1:5500/docs/Settings.html working
+The long-term browser goal is:
 
-127.0.0.1:5500/docs/Account.html failing with ERR_CONNECTION_REFUSED
+If video is playing in a browser, ISweep should eventually be able to recognize and filter it regardless of the website.
 
-That typically means Live Server stopped or the page path doesn’t exist where you think it does.
+The architecture should therefore separate:
 
-Quick checks:
+WHERE THE CONTENT COMES FROM
 
-In VS Code, confirm Live Server is running (bottom bar should show it)
+from:
 
-Confirm the file is really located at: .../docs/Account.html (or adjust the link to match the real folder)
+WHAT ISWEEP DOES WITH THE CONTENT
 
-Try opening index.html first via Live Server, then navigate using your site’s nav links
+For example:
 
-Production direction (how this becomes “real”)
+YouTube
+   ↓
+YouTube Adapter
+   ↓
+             ┌────────────────────┐
+             │                    │
+             │   ISweep Engine    │
+             │                    │
+             │ Filter             │
+             │ Mask               │
+             │ Mute               │
+             │ Skip               │
+             │ Fast Forward       │
+             │                    │
+             └────────────────────┘
+                      ↑
+              HTML5 Adapter
+                      ↑
+               Other Adapter
 
-Right now:
+This is one of the most important long-term design goals.
 
-Frontend stores settings in LocalStorage (prototype)
+Current Extension
 
-Extension stores auth state in chrome.storage.local (good foundation) 
+The Chrome extension lives in:
 
-README
+ISweep_extention/
 
-Backend exists to become the central preference + decision source
+The spelling extention is intentional because that is the current repository directory name.
 
-Next wiring steps (the “make it real” checklist):
+Important extension components include:
 
-Backend:
+popup.html
+popup.js
+popup.css
 
-Add endpoints for login/signup (or token exchange)
+background.js
+plumbing.js
 
-Add endpoints for get/update preferences
+youtube_captions.js
 
-Implement /event decision logic using stored preferences + word packs
+offscreen.js
+audio_chunk_processor.js
 
-Frontend:
+site_token_bridge.js
 
-Replace LocalStorage-only settings with API calls to backend
+options.html
+options.js
 
-Extension:
+manifest.json
 
-On sign-in, store token/user_id
+The extension is responsible for:
 
-Fetch preferences from backend
+User controls
+Authentication
+Preference synchronization
+Caption observation
+Audio/STT coordination
+Playback control
+YouTube integration
+Future browser-wide media integration
+Current Caption Controls
 
-On captions/transcripts, call /event and apply action immediately
+The popup contains controls for:
+
+Captions
+Caption style
+Text size
+Caption behavior
+Caption position
+
+Caption behavior currently includes:
+
+Captions Only
+
+Captions + Selected Word Mute
+
+The selected-word mode is intended to:
+
+Find selected word
+       ↓
+Display ___
+       ↓
+Mute audio
+       ↓
+Restore audio
+Current Backend
+
+The backend lives in:
+
+ISweep_backend/
+
+It uses Python and provides the server-side foundation for ISweep.
+
+Major responsibilities include:
+
+User authentication
+Preferences
+Database access
+Content analysis
+Caption/transcript processing
+Speech-to-text support
+API endpoints
+Decision logic
+Testing
+
+Important files include:
+
+app.py
+content_analyzer.py
+database.py
+
+The backend also contains the speech-lab work used to evaluate speech recognition and word timing.
+
+Backend Principle
+
+The backend should be the central intelligence when server processing is needed.
+
+The extension should still have enough local information to function when the backend is temporarily unavailable.
+
+The goal is:
+
+Website
+   ↓
+User Preferences
+   ↓
+Backend
+   ↓
+Extension
+   ↓
+Playback
+
+But also:
+
+Backend unavailable
+       ↓
+Local cached preferences
+       ↓
+Extension continues filtering where possible
+Preferences
+
+User preferences are extremely important.
+
+The user's selected words/categories should ultimately be the source used by every playback system.
+
+Examples:
+
+Profanity
+Custom words
+Language
+Other user-selected categories
+
+A selected word should not have one definition for YouTube and another definition for another media source.
+
+The filtering rules should be consistent.
+
+Playback Actions
+
+ISweep is intended to control playback rather than modify media.
+
+Possible actions include:
+
+NONE
+MUTE
+SKIP
+FAST_FORWARD
+
+Eventually:
+
+Selected content
+      ↓
+Decision
+      ↓
+Playback command
+Protecting Manual User Controls
+
+This is extremely important.
+
+If the user manually mutes the video:
+
+User muted video
+       ↓
+ISweep detects selected word
+       ↓
+ISweep may already be muted
+       ↓
+ISweep must NOT unmute the user afterward
+
+ISweep should restore the state that existed before ISweep temporarily changed it.
+
+Example:
+
+Before ISweep:
+
+UNMUTED
+
+ISweep:
+MUTE
+UNMUTE
+
+Final:
+
+UNMUTED
+
+But:
+
+Before ISweep:
+
+MUTED
+
+ISweep:
+MUTE/maintain muted state
+
+Final:
+
+MUTED
+STT / Audio Pipeline
+
+The extension has an audio-processing architecture intended to support speech recognition.
+
+Conceptually:
+
+Browser video
+      ↓
+Tab audio
+      ↓
+offscreen.js
+      ↓
+audio_chunk_processor.js
+      ↓
+background.js
+      ↓
+Backend STT
+      ↓
+Word timing
+      ↓
+ISweep filter engine
+      ↓
+Mute decision
+
+The important goal is that STT should eventually become another content source feeding the same filtering system.
+
+It should NOT become a completely separate filtering system.
+
+Caption Priority
+
+When synchronized visible captions are available:
+
+Use captions first
+
+because they can provide a fast signal aligned with playback.
+
+STT can act as a backup when captions are unavailable.
+
+Eventually:
+
+Captions ──┐
+           ├──> Same Filter Engine
+STT ───────┘
+
+Both sources should use the same selected-word rules and mute controller.
+
+Deduplication
+
+Caption systems often report the same caption repeatedly.
+
+ISweep must NOT do this:
+
+caption detected
+MUTE
+
+caption detected again
+UNMUTE
+
+caption detected again
+MUTE
+
+caption detected again
+UNMUTE
+
+Instead:
+
+caption detected
+      ↓
+new event?
+      ↓
+YES
+      ↓
+process
+
+same event again?
+      ↓
+ignore
+
+Deduplication is required for reliable real-time filtering.
+
+Testing
+
+Testing is a major part of the project.
+
+The project contains backend tests and extension tests.
+
+Important things to test include:
+
+Word matching
+Preferences
+Authentication
+Caption processing
+STT timing
+Mute timing
+API behavior
+Database behavior
+
+The selected-word system should have tests for:
+
+"hell" matches "hell"
+
+"hell" matches "Hell"
+
+"hello" does not incorrectly match "hell"
+
+No selected words → no mute
+
+Repeated caption → one event
+
+User already muted → remain muted
+
+User not muted → mute then restore
+
+"What the hell"
+        ↓
+"What the ___"
+Current Main Development Problem
+
+The extension has many pieces of the desired system already.
+
+The current challenge is making those pieces work as ONE clean pipeline.
+
+We do not want to keep adding another detector, another timer, or another mute function every time something fails.
+
+Instead:
+
+ONE EVENT
+     ↓
+ONE FILTER ENGINE
+     ↓
+ONE MATCH RESULT
+     ↓
+ONE CAPTION RENDERER
+     ↓
+ONE MUTE CONTROLLER
+
+The goal is to simplify the existing implementation while preserving working functionality.
+
+Refactoring Rule
+
+Before deleting existing code:
+
+Find out what it does.
+Find out who calls it.
+Determine whether another component depends on it.
+Replace its responsibility with the new architecture.
+Run tests.
+Only then remove obsolete code.
+
+Do not delete working code simply because it looks old.
+
+Current Development Priority
+
+The immediate priority is:
+
+1. Reliable selected-word detection
+2. Reliable caption masking
+3. Reliable mute
+4. Correct mute timing
+5. Correct preference synchronization
+6. Deduplication
+7. STT integration
+8. Universal web architecture
+
+Do not jump ahead to complicated visual AI until the basic audio filtering concept is reliable.
+
+Universal Architecture
+
+The long-term architecture should look approximately like this:
+
+                 CONTENT SOURCES
+
+       YouTube
+          │
+       HTML5
+          │
+       WebVTT
+          │
+        STT
+          │
+       Local Media
+          │
+        Future
+          │
+          ▼
+   NORMALIZED MEDIA EVENT
+          │
+          ▼
+   ┌──────────────────────┐
+   │   ISWEEP FILTER      │
+   │                      │
+   │ Selected words       │
+   │ Categories           │
+   │ User preferences     │
+   └──────────┬───────────┘
+              │
+              ▼
+        MATCHED CONTENT
+              │
+       ┌──────┼───────┐
+       ▼      ▼       ▼
+      MUTE   SKIP   FAST FORWARD
+       │
+       ▼
+   PLAYBACK CONTROLLER
+
+This is the architecture we should build toward.
+
+Physical Media / DVD
+
+The dvd/ portion of the repository is a separate development area.
+
+It shares the same overall philosophy:
+
+Control playback. Do not modify the original media.
+
+DVD/physical-media development may eventually support:
+
+DVD
+Blu-ray
+Television
+Receiver
+Media players
+Remote controls
+IR
+HDMI-CEC
+Bluetooth
+Network control
+
+The DVD system should not destroy or replace the browser extension.
+
+Likewise, browser-extension development should not unnecessarily modify the DVD system.
+
+They can share compatible concepts such as:
+
+User preferences
+Content detection
+Decision engine
+Playback actions
+
+but each system can have its own implementation where necessary.
+
+Physical Media Vision
+
+The long-term physical-media concept is:
+
+User's own movie
+      ↓
+ISweep recognizes playback
+      ↓
+ISweep knows user's preferences
+      ↓
+Selected content approaches
+      ↓
+ISweep acts like a remote control
+      ↓
+Mute / Skip / Fast Forward
+      ↓
+Original movie remains unchanged
+
+This allows ISweep to eventually support both:
+
+ONLINE MEDIA
+
+and:
+
+USER-OWNED PHYSICAL MEDIA
+
+without requiring ISweep to create altered copies of the media.
+
+What ISweep Should Never Become
+
+ISweep should not require:
+
+Editing the original video
+Editing the original audio
+Creating modified movie files
+Replacing the original media
+Permanently altering a user's media
+
+The fundamental principle is:
+
+ISweep controls playback, not the source media.
+
+Development Philosophy
+Keep working systems working
+
+Do not rewrite something just because it could be written differently.
+
+Build one layer at a time
+Detection
+   ↓
+Filtering
+   ↓
+Decision
+   ↓
+Action
+   ↓
+Timing
+   ↓
+Optimization
+Prefer simple systems
+
+If a simple function can solve a problem, use the simple function.
+
+One source of truth
+
+User preferences should not be duplicated into separate incompatible systems.
+
+One filtering engine
+
+Different media sources should feed the same filtering logic.
+
+One mute controller
+
+Different detection methods should not create competing mute systems.
+
+Test before expanding
+
+Prove YouTube first.
+
+Then expand to the rest of the web.
+
+Then expand to physical media.
+
+Development Workflow
+
+GitHub main is the source of truth.
+
+When changes are made directly to GitHub:
+
+GitHub
+   ↓
+VS Code
+   ↓
+Pull / Sync
+   ↓
+Local project
+
+If VS Code has local changes that have not been committed, Git may refuse to pull or push.
+
+Before syncing, check:
+
+VS Code
+→ Source Control
+→ Changes
+
+If there are changes you need to keep, commit or stash them before pulling.
+
+The basic command for getting the latest information is:
+
+git fetch origin
+
+Then the local branch can be synchronized with:
+
+git pull origin main
+
+For the normal workflow:
+
+1. GitHub change is made
+2. Open VS Code
+3. Pull/Sync
+4. Reload Chrome extension
+5. Test
+6. Commit local changes only when appropriate
+Running the Extension
+
+Open:
+
+chrome://extensions
+
+Enable:
+
+Developer mode
+
+Then:
+
+Load unpacked
+
+and select:
+
+ISweep_extention/
+
+After code changes:
+
+chrome://extensions
+      ↓
+ISweep
+      ↓
+Reload
+
+Then open a fresh YouTube tab when testing content-script changes.
+
+Running the Backend
+
+The backend lives in:
+
+ISweep_backend/
+
+The project uses Python and a local virtual environment.
+
+The backend should eventually start automatically without requiring VS Code to remain open.
+
+Startup files include:
+
+start_backend.bat
+run_backend.bat
+run_backend_hidden.ps1
+install_startup.bat
+
+The intended architecture is:
+
+Windows startup
+      ↓
+ISweep backend starts
+      ↓
+Flask API runs
+      ↓
+Extension connects
+
+VS Code should not be required for the production-like local experience.
+
+Current Proof-of-Concept Test
+
+The simplest important test is:
+
+Selected word:
+hell
+
+Play a video containing:
+
+"What the hell..."
+
+Expected:
+
+Caption:
+
+"What the ___..."
+
+and:
+
+Audio:
+
+NORMAL
+  ↓
+MUTE
+  ↓
+"hell" passes
+  ↓
+UNMUTE
+
+If this works reliably, we have proven the core concept.
+
+Future Roadmap
+Phase 1 — Prove YouTube
+[ ] Reliable caption event
+[ ] Reliable selected-word matching
+[ ] Caption masking
+[ ] Reliable mute
+[ ] Correct mute restoration
+[ ] Exact/near-exact word timing
+[ ] STT fallback
+Phase 2 — Clean Architecture
+[ ] Central filter engine
+[ ] Central mute controller
+[ ] Normalized caption events
+[ ] Deduplication
+[ ] Remove obsolete duplicate logic
+[ ] Strong unit tests
+Phase 3 — Universal Web
+[ ] HTML5 video detection
+[ ] WebVTT support
+[ ] Additional website adapters
+[ ] Browser-wide media event architecture
+[ ] Common filtering engine
+Phase 4 — More Actions
+[ ] Mute
+[ ] Skip
+[ ] Fast Forward
+[ ] Future playback actions
+Phase 5 — Better Intelligence
+[ ] Better STT
+[ ] Better word timing
+[ ] Scene recognition
+[ ] Visual filtering
+[ ] Content classification
+Phase 6 — Physical Media
+[ ] DVD playback control
+[ ] Remote-control integration
+[ ] TV control
+[ ] Playback synchronization
+[ ] Physical-media content detection
+Final Vision
+
+The ultimate ISweep system should look like this:
+
+                 USER
+                  │
+                  ▼
+          ISWEEP PREFERENCES
+                  │
+                  ▼
+          ┌───────────────┐
+          │ ISWEEP ENGINE │
+          └───────┬───────┘
+                  │
+        ┌─────────┼─────────┐
+        ▼         ▼         ▼
+      ONLINE    LOCAL      DVD
+      MEDIA     MEDIA     MEDIA
+        │         │         │
+        └─────────┼─────────┘
+                  ▼
+            CONTENT EVENT
+                  │
+                  ▼
+             FILTER MATCH
+                  │
+                  ▼
+              DECISION
+                  │
+          ┌───────┼────────┐
+          ▼       ▼        ▼
+        MUTE     SKIP    FAST-FORWARD
+          │       │        │
+          └───────┼────────┘
+                  ▼
+             PLAYBACK
+
+The user chooses their boundaries.
+
+ISweep detects the content.
+
+ISweep makes the decision.
+
+ISweep controls playback.
+
+The original media stays untouched.
+
+The Most Important Rule
+
+When adding new functionality, always ask:
+
+Can this become another input to the same ISweep filtering and decision system instead of becoming another separate system?
+
+If yes, integrate it.
+
+If no, keep it isolated.
+
+The goal is not to keep adding code.
+
+The goal is to build one reliable ISweep engine that can eventually control many different kinds of media.
+
+
+### One thing I would change from the old README
+
+The old README describes an older architecture where the extension sends everything through `/event` and waits for a backend decision. Our newer direction is more powerful:
+
+```text
+CONTENT SOURCE
+      ↓
+NORMALIZED EVENT
+      ↓
+FILTER ENGINE
+      ↓
+ACTION
+
+That lets us eventually use local filtering, backend filtering, captions, and STT without making each one a separate system.
+And I would keep the DVD section in the repository, but not make it the thing driving the browser architecture. It can grow alongside ISweep without fighting the extension.
