@@ -35,12 +35,12 @@ def make_wav_base64(samples, sample_rate=16000):
         return base64.b64encode(wav_buffer.getvalue()).decode('ascii')
 
 
-def make_silent_wav_base64(duration_seconds=0.5, sample_rate=16000):
+def make_silent_wav_base64(duration_seconds=1.5, sample_rate=16000):
     count = int(max(duration_seconds, 0.0) * sample_rate)
     return make_wav_base64(np.zeros(count, dtype=np.float32), sample_rate=sample_rate)
 
 
-def make_tone_wav_base64(duration_seconds=0.5, sample_rate=16000, hz=440.0, amplitude=0.2):
+def make_tone_wav_base64(duration_seconds=1.5, sample_rate=16000, hz=440.0, amplitude=0.2):
     count = int(max(duration_seconds, 0.0) * sample_rate)
     t = np.arange(count, dtype=np.float32) / float(sample_rate)
     samples = amplitude * np.sin(2.0 * math.pi * float(hz) * t)
@@ -850,7 +850,7 @@ class TestAPI:
         assert data['words'] == []
         assert data['word_timestamps'] == []
 
-    def test_captions_transcribe_speech_end_vad_forces_empty_payload(self, client):
+    def test_captions_transcribe_speech_end_vad_does_not_erase_nonquiet_payload(self, client):
         token, _ = signup_and_get_token(client, email='captions-speech-end-empty@example.com')
 
         class AnalyzerStub:
@@ -892,13 +892,12 @@ class TestAPI:
 
         assert response.status_code == 200
         data = json.loads(response.data)
-        assert data['source'] == 'silence'
-        assert data['text'] == ''
-        assert data['clean_text'] == ''
-        assert data['cleaned_text'] == ''
-        assert data['stable_text'] == ''
-        assert data['words'] == []
-        assert data['word_timestamps'] == []
+        assert data['source'] == 'audio_stt_live'
+        assert data['text'] == 'carry'
+        assert data['clean_text'] == 'carry over words should not survive speech_end'
+        assert data['cleaned_text'] == 'carry over words should not survive speech_end'
+        assert data['words'] == [{'word': 'carry', 'start': 1.0, 'end': 1.2}]
+        assert data['word_timestamps'] == data['words']
 
     def test_captions_transcribe_rejects_stale_sequence_only_within_same_tab_video_session(self, client):
         import app as app_module
@@ -1325,7 +1324,7 @@ class TestAPI:
                 'video_id': 'captions-vid-3',
                 'sampleRate': 16000,
                 'channels': 1,
-                'audio': [0.0, 0.1, -0.1, 0.2, -0.2],
+                'audio': ([0.0, 0.1, -0.1, 0.2, -0.2] * 4800),
                 'chunk_start_seconds': 2.0,
                 'chunk_end_seconds': 2.2,
             },

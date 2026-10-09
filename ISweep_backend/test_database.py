@@ -190,7 +190,66 @@ class TestDatabase:
 
         assert database.update_user_preferences(user_id, payload) is True
         loaded = database.get_user_preferences(user_id)
-        assert loaded == payload
+        assert loaded == {
+            **payload,
+            'categories': {
+                **payload['categories'],
+                'language': {
+                    **payload['categories']['language'],
+                    'items': [],
+                },
+            },
+            'blocklist': {'items': []},
+        }
+        assert database.get_user_preferences(user_id) == loaded
+
+    def test_preferences_canonical_blocklist_items_are_authoritative(self, database):
+        user_id = create_test_user(database, 'preferencecanonical')
+        payload = {
+            'enabled': True,
+            'categories': {
+                'language': {
+                    'enabled': True,
+                    'items': ['legacy-language-word'],
+                },
+            },
+            'blocklist': {
+                'items': ['Hell'],
+            },
+            'customWords': ['legacy-root-word'],
+            'unrelated': {'keep': True},
+        }
+
+        assert database.update_user_preferences(user_id, payload) is True
+        loaded = database.get_user_preferences(user_id)
+
+        assert loaded['blocklist']['items'] == ['hell']
+        assert loaded['categories']['language']['items'] == ['hell']
+        assert loaded['unrelated'] == {'keep': True}
+
+    def test_preferences_legacy_words_migrate_idempotently(self, database):
+        user_id = create_test_user(database, 'preferencelegacy')
+        payload = {
+            'enabled': True,
+            'categories': {
+                'language': {
+                    'enabled': True,
+                    'items': ['Hell'],
+                    'words': ['shell'],
+                },
+            },
+            'customWords': ['custom-word', 'HELL'],
+            'unrelated': 'preserve me',
+        }
+
+        assert database.update_user_preferences(user_id, payload) is True
+        migrated = database.get_user_preferences(user_id)
+        loaded_again = database.get_user_preferences(user_id)
+
+        assert migrated['blocklist']['items'] == ['hell', 'shell', 'custom-word']
+        assert migrated['categories']['language']['items'] == ['hell', 'shell', 'custom-word']
+        assert migrated['unrelated'] == 'preserve me'
+        assert loaded_again == migrated
 
     def test_video_analysis_cache_roundtrip(self, database):
         payload = {
