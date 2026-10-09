@@ -1,11 +1,14 @@
 # ISweep runtime logs
 /isweep_backend.log
 /isweep_backend_error.log
+/isweep_backend_startup.log
 
 # Python bytecode and local backend runtime state.
 /__pycache__/
 **/__pycache__/
 *.py[cod]
+/\.venv/
+/ISweep_backend/.venv/
 /isweep.db
 /ISweep_backend/isweep.db
 

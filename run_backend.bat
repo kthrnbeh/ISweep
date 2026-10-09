@@ -15,13 +15,15 @@ cd /d "%BACKEND_DIR%"
 REM Prefer an explicit virtual-environment interpreter so Windows startup does
 REM not depend on PATH or the Microsoft Store Python alias.
 set "PYTHON_EXE="
-if exist "%BACKEND_DIR%\.venv\Scripts\python.exe" (
-  set "PYTHON_EXE=%BACKEND_DIR%\.venv\Scripts\python.exe"
-) else if exist "%ROOT_DIR%.venv\Scripts\python.exe" (
-  set "PYTHON_EXE=%ROOT_DIR%.venv\Scripts\python.exe"
-) else (
-  set "PYTHON_EXE=python.exe"
+if exist "%ROOT_DIR%.venv\Scripts\python.exe" (
+  "%ROOT_DIR%.venv\Scripts\python.exe" -c "import flask, numpy, dotenv" >nul 2>&1
+  if not errorlevel 1 set "PYTHON_EXE=%ROOT_DIR%.venv\Scripts\python.exe"
 )
+if not defined PYTHON_EXE if exist "%BACKEND_DIR%\.venv\Scripts\python.exe" (
+  "%BACKEND_DIR%\.venv\Scripts\python.exe" -c "import flask, numpy, dotenv" >nul 2>&1
+  if not errorlevel 1 set "PYTHON_EXE=%BACKEND_DIR%\.venv\Scripts\python.exe"
+)
+if not defined PYTHON_EXE set "PYTHON_EXE=python.exe"
 
 echo [ISweep] Starting backend from "%BACKEND_DIR%"
 echo [ISweep] Using Python: "%PYTHON_EXE%"

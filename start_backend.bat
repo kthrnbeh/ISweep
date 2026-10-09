@@ -10,11 +10,11 @@ if not exist "%HIDDEN_SCRIPT%" (
   endlocal & exit /b 1
 )
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "Start-Process powershell.exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File','%HIDDEN_SCRIPT%' -WindowStyle Hidden"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%HIDDEN_SCRIPT%" -Once
 if errorlevel 1 (
   echo [ISweep] Backend launch failed.
   endlocal & exit /b 1
 )
-echo [ISweep] Backend launch requested in the background.
+echo [ISweep] Backend is healthy and running in the background.
 
 endlocal & exit /b 0
