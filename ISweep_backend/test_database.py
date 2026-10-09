@@ -85,6 +85,39 @@ class TestDatabase:
 
         assert migrated['blocklist']['items'] == []
 
+    def test_legacy_preferences_merge_recoverable_word_fields(self, database):
+        user_id = create_test_user(database, 'legacy-merge')
+        legacy = {
+            'categories': {
+                'language': {
+                    'items': ['Hell'],
+                    'words': ['shell'],
+                    'customWords': ['HELL', 'heck'],
+                },
+            },
+            'customWords': ['heck', 'damn'],
+            'future_setting': {'enabled': True},
+        }
+
+        assert database.update_user_preferences(user_id, legacy) is True
+        migrated = database.get_user_preferences(user_id)
+
+        assert migrated['blocklist']['items'] == ['hell', 'shell', 'heck', 'damn']
+        assert migrated['future_setting'] == {'enabled': True}
+
+    def test_existing_canonical_blocklist_is_not_overwritten(self, database):
+        user_id = create_test_user(database, 'canonical-preserved')
+        canonical = {
+            'categories': {'language': {'items': ['legacy-word']}},
+            'blocklist': {'items': ['selected-word']},
+            'sensitivity': 0.7,
+        }
+
+        assert database.update_user_preferences(user_id, canonical) is True
+        migrated = database.get_user_preferences(user_id)
+
+        assert migrated['blocklist']['items'] == ['selected-word']
+
     def test_update_preferences(self, database):
         user_id = create_test_user(database, 'update')  # Create user
 

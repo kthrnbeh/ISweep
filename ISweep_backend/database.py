@@ -283,15 +283,19 @@ class Database:
 
         candidate_lists = []
         if isinstance(blocklist.get('items'), list):
+            # The canonical list is authoritative; do not merge stale legacy
+            # fields into an already-established user selection.
             candidate_lists.append(blocklist['items'])
-        elif isinstance(language.get('items'), list):
-            candidate_lists.append(language['items'])
-        elif isinstance(language.get('words'), list):
-            candidate_lists.append(language['words'])
-        elif isinstance(language.get('customWords'), list):
-            candidate_lists.append(language['customWords'])
-        elif isinstance(raw.get('customWords'), list):
-            candidate_lists.append(raw['customWords'])
+        else:
+            # Legacy records may split selected words across these fields.
+            # Merge all recoverable sources rather than stopping at the first
+            # one, preserving their stored order and removing duplicates below.
+            for legacy_field in ('items', 'words', 'customWords'):
+                value = language.get(legacy_field)
+                if isinstance(value, list):
+                    candidate_lists.append(value)
+            if isinstance(raw.get('customWords'), list):
+                candidate_lists.append(raw['customWords'])
 
         items = []
         for candidate in candidate_lists:
