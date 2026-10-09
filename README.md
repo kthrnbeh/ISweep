@@ -123,20 +123,16 @@ The user's preferences are intended to be the single source of truth.
 
 The normalized selected-word contract is:
 
-```suggestion
-```json
-```
-{
-  "categories": {
-    "language": { "items": [] },
-    "intimacy": { "items": [] },
-    "violence": { "items": [] },
-    "substances": { "items": [] },
-    "horror": { "items": [] }
-  },
-  "blocklist": { "items": [] }
-}
-```
+    {
+      "categories": {
+        "language": { "items": [] },
+        "intimacy": { "items": [] },
+        "violence": { "items": [] },
+        "substances": { "items": [] },
+        "horror": { "items": [] }
+      },
+      "blocklist": { "items": [] }
+    }
 
 `blocklist.items` is the authoritative selected-word list. The site uses the
 canonical `isweep_auth_token` for new bridge traffic while migrating compatible
@@ -204,20 +200,19 @@ If the user already muted YouTube before ISweep detected the word, ISweep must n
 
 The ideal filtering function is conceptually:
 
-```javascript
-function onCaption(caption) {
-    const matches = filterCaption(caption.text);
+    function onCaption(caption) {
+        const matches = filterCaption(caption.text);
 
-    if (!matches.length) {
-        return;
+        if (!matches.length) {
+            return;
+        }
+
+        renderMaskedCaption(caption, matches);
+
+        for (const match of matches) {
+            requestMute({
+                start: match.start,
+                end: match.end
+            });
+        }
     }
-
-    renderMaskedCaption(caption, matches);
-
-    for (const match of matches) {
-        requestMute({
-            start: match.start,
-            end: match.end
-        });
-    }
-}

@@ -45,6 +45,8 @@ class TestDatabase:
         assert prefs['categories']['language']['enabled'] is True  # Language enabled
         assert prefs['categories']['sexual']['enabled'] is True  # Sexual enabled
         assert prefs['categories']['violence']['enabled'] is True  # Violence enabled
+        assert prefs['sensitivity'] == 0.7  # Sensitivity default
+        assert 'blocklist' in prefs  # Canonical list container exists
         assert prefs['blocklist']['items'] == []  # Explicit empty selection is verifiable
 
     def test_legacy_preferences_migrate_selected_words_idempotently(self, database):
@@ -58,6 +60,7 @@ class TestDatabase:
                 },
             },
             'sensitivity': 0.7,
+            'unrelated': {'keep': True},
         }
 
         assert database.update_user_preferences(user_id, legacy) is True
@@ -66,6 +69,7 @@ class TestDatabase:
 
         assert first['blocklist']['items'] == ['hell']
         assert first['categories']['language']['items'] == ['hell']
+        assert first['unrelated'] == {'keep': True}
         assert second == first
 
     def test_legacy_preferences_without_words_migrate_to_explicit_empty_list(self, database):
