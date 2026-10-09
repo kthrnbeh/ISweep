@@ -16,6 +16,7 @@ System connection:
 
 import sqlite3  # Standard library SQLite interface
 import json  # JSON serialization for preferences
+from copy import deepcopy
 from datetime import datetime  # Timestamp handling
 from typing import Dict, Optional  # Type annotations for clarity
 
@@ -157,6 +158,15 @@ class Database:
                     "sexual": {"enabled": True, "action": "skip", "duration": 12},
                     "violence": {"enabled": True, "action": "fast_forward", "duration": 8},
                 },
+                # An explicit empty list distinguishes a new user's valid
+                # empty selection from an unverifiable legacy response.
+                "blocklist": {
+                    "enabled": True,
+                    "mode": "whole_word",
+                    "action": "mute",
+                    "duration": 4,
+                    "items": [],
+                },
                 "sensitivity": 0.7,
             }  # Seed preferences JSON with defaults
 
@@ -227,12 +237,16 @@ class Database:
 
         if prefs_dict.get('preferences_json'):
             try:
-                return json.loads(prefs_dict['preferences_json'])  # Return parsed JSON prefs when present
+                raw_preferences = json.loads(prefs_dict['preferences_json'])
+                normalized_preferences = self.normalize_preferences(raw_preferences)
+                if normalized_preferences != raw_preferences:
+                    self._persist_normalized_preferences(user_id, normalized_preferences)
+                return normalized_preferences
             except json.JSONDecodeError:
                 pass  # Fallback to legacy fields below on parse error
 
         # Legacy shape fallback
-        return {
+        return self.normalize_preferences({
             "enabled": True,
             "categories": {
                 "language": {
@@ -252,7 +266,64 @@ class Database:
                 },
             },
             "sensitivity": 0.7,
-        }  # Return legacy-structured preferences if JSON missing
+        })  # Return legacy-structured preferences if JSON missing
+
+    @staticmethod
+    def normalize_preferences(preferences: Dict) -> Dict:
+        """Normalize legacy preference JSON without discarding recoverable words.
+
+        ``blocklist.items`` is authoritative after normalization. Existing
+        category/custom word fields are retained for compatibility, and their
+        words are used only when the canonical list is absent.
+        """
+        raw = deepcopy(preferences) if isinstance(preferences, dict) else {}
+        blocklist = raw.get('blocklist') if isinstance(raw.get('blocklist'), dict) else {}
+        categories = raw.get('categories') if isinstance(raw.get('categories'), dict) else {}
+        language = categories.get('language') if isinstance(categories.get('language'), dict) else {}
+
+        candidate_lists = []
+        if isinstance(blocklist.get('items'), list):
+            candidate_lists.append(blocklist['items'])
+        elif isinstance(language.get('items'), list):
+            candidate_lists.append(language['items'])
+        elif isinstance(language.get('words'), list):
+            candidate_lists.append(language['words'])
+        elif isinstance(language.get('customWords'), list):
+            candidate_lists.append(language['customWords'])
+        elif isinstance(raw.get('customWords'), list):
+            candidate_lists.append(raw['customWords'])
+
+        items = []
+        for candidate in candidate_lists:
+            for value in candidate:
+                word = str(value).strip().lower() if isinstance(value, str) else ''
+                if word and word not in items:
+                    items.append(word)
+
+        normalized_blocklist = {
+            **blocklist,
+            'items': items,
+        }
+        raw['blocklist'] = normalized_blocklist
+        raw['categories'] = {
+            **categories,
+            'language': {
+                **language,
+                'items': items,
+            },
+        }
+        return raw
+
+    def _persist_normalized_preferences(self, user_id: int, preferences: Dict) -> None:
+        conn = self.get_connection()
+        try:
+            conn.execute(
+                'UPDATE user_preferences SET preferences_json = ? WHERE user_id = ?',
+                (json.dumps(preferences), user_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
     def verify_user(self, email: str) -> Optional[Dict]:
         """Helper used by auth flows to look up the user."""

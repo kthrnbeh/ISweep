@@ -123,7 +123,9 @@ The user's preferences are intended to be the single source of truth.
 
 The normalized selected-word contract is:
 
+```suggestion
 ```json
+```
 {
   "categories": {
     "language": { "items": [] },

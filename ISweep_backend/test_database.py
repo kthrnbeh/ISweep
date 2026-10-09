@@ -45,6 +45,41 @@ class TestDatabase:
         assert prefs['categories']['language']['enabled'] is True  # Language enabled
         assert prefs['categories']['sexual']['enabled'] is True  # Sexual enabled
         assert prefs['categories']['violence']['enabled'] is True  # Violence enabled
+        assert prefs['blocklist']['items'] == []  # Explicit empty selection is verifiable
+
+    def test_legacy_preferences_migrate_selected_words_idempotently(self, database):
+        user_id = create_test_user(database, 'legacy-migration')
+        legacy = {
+            'enabled': True,
+            'categories': {
+                'language': {
+                    'enabled': True,
+                    'items': ['Hell', 'hell'],
+                },
+            },
+            'sensitivity': 0.7,
+        }
+
+        assert database.update_user_preferences(user_id, legacy) is True
+        first = database.get_user_preferences(user_id)
+        second = database.get_user_preferences(user_id)
+
+        assert first['blocklist']['items'] == ['hell']
+        assert first['categories']['language']['items'] == ['hell']
+        assert second == first
+
+    def test_legacy_preferences_without_words_migrate_to_explicit_empty_list(self, database):
+        user_id = create_test_user(database, 'legacy-empty-migration')
+        legacy = {
+            'enabled': True,
+            'categories': {'language': {'enabled': True}},
+            'sensitivity': 0.7,
+        }
+
+        assert database.update_user_preferences(user_id, legacy) is True
+        migrated = database.get_user_preferences(user_id)
+
+        assert migrated['blocklist']['items'] == []
 
     def test_update_preferences(self, database):
         user_id = create_test_user(database, 'update')  # Create user
