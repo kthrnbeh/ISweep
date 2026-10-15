@@ -18,6 +18,7 @@ import sqlite3  # Standard library SQLite interface
 import json  # JSON serialization for preferences
 from copy import deepcopy
 from datetime import datetime  # Timestamp handling
+from pathlib import Path
 from typing import Dict, Optional  # Type annotations for clarity
 
 
@@ -32,6 +33,7 @@ class Database:
     def get_connection(self):
         """Open a connection with row_factory set so rows can be dict-converted easily."""
         conn = sqlite3.connect(self.db_path)  # Open SQLite connection
+        conn.execute('PRAGMA foreign_keys = ON')
         conn.row_factory = sqlite3.Row  # Return rows as dict-like objects
         return conn  # Provide connection to caller
 
@@ -133,6 +135,10 @@ class Database:
         ''')  # Cache table for /audio/analyze chunk-level STT outputs
 
         conn.commit()  # Persist schema changes
+        schema_path = Path(__file__).resolve().parent.parent / 'isweep_sql_schema.sql'
+        if not schema_path.is_file():
+            raise FileNotFoundError(f'Relational filter schema not found: {schema_path}')
+        conn.executescript(schema_path.read_text(encoding='utf-8-sig'))
         conn.close()  # Close connection
 
     def create_user(self, email: str, password_hash: str, username: Optional[str] = None) -> Optional[int]:
@@ -222,7 +228,7 @@ class Database:
         return None  # Otherwise None
 
     def get_user_preferences(self, user_id: int) -> Optional[Dict]:
-        """Return user preferences as JSON (or legacy shape) for analysis decisions."""
+        """Return canonical preferences, overlaying selected relational words when present."""
         conn = self.get_connection()  # Open connection
         cursor = conn.cursor()  # Get cursor
 
@@ -241,12 +247,12 @@ class Database:
                 normalized_preferences = self.normalize_preferences(raw_preferences)
                 if normalized_preferences != raw_preferences:
                     self._persist_normalized_preferences(user_id, normalized_preferences)
-                return normalized_preferences
+                return self._apply_relational_preferences(user_id, normalized_preferences)
             except json.JSONDecodeError:
                 pass  # Fallback to legacy fields below on parse error
 
         # Legacy shape fallback
-        return self.normalize_preferences({
+        return self._apply_relational_preferences(user_id, self.normalize_preferences({
             "enabled": True,
             "categories": {
                 "language": {
@@ -266,7 +272,84 @@ class Database:
                 },
             },
             "sensitivity": 0.7,
-        })  # Return legacy-structured preferences if JSON missing
+        }))  # Return legacy-structured preferences if JSON missing
+
+    def get_selected_filter_words(self, user_id: int) -> list[Dict]:
+        """Return selected predefined and custom words from the relational filter view."""
+        conn = self.get_connection()
+        try:
+            rows = conn.execute(
+                '''SELECT user_id, normalized_word, display_word, category_key,
+                          action, duration_seconds
+                   FROM isweep_selected_words
+                   WHERE user_id = ?
+                   ORDER BY normalized_word, category_key''',
+                (user_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def _apply_relational_preferences(self, user_id: int, preferences: Dict) -> Dict:
+        """Overlay relational selections without erasing valid JSON-only preferences."""
+        selected_rows = self.get_selected_filter_words(user_id)
+        if not selected_rows:
+            return preferences
+
+        selected_words = []
+        for row in selected_rows:
+            word = str(row.get('normalized_word') or '').strip().lower()
+            if word and word not in selected_words:
+                selected_words.append(word)
+        if not selected_words:
+            return preferences
+
+        merged = deepcopy(preferences)
+        blocklist = merged.get('blocklist') if isinstance(merged.get('blocklist'), dict) else {}
+        blocklist['items'] = selected_words
+        merged['blocklist'] = blocklist
+        categories = merged.get('categories') if isinstance(merged.get('categories'), dict) else {}
+        language = categories.get('language') if isinstance(categories.get('language'), dict) else {}
+        language['items'] = selected_words
+        categories['language'] = language
+        merged['categories'] = categories
+        return merged
+
+    def record_preference_sync_event(
+        self,
+        user_id: Optional[int],
+        preference_source: str,
+        preference_schema: str,
+        selected_words: list[str],
+        result: str,
+        failure_reason: Optional[str] = None,
+    ) -> None:
+        """Store token-free synchronization diagnostics."""
+        words = []
+        for value in selected_words if isinstance(selected_words, list) else []:
+            word = str(value).strip().lower()
+            if word and word not in words:
+                words.append(word)
+        conn = self.get_connection()
+        try:
+            conn.execute(
+                '''INSERT INTO isweep_preference_sync_events (
+                       user_id, preference_source, preference_schema,
+                       selected_word_count, word_preview_json, result, failure_reason
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                (
+                    user_id,
+                    str(preference_source),
+                    str(preference_schema),
+                    len(words),
+                    json.dumps(words[:8], separators=(',', ':')),
+                    str(result),
+                    str(failure_reason) if failure_reason else None,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
     @staticmethod
     def normalize_preferences(preferences: Dict) -> Dict:

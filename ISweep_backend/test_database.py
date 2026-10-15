@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta
 from database import Database  # Database class under test
 
@@ -48,6 +49,114 @@ class TestDatabase:
         assert prefs['sensitivity'] == 0.7  # Sensitivity default
         assert 'blocklist' in prefs  # Canonical list container exists
         assert prefs['blocklist']['items'] == []  # Explicit empty selection is verifiable
+
+    def test_relational_filter_schema_is_idempotent_and_preserves_existing_user(self, database):
+        user_id = create_test_user(database, 'schema-idempotent')
+        database.init_db()
+        database.init_db()
+
+        assert database.get_user_by_id(user_id)['username'] == 'schema-idempotent'
+        conn = database.get_connection()
+        try:
+            assert conn.execute(
+                "SELECT COUNT(*) AS count FROM isweep_filter_categories"
+            ).fetchone()['count'] == 5
+            assert conn.execute(
+                "SELECT type FROM sqlite_master WHERE name = 'isweep_selected_words'"
+            ).fetchone()['type'] == 'view'
+        finally:
+            conn.close()
+
+    def test_relational_predefined_and_custom_selection_builds_blocklist(self, database):
+        user_id = create_test_user(database, 'relational-words')
+        conn = database.get_connection()
+        try:
+            category_id = conn.execute(
+                "SELECT category_id FROM isweep_filter_categories WHERE category_key = 'language'"
+            ).fetchone()['category_id']
+            conn.execute(
+                '''INSERT INTO isweep_filter_words
+                   (category_id, normalized_word, display_word)
+                   VALUES (?, 'hell', 'Hell')''',
+                (category_id,),
+            )
+            word_id = conn.execute(
+                "SELECT word_id FROM isweep_filter_words WHERE normalized_word = 'hell'"
+            ).fetchone()['word_id']
+            conn.execute(
+                '''INSERT INTO isweep_user_filter_words (user_id, word_id, selected)
+                   VALUES (?, ?, 1)''',
+                (user_id, word_id),
+            )
+            conn.execute(
+                '''INSERT INTO isweep_custom_words
+                   (user_id, normalized_word, display_word, selected)
+                   VALUES (?, 'quiet', 'Quiet', 1)''',
+                (user_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        assert [row['normalized_word'] for row in database.get_selected_filter_words(user_id)] == ['hell', 'quiet']
+        assert database.get_user_preferences(user_id)['blocklist']['items'] == ['hell', 'quiet']
+
+    def test_relational_deselection_and_duplicate_words_are_safe(self, database):
+        user_id = create_test_user(database, 'relational-deselect')
+        conn = database.get_connection()
+        try:
+            category_id = conn.execute(
+                "SELECT category_id FROM isweep_filter_categories WHERE category_key = 'language'"
+            ).fetchone()['category_id']
+            conn.execute(
+                "INSERT INTO isweep_filter_words (category_id, normalized_word, display_word) VALUES (?, 'hell', 'Hell')",
+                (category_id,),
+            )
+            word_id = conn.execute(
+                "SELECT word_id FROM isweep_filter_words WHERE normalized_word = 'hell'"
+            ).fetchone()['word_id']
+            conn.execute(
+                "INSERT INTO isweep_user_filter_words (user_id, word_id, selected) VALUES (?, ?, 0)",
+                (user_id, word_id),
+            )
+            conn.execute(
+                "INSERT INTO isweep_custom_words (user_id, normalized_word, display_word, selected) VALUES (?, 'quiet', 'Quiet', 1)",
+                (user_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        assert database.get_user_preferences(user_id)['blocklist']['items'] == ['quiet']
+        assert len(database.get_selected_filter_words(user_id)) == 1
+
+    def test_json_preferences_remain_fallback_when_no_relational_selection(self, database):
+        user_id = create_test_user(database, 'json-fallback')
+        payload = {'enabled': True, 'blocklist': {'items': ['legacy-word']}}
+        assert database.update_user_preferences(user_id, payload) is True
+        assert database.get_user_preferences(user_id)['blocklist']['items'] == ['legacy-word']
+
+    def test_preference_sync_events_store_no_tokens(self, database):
+        user_id = create_test_user(database, 'sync-diagnostics')
+        database.record_preference_sync_event(
+            user_id,
+            'relational_filter_tables',
+            'canonical_v1',
+            ['hell'],
+            'failure',
+            'missing_word_data',
+        )
+        conn = database.get_connection()
+        try:
+            stored = dict(conn.execute(
+                'SELECT * FROM isweep_preference_sync_events WHERE user_id = ?',
+                (user_id,),
+            ).fetchone())
+        finally:
+            conn.close()
+
+        assert stored['selected_word_count'] == 1
+        assert 'token' not in json.dumps(stored).lower()
 
     def test_legacy_preferences_migrate_selected_words_idempotently(self, database):
         user_id = create_test_user(database, 'legacy-migration')
