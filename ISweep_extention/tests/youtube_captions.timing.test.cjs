@@ -609,6 +609,45 @@ test('caption_remote does not compete for the shared visible overlay', () => {
   assert.equal(source.includes("data-isweep-caption-source = 'remote'"), false);
 });
 
+test('caption_remote cannot independently control playback mute state', () => {
+  const source = fs.readFileSync(
+    path.resolve(__dirname, '..', 'caption_remote.js'),
+    'utf8',
+  );
+
+  assert.equal(/function\s+(setMuted|restoreMute|beginMute)\s*\(/.test(source), false);
+  assert.equal(/\b(activeMute|restoreTimer|hardRestoreTimer)\b/.test(source), false);
+  assert.equal(/\.(?:mute|unMute)\s*\(/.test(source), false);
+  assert.equal(/\.muted\s*=/.test(source), false);
+  assert.equal(source.includes('youtube_captions.js is the sole playback mute owner'), true);
+  assert.equal(source.includes('function processCaption()'), true);
+});
+
+test('caption_remote preserves selected-word masking and supported caption styles', () => {
+  const source = fs.readFileSync(
+    path.resolve(__dirname, '..', 'caption_remote.js'),
+    'utf8',
+  );
+
+  assert.equal(source.includes('function maskSelectedText(text)'), true);
+  assert.equal(source.includes("cleanCaptionStyle: ['black_white', 'white_black', 'transparent_white']"), true);
+  assert.equal(source.includes('new RegExp(`'), true);
+  assert.equal(source.includes('youtube_captions.js owns the shared overlay'), true);
+});
+
+test('background and caption remote do not contain independent mute operations', () => {
+  const extensionRoot = path.resolve(__dirname, '..');
+  const remoteSource = fs.readFileSync(path.join(extensionRoot, 'caption_remote.js'), 'utf8');
+  const backgroundSource = fs.readFileSync(path.join(extensionRoot, 'background.js'), 'utf8');
+  const youtubeSource = fs.readFileSync(path.join(extensionRoot, 'youtube_captions.js'), 'utf8');
+  const directMutePattern = /(?:\.muted\s*=|\.(?:mute|unMute)\s*\()/;
+
+  assert.equal(directMutePattern.test(remoteSource), false);
+  assert.equal(directMutePattern.test(backgroundSource), false);
+  assert.equal(youtubeSource.includes('function setMutedState'), true);
+  assert.equal(youtubeSource.includes('function applyMuteWindow'), true);
+});
+
 test('fresh audio STT outranks native caption fallback', () => {
   const hooks = loadYoutubeTimingHooks();
   const nowMs = Date.now();
