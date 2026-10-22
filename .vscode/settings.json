@@ -1,5 +1,6 @@
 {
     "chat.tools.terminal.autoApprove": {
         "..\\..\\ISweep\\.venv\\Scripts\\python": true
-    }
+    },
+    "liveServer.settings.port": 5501
 }
