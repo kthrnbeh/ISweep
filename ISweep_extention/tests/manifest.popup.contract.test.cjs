@@ -50,6 +50,16 @@ test('popup account links use preferred frontend base URL helper', () => {
   assert.equal(popupSource.includes('Account.html#create'), true);
 });
 
+test('site token bridge matches the local docs server root', () => {
+  const manifest = readJson('manifest.json');
+  const contentScript = manifest.content_scripts.find((entry) =>
+    Array.isArray(entry.js) && entry.js.includes('site_token_bridge.js')
+  );
+  assert.ok(contentScript);
+  assert.equal(contentScript.matches.includes('http://127.0.0.1:5500/*'), true);
+  assert.equal(contentScript.matches.includes('http://localhost:5500/*'), true);
+});
+
 test('offscreen.js routes captured tab audio back to speakers', () => {
   const offscreenSource = fs.readFileSync(path.join(extensionRoot, 'offscreen.js'), 'utf8');
   // Verify audio routing: source → monitorGain → destination (for speakers)
