@@ -1509,6 +1509,30 @@ async function persistPreferences(preferences) {
     );
   }
 
+  const outgoingItems = preferences?.blocklist?.items;
+  if (Array.isArray(outgoingItems) && outgoingItems.length === 0) {
+    const currentResponse = await fetch(
+      `${getBackendUrl()}/preferences`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization:
+            `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (!currentResponse.ok) {
+      throw new Error('Could not verify existing preferences before an empty save');
+    }
+
+    const currentPreferences = await currentResponse.json();
+    const currentItems = currentPreferences?.blocklist?.items;
+    if (Array.isArray(currentItems) && currentItems.length > 0) {
+      throw new Error('Refusing to replace existing selected words with an empty list');
+    }
+  }
+
   console.log(
     '[ISWEEP][FE] saving preferences...',
     getBackendUrl()
@@ -2899,6 +2923,7 @@ document.addEventListener(
             settings
           );
 
+          let synced = false;
           try {
             const prefsPayload =
               filterSettingsToPreferences(
@@ -2908,6 +2933,7 @@ document.addEventListener(
             await persistPreferences(
               prefsPayload
             );
+            synced = true;
 
             localStorage.setItem(
               LANGUAGE_WORDLIST_MIGRATION_KEY,
@@ -2921,7 +2947,9 @@ document.addEventListener(
           }
 
           alert(
-            'Filters saved locally.'
+            synced
+              ? 'Filters saved locally and synced to your ISweep account.'
+              : 'Filters saved locally, but not synced to your ISweep account.'
           );
         }
       );

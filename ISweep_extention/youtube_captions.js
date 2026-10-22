@@ -4292,11 +4292,25 @@
     const normalizedCaption = { ...caption, text };
     console.log('[ISWEEP][CAPTION] received', { source: caption.source || 'unknown' });
     console.log('[ISWEEP][FILTER] checking caption');
+    const filterState = getFilterWords();
     const matches = filterCaption(text, normalizedCaption);
     const cleanedText = renderMaskedCaption(normalizedCaption, matches);
-    if (!matches.length) return { matches, cleanedText };
+    if (!matches.length) {
+      console.log('[ISWEEP][FILTER] no match', {
+        source: caption.source || 'unknown',
+        selectedWordCount: filterState.words.length,
+        filteringEnabled: filterState.enabled,
+        reason: filterState.words.length ? 'word_not_present' : 'no_selected_words',
+      });
+      return { matches, cleanedText };
+    }
 
-    console.log('[ISWEEP][FILTER] match found', { words: matches.map((match) => match.word) });
+    console.log('[ISWEEP][FILTER] match found', {
+      source: caption.source || 'unknown',
+      selectedWordCount: filterState.words.length,
+      words: matches.map((match) => match.word),
+      muteMode: cleanCaptionSettings.cleanCaptionWordMuteMode,
+    });
     const eventKey = `${caption.source || 'caption'}|${normalizeCaptionText(text)}|${Number(caption.startTime).toFixed(3)}`;
     const unseenMatches = matches.filter((match) => {
       const key = `${eventKey}|${match.index}|${normalizeCaptionWord(match.word)}`;
@@ -4312,9 +4326,25 @@
     if (isSelectedWordMuteModeEnabled() && unseenMatches.length) {
       for (const match of unseenMatches) {
         if (Number.isFinite(match.startTime) && Number.isFinite(match.endTime)) {
-          requestMute({ start: match.startTime, end: match.endTime, reason: `caption:${caption.source || 'unknown'}` });
+          const muteResult = requestMute({
+            start: match.startTime,
+            end: match.endTime,
+            reason: `caption:${caption.source || 'unknown'}`,
+          });
+          console.log('[ISWEEP][FILTER] mute result', {
+            matchedWord: match.word,
+            result: muteResult === true ? 'accepted' : 'skipped',
+            reason: muteResult === true ? 'mute_window_requested' : 'mute_window_rejected',
+            startTime: match.startTime,
+            endTime: match.endTime,
+          });
         }
       }
+    } else if (unseenMatches.length) {
+      console.log('[ISWEEP][FILTER] mute skipped', {
+        reason: 'selected_word_mute_mode_disabled',
+        mode: cleanCaptionSettings.cleanCaptionWordMuteMode,
+      });
     }
     return { matches, cleanedText };
   }

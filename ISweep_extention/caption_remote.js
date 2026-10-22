@@ -35,13 +35,17 @@
     const language = data.categories?.language && typeof data.categories.language === 'object'
       ? data.categories.language
       : {};
-    const words = [];
+    const canonicalItems = Array.isArray(data.blocklist?.items)
+      ? data.blocklist.items
+      : null;
+    const words = canonicalItems ? [...canonicalItems] : [];
 
-    if (Array.isArray(data.blocklist?.items)) words.push(...data.blocklist.items);
-    if (Array.isArray(language.items)) words.push(...language.items);
-    if (Array.isArray(language.words)) words.push(...language.words);
-    if (Array.isArray(language.customWords)) words.push(...language.customWords);
-    if (Array.isArray(data.customWords)) words.push(...data.customWords);
+    if (!canonicalItems) {
+      if (Array.isArray(language.items)) words.push(...language.items);
+      if (Array.isArray(language.words)) words.push(...language.words);
+      if (Array.isArray(language.customWords)) words.push(...language.customWords);
+      if (Array.isArray(data.customWords)) words.push(...data.customWords);
+    }
 
     return {
       enabled: data.enabled !== false

@@ -68,7 +68,11 @@ function loadYoutubeTimingHooks() {
     __ISWEEP_TEST_MODE__: true,
     setTimeout,
     clearTimeout,
-    setInterval,
+    setInterval: (...args) => {
+      const timer = setInterval(...args);
+      timer.unref?.();
+      return timer;
+    },
     clearInterval,
     requestAnimationFrame: (cb) => setTimeout(cb, 0),
     cancelAnimationFrame: (id) => clearTimeout(id),
@@ -621,6 +625,32 @@ test('caption_remote cannot independently control playback mute state', () => {
   assert.equal(/\.muted\s*=/.test(source), false);
   assert.equal(source.includes('youtube_captions.js is the sole playback mute owner'), true);
   assert.equal(source.includes('function processCaption()'), true);
+  assert.equal(source.includes('const canonicalItems = Array.isArray(data.blocklist?.items)'), true);
+});
+
+test('synced canonical hell preference matches a native caption and schedules mute', () => {
+  const hooks = loadYoutubeTimingHooks();
+  hooks.setCachedPreferences({
+    enabled: true,
+    blocklist: { enabled: true, items: ['hell'] },
+    categories: { language: { enabled: true } },
+  });
+  hooks.applyCleanCaptionSettings({
+    cleanCaptionsEnabled: true,
+    cleanCaptionWordMuteMode: 'captions_word_mute',
+  }, 'test');
+
+  const result = hooks.onCaption({
+    text: 'What the hell',
+    source: 'page_caption_dom',
+    startTime: 0,
+    endTime: 0.6,
+  });
+
+  assert.equal(result.matches.length, 1);
+  assert.equal(result.matches[0].word.toLowerCase(), 'hell');
+  assert.equal(hooks.getMuteControllerState().active, true);
+  hooks.restoreMuteState('test_cleanup');
 });
 
 test('caption_remote preserves selected-word masking and supported caption styles', () => {
