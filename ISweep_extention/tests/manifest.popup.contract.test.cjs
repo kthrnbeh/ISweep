@@ -57,6 +57,7 @@ test('site token bridge matches the local docs server root', () => {
   );
   assert.ok(contentScript);
   assert.equal(contentScript.matches.includes('http://127.0.0.1:5500/*'), true);
+  assert.equal(contentScript.matches.includes('http://127.0.0.1:5500/docs/*'), true);
   assert.equal(contentScript.matches.includes('http://localhost:5500/*'), true);
 });
 

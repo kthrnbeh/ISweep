@@ -64,7 +64,11 @@
             <div class="dropdown-section">
               <button id="themeToggleDropdown">Toggle Theme</button>
             </div>
-            <div class="dropdown-section">
+            <div class="dropdown-section" data-auth-signed-out>
+              <button type="button" data-open-auth="signin">Sign In</button>
+              <button type="button" data-open-auth="create">Create Account</button>
+            </div>
+            <div class="dropdown-section" data-auth-signed-in>
               <a href="Account.html">Account</a>
               <a href="Settings.html">Settings</a>
               <button id="signOutBtn" data-logout>Sign Out</button>

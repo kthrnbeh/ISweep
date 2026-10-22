@@ -11,14 +11,11 @@ async function pushTokenToExtension() {
       return { ok: true, hasToken: false };
     }
 
-    // Wait until the token is actually in extension storage before asking the
-    // background worker to fetch /preferences. This removes the old race.
-    await chrome.storage.local.set({ [TOKEN_KEY]: token });
-
     let syncResult = null;
     try {
       syncResult = await chrome.runtime.sendMessage({
         type: 'isweep_sync_prefs',
+        token,
         userId: window.localStorage.getItem(USER_ID_KEY) || null,
       });
     } catch (err) {
@@ -30,9 +27,10 @@ async function pushTokenToExtension() {
     });
 
     return {
-      ok: true,
+      ok: syncResult?.ok === true,
       hasToken: true,
       prefsSynced: syncResult?.ok === true,
+      error: syncResult?.ok === true ? null : (syncResult?.error || 'preference sync failed'),
     };
   } catch (err) {
     console.warn('[ISWEEP][TOKEN_BRIDGE] token bridge failed', err?.message || err);

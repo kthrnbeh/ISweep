@@ -1694,7 +1694,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     handleLogin(message.email, message.password).then(sendResponse);
     return true; // async
   } else if (message.type === 'isweep_sync_prefs') {
-    handleSyncPrefs(message.userId).then(sendResponse);
+    const syncTask = message.token
+      ? handleSiteTokenSync(message.token, message.userId)
+      : handleSyncPrefs(message.userId);
+    syncTask.then(sendResponse);
     return true; // async
   } else if (message.type === 'isweep_markers_analyze') {
     handleMarkerAnalyze(message.video_id, message.force_refresh === true).then(sendResponse);
@@ -2934,5 +2937,45 @@ async function handleSyncPrefs(expectedUserId = null) {
   } catch (err) {
     console.warn(LOG_PREFIX, 'prefs sync failed', err?.message || err);
     return { ok: false, error: err?.message || 'sync failed' };
+  }
+}
+
+// Site pages must never write directly into extension storage. Validate the
+// supplied bearer token first, then update the extension session only after
+// the backend accepts it and the known account identity is compatible.
+async function handleSiteTokenSync(siteToken, expectedUserId = null) {
+  const token = String(siteToken || '').trim();
+  if (!token) return { ok: false, error: 'missing token' };
+
+  const backendUrl = await getBackendUrl();
+  const storedAccount = await chrome.storage.local.get([
+    STORAGE_KEYS.USER_ID,
+    TOKEN_KEY,
+    STORAGE_KEYS.PREFS,
+  ]);
+  const normalizedExpectedUserId = expectedUserId == null ? null : String(expectedUserId);
+  const normalizedStoredUserId = storedAccount[STORAGE_KEYS.USER_ID] == null
+    ? null
+    : String(storedAccount[STORAGE_KEYS.USER_ID]);
+
+  if (normalizedExpectedUserId && normalizedStoredUserId
+    && normalizedExpectedUserId !== normalizedStoredUserId) {
+    console.warn(LOG_PREFIX, 'site token sync rejected account mismatch');
+    return { ok: false, error: 'account mismatch' };
+  }
+
+  try {
+    const result = await fetchPreferences(token, backendUrl);
+    const updates = { [TOKEN_KEY]: token };
+    await chrome.storage.local.set(updates);
+    console.log(LOG_PREFIX, 'site token sync success', result.status);
+    return {
+      ok: true,
+      status: result.status,
+      selectedWordCount: result.selectedWordCount,
+    };
+  } catch (err) {
+    console.warn(LOG_PREFIX, 'site token sync failed', { reason: 'backend_rejected' });
+    return { ok: false, error: 'preference sync failed' };
   }
 }

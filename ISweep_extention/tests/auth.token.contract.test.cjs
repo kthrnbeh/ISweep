@@ -39,12 +39,13 @@ test('filter sync guard reads canonical storage without rewriting legacy tokens'
   assert.equal(source.includes('localStorage.setItem(SHARED_TOKEN_KEY'), false);
 });
 
-test('website bridge forwards only a sanitized user id for account consistency', () => {
+test('website bridge delegates token validation and forwards a sanitized user id', () => {
   const source = read('ISweep_extention/site_token_bridge.js');
   assert.equal(source.includes("const USER_ID_KEY = 'isweep-user-id';"), true);
   assert.equal(source.includes('userId: window.localStorage.getItem(USER_ID_KEY) || null'), true);
+  assert.equal(source.includes('token,'), true);
+  assert.equal(source.includes('chrome.storage.local.set({ [TOKEN_KEY]: token })'), false);
   assert.equal(source.includes('console.log'), true);
-  assert.equal(source.includes('token,'), false);
 });
 
 test('development caption token remains isolated from the canonical account token', () => {

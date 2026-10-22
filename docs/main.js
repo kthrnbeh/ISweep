@@ -104,6 +104,8 @@ const kbDropdown = document.getElementById('kbDropdown');
 const kbWrapper = document.querySelector('.kb-wrapper');
 const signedInBlock = document.querySelector('[data-auth-signed-in]');
 const signedOutBlock = document.querySelector('[data-auth-signed-out]');
+const signedInControls = document.querySelectorAll('[data-auth-signed-in]');
+const signedOutControls = document.querySelectorAll('[data-auth-signed-out]');
 const authLaunchers = document.querySelectorAll('[data-open-auth]');
 const authSwitchers = document.querySelectorAll('[data-switch-auth]');
 const logoutButtons = document.querySelectorAll('[data-logout]');
@@ -189,7 +191,14 @@ function closeAuth() {
 
 function syncAuthUI() {
   const state = authState.get();
-  const isSignedIn = Boolean(state);
+  const isSignedIn = Boolean(state && localStorage.getItem(TOKEN_KEY));
+
+  signedInControls.forEach((element) => {
+    element.style.display = isSignedIn ? '' : 'none';
+  });
+  signedOutControls.forEach((element) => {
+    element.style.display = isSignedIn ? 'none' : '';
+  });
 
   if (signedInBlock && signedOutBlock) {
     signedInBlock.style.display = isSignedIn ? 'block' : 'none';
@@ -216,6 +225,9 @@ function syncAuthUI() {
   }
 
   setKbAvatarInitials(state);
+  if (kbToggle) {
+    kbToggle.setAttribute('aria-label', isSignedIn ? 'Open account menu' : 'Sign in or create an account');
+  }
 }
 
 async function callAuthEndpoint(path, payload) {
@@ -1525,6 +1537,11 @@ async function fetchPreferencesFromBackend() {
     if (!res.ok) {
       const msg =
         await res.text();
+
+      if (res.status === 401 || res.status === 403) {
+        clearSession();
+        syncAuthUI();
+      }
 
       console.warn(
         '[ISWEEP][FE] /preferences failed',
