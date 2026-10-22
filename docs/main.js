@@ -13,12 +13,14 @@ const CURRENT_PLAN_KEY = "currentPlan"; // Stores the selected plan in localStor
 const SETTINGS_KEY = "isweep-settings"; // Stores settings payloads in localStorage for the settings page demo.
 const themePreferenceKey = 'isweep-theme'; // Stores the user’s theme preference so it survives reloads.
 const themeLabelMap = { light: 'Light Mode', dark: 'Dark Mode' }; // Maps preference keys to human-friendly labels for the dropdown text.
-const authStateKey = 'auth-state'; // Stores { name, email, token } as a placeholder auth state until backend exists.
+const authStateKey = 'auth-state'; // Stores safe account display metadata only.
 const backendUrlKey = 'isweep-backend-url'; // Allows overriding the backend URL for local dev.
-const tokenStorageKey = 'isweep-token'; // Stores auth token from backend.
 const userIdStorageKey = 'isweep-user-id'; // Stores user id returned by backend.
 const preferencesCacheKey = 'isweep-preferences'; // Caches preferences for offline fallback.
 const TOKEN_KEY = 'isweep_auth_token'; // Unified token key shared with extension bridge.
+const LEGACY_TOKEN_KEYS = ['isweep-token', 'isweepToken'];
+const AUTH_LOGGED_OUT_KEY = 'isweep-auth-logged-out';
+const AUTH_MIGRATION_KEY = 'isweep-auth-token-migrated-v1';
 const LANGUAGE_WORDLIST_URL = 'wordlists/language_words.json'; // Predefined language words per subfilter.
 const LANGUAGE_WORDLIST_MIGRATION_KEY = 'isweep-language-wordlist-v2'; // One-time migration so newly added default language words become selected for existing users.
 const LANGUAGE_WORDLIST_NEW_DEFAULT_IDS = {
@@ -86,10 +88,6 @@ const FILTER_CATEGORY_CONFIG = {
   },
 };
 
-// Migration: copy older camelCase keys into the new kebab-case keys so existing users stay signed in.
-if (!localStorage.getItem(tokenStorageKey) && localStorage.getItem('isweepToken')) {
-  localStorage.setItem(tokenStorageKey, localStorage.getItem('isweepToken'));
-}
 if (!localStorage.getItem(userIdStorageKey) && localStorage.getItem('isweepUserId')) {
   localStorage.setItem(userIdStorageKey, localStorage.getItem('isweepUserId'));
 }
@@ -238,26 +236,89 @@ async function callAuthEndpoint(path, payload) {
 }
 
 function persistSession({ token, userId, email, name, initials }) {
-  localStorage.setItem(tokenStorageKey, token);
   localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem(userIdStorageKey, userId);
+  LEGACY_TOKEN_KEYS.forEach((key) => localStorage.removeItem(key));
+  localStorage.removeItem(AUTH_LOGGED_OUT_KEY);
+  localStorage.removeItem(AUTH_MIGRATION_KEY);
 
   const resolvedName = name || email.split('@')[0] || 'User';
 
   authState.set({
     name: resolvedName,
     email,
-    token,
     initials: initials || deriveInitials(resolvedName, email),
   });
 
   setKbAvatarInitials(authState.get());
 }
 
-function clearSession() {
-  localStorage.removeItem(tokenStorageKey);
+function clearSession({ markLoggedOut = true } = {}) {
+  localStorage.removeItem(TOKEN_KEY);
+  LEGACY_TOKEN_KEYS.forEach((key) => localStorage.removeItem(key));
   localStorage.removeItem(userIdStorageKey);
+  localStorage.removeItem('isweepUserId');
+  localStorage.removeItem(preferencesCacheKey);
   authState.clear();
+  if (markLoggedOut) {
+    localStorage.setItem(AUTH_LOGGED_OUT_KEY, '1');
+  }
+}
+
+async function validateToken(token) {
+  try {
+    const response = await fetch(`${getBackendUrl()}/preferences`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return response.ok;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function migrateLegacySession() {
+  if (localStorage.getItem(AUTH_LOGGED_OUT_KEY) === '1') {
+    clearSession({ markLoggedOut: true });
+    return false;
+  }
+
+  if (localStorage.getItem(AUTH_MIGRATION_KEY) === 'done'
+    && !localStorage.getItem(TOKEN_KEY)) {
+    return false;
+  }
+
+  if (localStorage.getItem(TOKEN_KEY)) {
+    LEGACY_TOKEN_KEYS.forEach((key) => localStorage.removeItem(key));
+    const state = authState.get();
+    if (state?.token) {
+      delete state.token;
+      authState.set(state);
+    }
+    localStorage.setItem(AUTH_MIGRATION_KEY, 'done');
+    return true;
+  }
+
+  const state = authState.get();
+  if (!state?.email) return false;
+
+  const legacyToken = state.token
+    || LEGACY_TOKEN_KEYS.map((key) => localStorage.getItem(key)).find(Boolean);
+  if (!legacyToken) return false;
+
+  const valid = await validateToken(legacyToken);
+  if (!valid) {
+    clearSession({ markLoggedOut: true });
+    localStorage.setItem(AUTH_MIGRATION_KEY, 'done');
+    return false;
+  }
+
+  localStorage.setItem(TOKEN_KEY, legacyToken);
+  LEGACY_TOKEN_KEYS.forEach((key) => localStorage.removeItem(key));
+  delete state.token;
+  authState.set(state);
+  localStorage.setItem(AUTH_MIGRATION_KEY, 'done');
+  return true;
 }
 
 const savedThemePreference =
@@ -419,7 +480,15 @@ if (createAccountForm) {
   });
 }
 
-syncAuthUI();
+migrateLegacySession()
+  .then((sessionReady) => {
+    syncAuthUI();
+    if (sessionReady) return fetchAndCachePreferences();
+    return null;
+  })
+  .catch(() => {
+    syncAuthUI();
+  });
 
 //-----------------------------------------------------
 //  ISWEEP PLAN SYSTEM
@@ -1429,10 +1498,7 @@ function uiToPreferences(saved) {
 }
 
 async function fetchPreferencesFromBackend() {
-  const token =
-    localStorage.getItem(
-      tokenStorageKey
-    );
+  const token = localStorage.getItem(TOKEN_KEY);
 
   if (!token) {
     return null;
@@ -1494,10 +1560,7 @@ async function fetchPreferencesFromBackend() {
 }
 
 async function persistPreferences(preferences) {
-  const token =
-    localStorage.getItem(
-      tokenStorageKey
-    );
+  const token = localStorage.getItem(TOKEN_KEY);
 
   if (!token) {
     console.warn(

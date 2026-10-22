@@ -1694,7 +1694,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     handleLogin(message.email, message.password).then(sendResponse);
     return true; // async
   } else if (message.type === 'isweep_sync_prefs') {
-    handleSyncPrefs().then(sendResponse);
+    handleSyncPrefs(message.userId).then(sendResponse);
     return true; // async
   } else if (message.type === 'isweep_markers_analyze') {
     handleMarkerAnalyze(message.video_id, message.force_refresh === true).then(sendResponse);
@@ -2897,8 +2897,18 @@ async function handleLogin(email, password) {
   }
 }
 
-async function handleSyncPrefs() {
+async function handleSyncPrefs(expectedUserId = null) {
   const backendUrl = await getBackendUrl();
+  const storedAccount = await chrome.storage.local.get([STORAGE_KEYS.USER_ID]);
+  const normalizedExpectedUserId = expectedUserId == null ? null : String(expectedUserId);
+  const normalizedStoredUserId = storedAccount[STORAGE_KEYS.USER_ID] == null
+    ? null
+    : String(storedAccount[STORAGE_KEYS.USER_ID]);
+  if (normalizedExpectedUserId && normalizedStoredUserId
+    && normalizedExpectedUserId !== normalizedStoredUserId) {
+    console.warn(LOG_PREFIX, 'sync prefs rejected account mismatch');
+    return { ok: false, error: 'account mismatch' };
+  }
   const token = await getAuthToken();
   if (!token) {
     const devLocal = await getDevLocalAuthContext();
@@ -2912,6 +2922,9 @@ async function handleSyncPrefs() {
   console.log(LOG_PREFIX, 'prefs sync start');
   try {
     const result = await fetchPreferences(token, backendUrl);
+    if (normalizedExpectedUserId && !normalizedStoredUserId) {
+      await chrome.storage.local.set({ [STORAGE_KEYS.USER_ID]: normalizedExpectedUserId });
+    }
     console.log(LOG_PREFIX, 'prefs sync success', result.status);
     return {
       ok: true,

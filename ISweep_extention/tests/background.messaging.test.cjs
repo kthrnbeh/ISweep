@@ -132,6 +132,41 @@ test('canonical blocklist items are not merged with stale legacy word fields', (
   assert.deepEqual(Array.from(normalized.blocklist.items), ['hell']);
 });
 
+test('preference sync rejects a website account id that differs from extension storage', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({ isweepUserId: 22 });
+  bg.getAuthToken = async () => 'test-token';
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async () => {
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+
+  assert.equal(bg.__getLocalStore().isweepUserId, 22);
+  assert.equal(bg.handleSyncPrefs.toString().includes('account mismatch'), true);
+
+  const result = await bg.__sendRuntimeMessage({ type: 'isweep_sync_prefs', userId: '11' });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'account mismatch');
+});
+
+test('preference sync records a website account id when extension metadata is absent', async () => {
+  const bg = loadBackgroundContext();
+  bg.getAuthToken = async () => 'test-token';
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ blocklist: { items: ['hell'] } }),
+  });
+
+  const result = await bg.handleSyncPrefs('11');
+  const stored = await bg.chrome.storage.local.get(['isweepUserId']);
+
+  assert.equal(result.ok, true);
+  assert.equal(stored.isweepUserId, '11');
+});
+
 test('caption runtime status prefers YouTube fallback when active tab reports live masked captions', async () => {
   const bg = loadBackgroundContext();
   bg.fetch = async () => ({ ok: true, status: 200, json: async () => ({ status: 'ok', stt_enabled: true }) });

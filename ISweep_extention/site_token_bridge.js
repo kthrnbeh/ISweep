@@ -1,6 +1,7 @@
 // Bridges site-localStorage auth token into extension storage so popup/background share the same Bearer.
 const TOKEN_KEY = 'isweep_auth_token'; // Shared token key between site and extension
 const PREFS_CACHE_KEY = 'isweep-preferences'; // Frontend cache updated after /preferences saves
+const USER_ID_KEY = 'isweep-user-id';
 
 async function pushTokenToExtension() {
   try {
@@ -16,7 +17,10 @@ async function pushTokenToExtension() {
 
     let syncResult = null;
     try {
-      syncResult = await chrome.runtime.sendMessage({ type: 'isweep_sync_prefs' });
+      syncResult = await chrome.runtime.sendMessage({
+        type: 'isweep_sync_prefs',
+        userId: window.localStorage.getItem(USER_ID_KEY) || null,
+      });
     } catch (err) {
       console.warn('[ISWEEP][TOKEN_BRIDGE] preference sync request failed', err?.message || err);
     }
