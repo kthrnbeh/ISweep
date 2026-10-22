@@ -88,8 +88,49 @@ function loadBackgroundContext() {
       setTimeout(() => resolve(undefined), 0);
     }
   });
+  context.__getLocalStore = () => ({ ...localStore });
   return context;
 }
+
+test('preference sync preserves canonical blocklist items and exposes the selected-word count', async () => {
+  const bg = loadBackgroundContext();
+  bg.getAuthToken = async () => 'test-token';
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      enabled: true,
+      blocklist: { enabled: true, action: 'mute', items: ['hell'] },
+      customWords: ['stale-word'],
+      categories: { language: { enabled: true, items: ['legacy-word'] } },
+    }),
+  });
+
+  const result = await bg.handleSyncPrefs();
+  const stored = bg.__getLocalStore().isweepPreferences;
+
+  assert.equal(result.ok, true);
+  assert.equal(result.selectedWordCount, 1);
+  assert.deepEqual(Array.from(stored.blocklist.items), ['hell']);
+  assert.equal(JSON.stringify(bg.makeLocalDecisionFromPreferences('What the hell', stored)), JSON.stringify({
+    action: 'mute',
+    reason: 'local prefs blocklist match: hell',
+    duration_seconds: 4,
+    matched_category: 'blocklist',
+  }));
+});
+
+test('canonical blocklist items are not merged with stale legacy word fields', () => {
+  const bg = loadBackgroundContext();
+  const normalized = bg.normalizePreferences({
+    blocklist: { items: ['hell'] },
+    customWords: ['stale-word'],
+    categories: { language: { items: ['legacy-word'] } },
+  });
+
+  assert.deepEqual(Array.from(normalized.blocklist.items), ['hell']);
+});
 
 test('caption runtime status prefers YouTube fallback when active tab reports live masked captions', async () => {
   const bg = loadBackgroundContext();

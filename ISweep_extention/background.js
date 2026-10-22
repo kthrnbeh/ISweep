@@ -456,12 +456,16 @@ function normalizePreferences(raw) {
   const categories = prefs.categories && typeof prefs.categories === 'object' ? prefs.categories : {};
   const lang = categories.language && typeof categories.language === 'object' ? categories.language : {};
 
-  const candidates = [];
-  if (Array.isArray(prefs?.blocklist?.items)) candidates.push(...prefs.blocklist.items);
-  if (Array.isArray(prefs?.customWords)) candidates.push(...prefs.customWords);
-  if (Array.isArray(lang.items)) candidates.push(...lang.items);
-  if (Array.isArray(lang.words)) candidates.push(...lang.words);
-  if (Array.isArray(lang.customWords)) candidates.push(...lang.customWords);
+  const canonicalItems = Array.isArray(prefs?.blocklist?.items)
+    ? prefs.blocklist.items
+    : null;
+  const candidates = canonicalItems ? [...canonicalItems] : [];
+  if (!canonicalItems) {
+    if (Array.isArray(prefs?.customWords)) candidates.push(...prefs.customWords);
+    if (Array.isArray(lang.items)) candidates.push(...lang.items);
+    if (Array.isArray(lang.words)) candidates.push(...lang.words);
+    if (Array.isArray(lang.customWords)) candidates.push(...lang.customWords);
+  }
 
   const cleaned = Array.from(
     new Set(
@@ -1558,7 +1562,18 @@ async function fetchPreferences(token, backendUrl) {
   const prefs = await res.json();
   const normalized = normalizePreferences(prefs); // Ensure blocklist/items always present
   await chrome.storage.local.set({ [STORAGE_KEYS.PREFS]: normalized });
-  return { prefs: normalized, status: res.status };
+  const selectedWords = normalized.blocklist.items;
+  console.log('[ISWEEP][PREFS] synchronized', {
+    source: 'backend',
+    status: res.status,
+    selectedWordCount: selectedWords.length,
+    testWordHellPresent: selectedWords.includes('hell'),
+  });
+  return {
+    prefs: normalized,
+    status: res.status,
+    selectedWordCount: selectedWords.length,
+  };
 }
 
 // Icon paths (will use emoji/text as fallback if actual icons don't exist)
@@ -1662,7 +1677,11 @@ async function updateIcon(isEnabled) {
  * Handle messages from content scripts or popup
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log(LOG_PREFIX, 'received message:', message);
+  console.log(LOG_PREFIX, 'received message:', {
+    type: message?.type || null,
+    action: message?.action || null,
+    tabId: sender?.tab?.id ?? null,
+  });
 
   if (message.action === 'updateIcon') {
     updateIcon(message.enabled !== false);
@@ -2853,9 +2872,9 @@ async function handleLogin(email, password) {
       body: JSON.stringify({ email, password }),
     });
     if (res.status !== 200 && res.status !== 201) {
-      const msg = await res.text();
-      console.warn('[ISWEEP][BG][AUTH] login failed', res.status, msg || '');
-      return { ok: false, error: msg || `status ${res.status}` };
+      await res.text();
+      console.warn('[ISWEEP][BG][AUTH] login failed', { status: res.status });
+      return { ok: false, error: `status ${res.status}` };
     }
     const data = await res.json();
     const token = data.token;
@@ -2873,7 +2892,7 @@ async function handleLogin(email, password) {
     console.log('[ISWEEP][BG][AUTH] login success', res.status);
     return { ok: true, status: res.status };
   } catch (err) {
-    console.error('[ISWEEP][BG][AUTH] login failed', err?.message || err);
+    console.error('[ISWEEP][BG][AUTH] login failed', { reason: 'request_failed' });
     return { ok: false, error: err?.message || 'login failed' };
   }
 }
@@ -2894,7 +2913,11 @@ async function handleSyncPrefs() {
   try {
     const result = await fetchPreferences(token, backendUrl);
     console.log(LOG_PREFIX, 'prefs sync success', result.status);
-    return { ok: true, status: result.status };
+    return {
+      ok: true,
+      status: result.status,
+      selectedWordCount: result.selectedWordCount,
+    };
   } catch (err) {
     console.warn(LOG_PREFIX, 'prefs sync failed', err?.message || err);
     return { ok: false, error: err?.message || 'sync failed' };
