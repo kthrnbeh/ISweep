@@ -104,13 +104,13 @@ This is static HTML/JS/Tailwind.
 
 Recommended: VS Code → Live Server
 
-Right-click ISweep_frontend/docs/index.html → Open with Live Server
+Right-click `docs/index.html` → Open with Live Server
 
 You’ll get something like:
 
 http://127.0.0.1:5500/docs/
 
-Frontend details live here: ISweep_frontend/README.md 
+Frontend details live here: `docs/`
 
 README
 
@@ -142,14 +142,15 @@ Or if it’s Flask:
 flask run
 
 
-Expected: backend running at something like:
+Expected backend URL:
 
-http://127.0.0.1:8000 or http://127.0.0.1:5000
+http://127.0.0.1:5000
 
 Quick HOW TO RUN LOCALLY
 - Backend: in ISweep_backend/ `python app.py` (uses SQLite file isweep.db and .env SECRET_KEY/DATABASE_PATH if set)
-- Frontend: open ISweep_frontend/docs/index.html with Live Server → http://127.0.0.1:5500/ISweep_frontend/docs/
-- Extension: chrome://extensions → Load unpacked → ISweep_extention/; set backend URL to http://127.0.0.1:5000 in Options; login via popup with the same email/password as backend.
+- Frontend: open `docs/index.html` with Live Server → http://127.0.0.1:5500/docs/
+- Extension: chrome://extensions → Load unpacked → `ISweep_extention/`; set backend URL to http://127.0.0.1:5000 in Options; login via popup with the same development account as the website.
+- For testing, set `DATABASE_PATH` to a new temporary SQLite path before starting Flask. Never use the production database for experiments.
 
 End-to-end smoke test checklist
 - Backend up at http://127.0.0.1:5000 and /health returns healthy.
