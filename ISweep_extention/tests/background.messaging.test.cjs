@@ -88,8 +88,193 @@ function loadBackgroundContext() {
       setTimeout(() => resolve(undefined), 0);
     }
   });
+  context.__getLocalStore = () => ({ ...localStore });
   return context;
 }
+
+test('preference sync preserves canonical blocklist items and exposes the selected-word count', async () => {
+  const bg = loadBackgroundContext();
+  bg.getAuthToken = async () => 'test-token';
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      enabled: true,
+      blocklist: { enabled: true, action: 'mute', items: ['hell'] },
+      customWords: ['stale-word'],
+      categories: { language: { enabled: true, items: ['legacy-word'] } },
+    }),
+  });
+
+  const result = await bg.handleSyncPrefs();
+  const stored = bg.__getLocalStore().isweepPreferences;
+
+  assert.equal(result.ok, true);
+  assert.equal(result.selectedWordCount, 1);
+  assert.deepEqual(Array.from(stored.blocklist.items), ['hell']);
+  assert.equal(JSON.stringify(bg.makeLocalDecisionFromPreferences('What the hell', stored)), JSON.stringify({
+    action: 'mute',
+    reason: 'local prefs blocklist match: hell',
+    duration_seconds: 4,
+    matched_category: 'blocklist',
+  }));
+});
+
+test('canonical blocklist items are not merged with stale legacy word fields', () => {
+  const bg = loadBackgroundContext();
+  const normalized = bg.normalizePreferences({
+    blocklist: { items: ['hell'] },
+    customWords: ['stale-word'],
+    categories: { language: { items: ['legacy-word'] } },
+  });
+
+  assert.deepEqual(Array.from(normalized.blocklist.items), ['hell']);
+});
+
+test('preference sync rejects a website account id that differs from extension storage', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({ isweepUserId: 22 });
+  bg.getAuthToken = async () => 'test-token';
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async () => {
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+
+  assert.equal(bg.__getLocalStore().isweepUserId, 22);
+  assert.equal(bg.handleSyncPrefs.toString().includes('account mismatch'), true);
+
+  const result = await bg.__sendRuntimeMessage({ type: 'isweep_sync_prefs', userId: '11' });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'account mismatch');
+});
+
+test('preference sync records a website account id when extension metadata is absent', async () => {
+  const bg = loadBackgroundContext();
+  bg.getAuthToken = async () => 'test-token';
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ blocklist: { items: ['hell'] } }),
+  });
+
+  const result = await bg.handleSyncPrefs('11');
+  const stored = await bg.chrome.storage.local.get(['isweepUserId']);
+
+  assert.equal(result.ok, true);
+  assert.equal(stored.isweepUserId, '11');
+});
+
+test('site token sync preserves the extension session when account ids differ', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({
+    isweep_auth_token: 'existing-token',
+    isweepUserId: '22',
+    isweepPreferences: { blocklist: { items: ['existing-word'] } },
+  });
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ blocklist: { items: ['hell'] } }),
+  });
+
+  const result = await bg.__sendRuntimeMessage({
+    type: 'isweep_sync_prefs',
+    token: 'website-token',
+    userId: '11',
+  });
+  const stored = bg.__getLocalStore();
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'account mismatch');
+  assert.equal(stored.isweep_auth_token, 'existing-token');
+  assert.equal(stored.isweepUserId, '22');
+  assert.deepEqual(Array.from(stored.isweepPreferences.blocklist.items), ['existing-word']);
+});
+
+test('site token sync validates first and stores the canonical session after success', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({ isweepUserId: '11' });
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async (url, options) => {
+    assert.equal(options.headers.Authorization, 'Bearer website-token');
+    if (String(url).endsWith('/auth/me')) {
+      return { ok: true, status: 200, json: async () => ({ user_id: 11 }) };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ blocklist: { items: ['hell'] } }),
+    };
+  };
+
+  const result = await bg.__sendRuntimeMessage({
+    type: 'isweep_sync_prefs',
+    token: 'website-token',
+    userId: '11',
+  });
+  const stored = bg.__getLocalStore();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.selectedWordCount, 1);
+  assert.equal(stored.isweep_auth_token, 'website-token');
+  assert.equal(stored.isweepUserId, '11');
+  assert.deepEqual(Array.from(stored.isweepPreferences.blocklist.items), ['hell']);
+});
+
+test('site token sync rejects backend identity mismatch before replacing preferences', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({
+    isweep_auth_token: 'existing-token',
+    isweepUserId: '22',
+    isweepPreferences: { blocklist: { items: ['existing-word'] } },
+  });
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async (url) => {
+    if (String(url).endsWith('/auth/me')) {
+      return { ok: true, status: 200, json: async () => ({ user_id: 11 }) };
+    }
+    throw new Error('preferences should not be fetched after identity mismatch');
+  };
+
+  const result = await bg.__sendRuntimeMessage({
+    type: 'isweep_sync_prefs',
+    token: 'website-token',
+    userId: '11',
+  });
+  const stored = bg.__getLocalStore();
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'account mismatch');
+  assert.equal(stored.isweep_auth_token, 'existing-token');
+  assert.deepEqual(Array.from(stored.isweepPreferences.blocklist.items), ['existing-word']);
+});
+
+test('site token sync does not replace credentials after backend rejection', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({
+    isweep_auth_token: 'existing-token',
+    isweepUserId: '11',
+    isweepPreferences: { blocklist: { items: ['existing-word'] } },
+  });
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async () => ({ status: 401, ok: false, text: async () => 'Unauthorized' });
+
+  const result = await bg.__sendRuntimeMessage({
+    type: 'isweep_sync_prefs',
+    token: 'expired-website-token',
+    userId: '11',
+  });
+  const stored = bg.__getLocalStore();
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'preference sync failed');
+  assert.equal(stored.isweep_auth_token, 'existing-token');
+  assert.deepEqual(Array.from(stored.isweepPreferences.blocklist.items), ['existing-word']);
+});
 
 test('caption runtime status prefers YouTube fallback when active tab reports live masked captions', async () => {
   const bg = loadBackgroundContext();

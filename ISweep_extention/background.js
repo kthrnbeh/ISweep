@@ -456,12 +456,16 @@ function normalizePreferences(raw) {
   const categories = prefs.categories && typeof prefs.categories === 'object' ? prefs.categories : {};
   const lang = categories.language && typeof categories.language === 'object' ? categories.language : {};
 
-  const candidates = [];
-  if (Array.isArray(prefs?.blocklist?.items)) candidates.push(...prefs.blocklist.items);
-  if (Array.isArray(prefs?.customWords)) candidates.push(...prefs.customWords);
-  if (Array.isArray(lang.items)) candidates.push(...lang.items);
-  if (Array.isArray(lang.words)) candidates.push(...lang.words);
-  if (Array.isArray(lang.customWords)) candidates.push(...lang.customWords);
+  const canonicalItems = Array.isArray(prefs?.blocklist?.items)
+    ? prefs.blocklist.items
+    : null;
+  const candidates = canonicalItems ? [...canonicalItems] : [];
+  if (!canonicalItems) {
+    if (Array.isArray(prefs?.customWords)) candidates.push(...prefs.customWords);
+    if (Array.isArray(lang.items)) candidates.push(...lang.items);
+    if (Array.isArray(lang.words)) candidates.push(...lang.words);
+    if (Array.isArray(lang.customWords)) candidates.push(...lang.customWords);
+  }
 
   const cleaned = Array.from(
     new Set(
@@ -1546,7 +1550,7 @@ async function refreshLocalDevCaptionToken(backendUrl) {
   return token;
 }
 
-async function fetchPreferences(token, backendUrl) {
+async function fetchPreferences(token, backendUrl, { persist = true } = {}) {
   const res = await fetch(`${backendUrl}/preferences`, {
     method: 'GET',
     headers: { Authorization: `Bearer ${token}` },
@@ -1557,8 +1561,32 @@ async function fetchPreferences(token, backendUrl) {
   }
   const prefs = await res.json();
   const normalized = normalizePreferences(prefs); // Ensure blocklist/items always present
-  await chrome.storage.local.set({ [STORAGE_KEYS.PREFS]: normalized });
-  return { prefs: normalized, status: res.status };
+  if (persist) {
+    await chrome.storage.local.set({ [STORAGE_KEYS.PREFS]: normalized });
+  }
+  const selectedWords = normalized.blocklist.items;
+  console.log('[ISWEEP][PREFS] synchronized', {
+    source: 'backend',
+    status: res.status,
+    selectedWordCount: selectedWords.length,
+    testWordHellPresent: selectedWords.includes('hell'),
+  });
+  return {
+    prefs: normalized,
+    status: res.status,
+    selectedWordCount: selectedWords.length,
+  };
+}
+
+async function fetchAuthenticatedIdentity(token, backendUrl) {
+  const res = await fetch(`${backendUrl}/auth/me`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`identity status ${res.status}`);
+  const body = await res.json();
+  if (body?.user_id == null) throw new Error('identity missing');
+  return String(body.user_id);
 }
 
 // Icon paths (will use emoji/text as fallback if actual icons don't exist)
@@ -1662,7 +1690,11 @@ async function updateIcon(isEnabled) {
  * Handle messages from content scripts or popup
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log(LOG_PREFIX, 'received message:', message);
+  console.log(LOG_PREFIX, 'received message:', {
+    type: message?.type || null,
+    action: message?.action || null,
+    tabId: sender?.tab?.id ?? null,
+  });
 
   if (message.action === 'updateIcon') {
     updateIcon(message.enabled !== false);
@@ -1675,7 +1707,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     handleLogin(message.email, message.password).then(sendResponse);
     return true; // async
   } else if (message.type === 'isweep_sync_prefs') {
-    handleSyncPrefs().then(sendResponse);
+    const syncTask = message.token
+      ? handleSiteTokenSync(message.token, message.userId)
+      : handleSyncPrefs(message.userId);
+    syncTask.then(sendResponse);
     return true; // async
   } else if (message.type === 'isweep_markers_analyze') {
     handleMarkerAnalyze(message.video_id, message.force_refresh === true).then(sendResponse);
@@ -2853,9 +2888,9 @@ async function handleLogin(email, password) {
       body: JSON.stringify({ email, password }),
     });
     if (res.status !== 200 && res.status !== 201) {
-      const msg = await res.text();
-      console.warn('[ISWEEP][BG][AUTH] login failed', res.status, msg || '');
-      return { ok: false, error: msg || `status ${res.status}` };
+      await res.text();
+      console.warn('[ISWEEP][BG][AUTH] login failed', { status: res.status });
+      return { ok: false, error: `status ${res.status}` };
     }
     const data = await res.json();
     const token = data.token;
@@ -2873,13 +2908,23 @@ async function handleLogin(email, password) {
     console.log('[ISWEEP][BG][AUTH] login success', res.status);
     return { ok: true, status: res.status };
   } catch (err) {
-    console.error('[ISWEEP][BG][AUTH] login failed', err?.message || err);
+    console.error('[ISWEEP][BG][AUTH] login failed', { reason: 'request_failed' });
     return { ok: false, error: err?.message || 'login failed' };
   }
 }
 
-async function handleSyncPrefs() {
+async function handleSyncPrefs(expectedUserId = null) {
   const backendUrl = await getBackendUrl();
+  const storedAccount = await chrome.storage.local.get([STORAGE_KEYS.USER_ID]);
+  const normalizedExpectedUserId = expectedUserId == null ? null : String(expectedUserId);
+  const normalizedStoredUserId = storedAccount[STORAGE_KEYS.USER_ID] == null
+    ? null
+    : String(storedAccount[STORAGE_KEYS.USER_ID]);
+  if (normalizedExpectedUserId && normalizedStoredUserId
+    && normalizedExpectedUserId !== normalizedStoredUserId) {
+    console.warn(LOG_PREFIX, 'sync prefs rejected account mismatch');
+    return { ok: false, error: 'account mismatch' };
+  }
   const token = await getAuthToken();
   if (!token) {
     const devLocal = await getDevLocalAuthContext();
@@ -2893,10 +2938,70 @@ async function handleSyncPrefs() {
   console.log(LOG_PREFIX, 'prefs sync start');
   try {
     const result = await fetchPreferences(token, backendUrl);
+    if (normalizedExpectedUserId && !normalizedStoredUserId) {
+      await chrome.storage.local.set({ [STORAGE_KEYS.USER_ID]: normalizedExpectedUserId });
+    }
     console.log(LOG_PREFIX, 'prefs sync success', result.status);
-    return { ok: true, status: result.status };
+    return {
+      ok: true,
+      status: result.status,
+      selectedWordCount: result.selectedWordCount,
+    };
   } catch (err) {
     console.warn(LOG_PREFIX, 'prefs sync failed', err?.message || err);
     return { ok: false, error: err?.message || 'sync failed' };
+  }
+}
+
+// Site pages must never write directly into extension storage. Validate the
+// supplied bearer token first, then update the extension session only after
+// the backend accepts it and the known account identity is compatible.
+async function handleSiteTokenSync(siteToken, expectedUserId = null) {
+  const token = String(siteToken || '').trim();
+  if (!token) return { ok: false, error: 'missing token' };
+
+  const backendUrl = await getBackendUrl();
+  const storedAccount = await chrome.storage.local.get([
+    STORAGE_KEYS.USER_ID,
+    TOKEN_KEY,
+    STORAGE_KEYS.PREFS,
+  ]);
+  const normalizedExpectedUserId = expectedUserId == null ? null : String(expectedUserId);
+  const normalizedStoredUserId = storedAccount[STORAGE_KEYS.USER_ID] == null
+    ? null
+    : String(storedAccount[STORAGE_KEYS.USER_ID]);
+
+  if (normalizedExpectedUserId && normalizedStoredUserId
+    && normalizedExpectedUserId !== normalizedStoredUserId) {
+    console.warn(LOG_PREFIX, 'site token sync rejected account mismatch');
+    return { ok: false, error: 'account mismatch' };
+  }
+
+  try {
+    const authenticatedUserId = await fetchAuthenticatedIdentity(token, backendUrl);
+    if (normalizedExpectedUserId && authenticatedUserId !== normalizedExpectedUserId) {
+      console.warn(LOG_PREFIX, 'site token sync rejected backend account mismatch');
+      return { ok: false, error: 'account mismatch' };
+    }
+    if (normalizedStoredUserId && authenticatedUserId !== normalizedStoredUserId) {
+      console.warn(LOG_PREFIX, 'site token sync rejected stored account mismatch');
+      return { ok: false, error: 'account mismatch' };
+    }
+    const result = await fetchPreferences(token, backendUrl, { persist: false });
+    const updates = {
+      [TOKEN_KEY]: token,
+      [STORAGE_KEYS.USER_ID]: authenticatedUserId,
+      [STORAGE_KEYS.PREFS]: result.prefs,
+    };
+    await chrome.storage.local.set(updates);
+    console.log(LOG_PREFIX, 'site token sync success', result.status);
+    return {
+      ok: true,
+      status: result.status,
+      selectedWordCount: result.selectedWordCount,
+    };
+  } catch (err) {
+    console.warn(LOG_PREFIX, 'site token sync failed', { reason: 'backend_rejected' });
+    return { ok: false, error: 'preference sync failed' };
   }
 }
