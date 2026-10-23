@@ -199,8 +199,11 @@ test('site token sync validates first and stores the canonical session after suc
   const bg = loadBackgroundContext();
   await bg.chrome.storage.local.set({ isweepUserId: '11' });
   bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
-  bg.fetch = async (_url, options) => {
+  bg.fetch = async (url, options) => {
     assert.equal(options.headers.Authorization, 'Bearer website-token');
+    if (String(url).endsWith('/auth/me')) {
+      return { ok: true, status: 200, json: async () => ({ user_id: 11 }) };
+    }
     return {
       ok: true,
       status: 200,
@@ -220,6 +223,34 @@ test('site token sync validates first and stores the canonical session after suc
   assert.equal(stored.isweep_auth_token, 'website-token');
   assert.equal(stored.isweepUserId, '11');
   assert.deepEqual(Array.from(stored.isweepPreferences.blocklist.items), ['hell']);
+});
+
+test('site token sync rejects backend identity mismatch before replacing preferences', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({
+    isweep_auth_token: 'existing-token',
+    isweepUserId: '22',
+    isweepPreferences: { blocklist: { items: ['existing-word'] } },
+  });
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async (url) => {
+    if (String(url).endsWith('/auth/me')) {
+      return { ok: true, status: 200, json: async () => ({ user_id: 11 }) };
+    }
+    throw new Error('preferences should not be fetched after identity mismatch');
+  };
+
+  const result = await bg.__sendRuntimeMessage({
+    type: 'isweep_sync_prefs',
+    token: 'website-token',
+    userId: '11',
+  });
+  const stored = bg.__getLocalStore();
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'account mismatch');
+  assert.equal(stored.isweep_auth_token, 'existing-token');
+  assert.deepEqual(Array.from(stored.isweepPreferences.blocklist.items), ['existing-word']);
 });
 
 test('site token sync does not replace credentials after backend rejection', async () => {

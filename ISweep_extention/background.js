@@ -1550,7 +1550,7 @@ async function refreshLocalDevCaptionToken(backendUrl) {
   return token;
 }
 
-async function fetchPreferences(token, backendUrl) {
+async function fetchPreferences(token, backendUrl, { persist = true } = {}) {
   const res = await fetch(`${backendUrl}/preferences`, {
     method: 'GET',
     headers: { Authorization: `Bearer ${token}` },
@@ -1561,7 +1561,9 @@ async function fetchPreferences(token, backendUrl) {
   }
   const prefs = await res.json();
   const normalized = normalizePreferences(prefs); // Ensure blocklist/items always present
-  await chrome.storage.local.set({ [STORAGE_KEYS.PREFS]: normalized });
+  if (persist) {
+    await chrome.storage.local.set({ [STORAGE_KEYS.PREFS]: normalized });
+  }
   const selectedWords = normalized.blocklist.items;
   console.log('[ISWEEP][PREFS] synchronized', {
     source: 'backend',
@@ -1574,6 +1576,17 @@ async function fetchPreferences(token, backendUrl) {
     status: res.status,
     selectedWordCount: selectedWords.length,
   };
+}
+
+async function fetchAuthenticatedIdentity(token, backendUrl) {
+  const res = await fetch(`${backendUrl}/auth/me`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`identity status ${res.status}`);
+  const body = await res.json();
+  if (body?.user_id == null) throw new Error('identity missing');
+  return String(body.user_id);
 }
 
 // Icon paths (will use emoji/text as fallback if actual icons don't exist)
@@ -2965,8 +2978,21 @@ async function handleSiteTokenSync(siteToken, expectedUserId = null) {
   }
 
   try {
-    const result = await fetchPreferences(token, backendUrl);
-    const updates = { [TOKEN_KEY]: token };
+    const authenticatedUserId = await fetchAuthenticatedIdentity(token, backendUrl);
+    if (normalizedExpectedUserId && authenticatedUserId !== normalizedExpectedUserId) {
+      console.warn(LOG_PREFIX, 'site token sync rejected backend account mismatch');
+      return { ok: false, error: 'account mismatch' };
+    }
+    if (normalizedStoredUserId && authenticatedUserId !== normalizedStoredUserId) {
+      console.warn(LOG_PREFIX, 'site token sync rejected stored account mismatch');
+      return { ok: false, error: 'account mismatch' };
+    }
+    const result = await fetchPreferences(token, backendUrl, { persist: false });
+    const updates = {
+      [TOKEN_KEY]: token,
+      [STORAGE_KEYS.USER_ID]: authenticatedUserId,
+      [STORAGE_KEYS.PREFS]: result.prefs,
+    };
     await chrome.storage.local.set(updates);
     console.log(LOG_PREFIX, 'site token sync success', result.status);
     return {
