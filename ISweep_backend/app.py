@@ -527,6 +527,13 @@ def login():
     return jsonify({'token': token, 'user_id': user['id']}), 200
 
 
+@app.route('/auth/me', methods=['GET'])
+@require_auth
+def authenticated_identity():
+    """Return only the backend-authenticated identity for a bearer token."""
+    return jsonify({'user_id': request.user_id}), 200
+
+
 @app.route('/api/users', methods=['POST'])
 def create_user():
     """

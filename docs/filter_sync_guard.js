@@ -2,7 +2,7 @@
  * ISWEEP COMPONENT: Filter-page save guard.
  *
  * Purpose:
- * - Keep the two historical website token keys aligned to the active account.
+ * - Use the website's canonical token key for the active account.
  * - Verify that pressing Save actually writes selected language words to /preferences.
  * - Retry the SAME backend /preferences save when the legacy page save silently leaves
  *   the backend with an empty blocklist.
@@ -16,9 +16,8 @@
 
   const SETTINGS_KEY = 'isweep-settings';
   const PREFS_CACHE_KEY = 'isweep-preferences';
-  const LEGACY_TOKEN_KEY = 'isweep-token';
   const SHARED_TOKEN_KEY = 'isweep_auth_token';
-  const AUTH_STATE_KEY = 'auth-state';
+  const LEGACY_TOKEN_KEYS = ['isweep-token', 'isweepToken'];
   const BACKEND_URL_KEY = 'isweep-backend-url';
   const DEFAULT_BACKEND = 'http://127.0.0.1:5000';
   const WORDLIST_URL = 'wordlists/language_words.json';
@@ -47,24 +46,12 @@
   }
 
   function currentToken() {
-    const auth = safeJson(localStorage.getItem(AUTH_STATE_KEY), null);
-    return String(
-      auth?.token
-      || localStorage.getItem(LEGACY_TOKEN_KEY)
-      || localStorage.getItem(SHARED_TOKEN_KEY)
-      || ''
-    ).trim();
+    return String(localStorage.getItem(SHARED_TOKEN_KEY) || '').trim();
   }
 
   function alignTokenKeys() {
     const token = currentToken();
-    if (!token) return null;
-    if (localStorage.getItem(LEGACY_TOKEN_KEY) !== token) {
-      localStorage.setItem(LEGACY_TOKEN_KEY, token);
-    }
-    if (localStorage.getItem(SHARED_TOKEN_KEY) !== token) {
-      localStorage.setItem(SHARED_TOKEN_KEY, token);
-    }
+    LEGACY_TOKEN_KEYS.forEach((key) => localStorage.removeItem(key));
     return token;
   }
 
@@ -312,7 +299,7 @@
       ? event.target.closest('[data-logout]')
       : null;
     if (!logout) return;
-    localStorage.removeItem(LEGACY_TOKEN_KEY);
+    LEGACY_TOKEN_KEYS.forEach((key) => localStorage.removeItem(key));
     localStorage.removeItem(SHARED_TOKEN_KEY);
   }, true);
 })();

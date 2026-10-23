@@ -94,6 +94,12 @@ Important: if backend is down, the extension should still have a “local fallba
 Local dev: run all 3 parts
 1) Frontend (website prototype)
 
+Use one canonical development website origin for extension integration:
+
+http://127.0.0.1:5500/docs/
+
+Open Filter.html, Account.html, and Settings.html from that same origin. Do not switch between port 5501, localhost, and GitHub Pages while testing one session; each origin has separate browser storage. The extension manifest includes the canonical 127.0.0.1:5500 origin and its /docs/* pages.
+
 This is static HTML/JS/Tailwind.
 
 Recommended: VS Code → Live Server

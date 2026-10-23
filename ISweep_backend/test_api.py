@@ -102,6 +102,13 @@ class TestAPI:
         assert isinstance(data.get('token'), str) and data['token']
         assert isinstance(data.get('user_id'), int)
 
+    def test_auth_me_returns_backend_authenticated_user_id(self, client):
+        response = client.post('/auth/signup', json={'email': 'auth-me@example.com', 'password': 'Password123!'})
+        data = json.loads(response.data)
+        identity = client.get('/auth/me', headers=auth_headers(data['token']))
+        assert identity.status_code == 200
+        assert identity.get_json() == {'user_id': data['user_id']}
+
     def test_auth_login_invalid_credentials_returns_clear_401_json(self, client):
         client.post('/auth/signup', json={'email': 'login-fail@example.com', 'password': 'Password123!'})
         response = client.post('/auth/login', json={'email': 'login-fail@example.com', 'password': 'WrongPass123!'})
