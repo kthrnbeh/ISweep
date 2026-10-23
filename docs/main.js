@@ -1653,6 +1653,25 @@ async function persistPreferences(preferences) {
   const prefs =
     await res.json();
 
+  const expectedItems = Array.isArray(preferences?.blocklist?.items)
+    ? preferences.blocklist.items
+        .map((item) => String(item).trim().toLowerCase())
+        .filter(Boolean)
+    : [];
+  const returnedItems = Array.isArray(prefs?.blocklist?.items)
+    ? prefs.blocklist.items
+        .map((item) => String(item).trim().toLowerCase())
+        .filter(Boolean)
+    : null;
+  if (!returnedItems) {
+    throw new Error('Backend response did not include canonical blocklist.items');
+  }
+  const expectedSet = new Set(expectedItems);
+  const returnedSet = new Set(returnedItems);
+  if (expectedSet.size !== returnedSet.size || [...expectedSet].some((item) => !returnedSet.has(item))) {
+    throw new Error('Backend returned a different selected-word list');
+  }
+
   console.log(
     '[ISWEEP][FE] /preferences success',
     res.status
