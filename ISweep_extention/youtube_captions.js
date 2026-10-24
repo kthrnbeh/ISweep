@@ -440,6 +440,7 @@
   const PAGE_SELECTED_WORD_MUTE_MIN_SEC = 0.28;
   const PAGE_SELECTED_WORD_MUTE_MAX_SEC = 0.8;
   const PAGE_SELECTED_WORD_MUTE_DEFAULT_WORD_SEC = 0.30;
+  const PAGE_SELECTED_WORD_MUTE_ESTIMATED_POST_MARGIN_SEC = 0.10;
   const PAGE_SELECTED_WORD_MUTE_RETRIGGER_MS = 900;
   // Visible captions do not expose word-level timing. Keep this fallback in
   // one place so it can be tuned or replaced by timed STT/text-track data.
@@ -4257,29 +4258,38 @@
     const estimatedWordDuration = hasWindow
       ? estimatePageWordDurationSec(value, captionEnd - captionStart)
       : PAGE_SELECTED_WORD_MUTE_DEFAULT_WORD_SEC;
-    return Array.from(derived.values()).map((entry) => ({
-      ...entry,
-      word: entry.matchedVariant,
-      start: tokens[entry.index]?.start ?? 0,
-      end: tokens[entry.index]?.end ?? 0,
-      startTime: Number.isFinite(Number(timedWords[entry.index]?.start))
-        ? Number(timedWords[entry.index].start)
-        : (hasWindow
-          ? startTime + ((captionEnd - captionStart) * entry.index / Math.max(tokens.length, 1))
-          : startTime),
-      endTime: Number.isFinite(Number(timedWords[entry.index]?.end))
-        ? Number(timedWords[entry.index].end)
-        : (hasWindow
-          ? Math.min(captionEnd, startTime + ((captionEnd - captionStart) * (entry.index + 1) / Math.max(tokens.length, 1)))
-          : endTime),
-      timing: Number.isFinite(Number(timedWords[entry.index]?.start))
-        && Number.isFinite(Number(timedWords[entry.index]?.end))
-        ? 'word_timestamp'
-        : (hasWindow ? 'estimated_caption_word_position' : (options.timing || 'unreliable_caption_timing')),
-      timingEstimated: !(Number.isFinite(Number(timedWords[entry.index]?.start))
-        && Number.isFinite(Number(timedWords[entry.index]?.end))),
-      estimatedWordDurationSec: estimatedWordDuration,
-    }));
+    return Array.from(derived.values()).map((entry) => {
+      const wordStart = Number(timedWords[entry.index]?.start);
+      const wordEnd = Number(timedWords[entry.index]?.end);
+      const hasWordTiming = Number.isFinite(wordStart) && Number.isFinite(wordEnd) && wordEnd > wordStart;
+      const estimatedStart = hasWindow
+        ? startTime + ((captionEnd - captionStart) * entry.index / Math.max(tokens.length, 1))
+        : startTime;
+      const estimatedDuration = estimatePageSelectedWordMuteDurationSec(
+        entry.matchedVariant,
+        estimatedWordDuration,
+      );
+      return {
+        ...entry,
+        word: entry.matchedVariant,
+        start: tokens[entry.index]?.start ?? 0,
+        end: tokens[entry.index]?.end ?? 0,
+        startTime: hasWordTiming ? wordStart : estimatedStart,
+        endTime: hasWordTiming
+          ? wordEnd
+          : (hasWindow
+            ? Math.max(
+              startTime + ((captionEnd - captionStart) * (entry.index + 1) / Math.max(tokens.length, 1)),
+              estimatedStart + estimatedDuration + PAGE_SELECTED_WORD_MUTE_ESTIMATED_POST_MARGIN_SEC,
+            )
+            : endTime),
+        timing: hasWordTiming
+          ? 'word_timestamp'
+          : (hasWindow ? 'estimated_caption_word_position' : (options.timing || 'unreliable_caption_timing')),
+        timingEstimated: !hasWordTiming,
+        estimatedWordDurationSec: hasWordTiming ? null : estimatedDuration,
+      };
+    });
   }
 
   function renderMaskedCaption(caption = {}, matches = []) {
@@ -4310,18 +4320,10 @@
     const text = String(caption.text || '').replace(/\s+/g, ' ').trim();
     if (!text) return { matches: [], cleanedText: '' };
     const normalizedCaption = { ...caption, text };
-    console.log('[ISWEEP][CAPTION] received', { source: caption.source || 'unknown' });
-    console.log('[ISWEEP][FILTER] checking caption');
     const filterState = getFilterWords();
     const matches = filterCaption(text, normalizedCaption);
     const cleanedText = renderMaskedCaption(normalizedCaption, matches);
     if (!matches.length) {
-      console.log('[ISWEEP][FILTER] no match', {
-        source: caption.source || 'unknown',
-        selectedWordCount: filterState.words.length,
-        filteringEnabled: filterState.enabled,
-        reason: filterState.words.length ? 'word_not_present' : 'no_selected_words',
-      });
       return { matches, cleanedText };
     }
 

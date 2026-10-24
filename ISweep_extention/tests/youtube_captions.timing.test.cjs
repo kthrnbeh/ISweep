@@ -1469,6 +1469,42 @@ test('reliable per-word timestamps override sentence-level estimates', () => {
   assert.equal(match.endTime, 102.1);
 });
 
+test('short observed caption intervals cannot collapse an estimated mute window', () => {
+  const hooks = loadYoutubeTimingHooks();
+  hooks.setCachedPreferences({
+    enabled: true,
+    blocklist: { enabled: true, items: ['hell'] },
+    categories: { language: { enabled: true, items: ['hell'] } },
+  });
+
+  const match = hooks.filterCaption('one two hell', {
+    startTime: 53.612249,
+    endTime: 53.706694,
+  })[0];
+
+  assert.equal(match.timingEstimated, true);
+  assert.equal(match.timing, 'estimated_caption_word_position');
+  assert.ok(match.endTime - match.startTime >= 0.38);
+});
+
+test('a caption observed before speech remains explicitly estimated', () => {
+  const hooks = loadYoutubeTimingHooks();
+  hooks.setCachedPreferences({
+    enabled: true,
+    blocklist: { enabled: true, items: ['hell'] },
+    categories: { language: { enabled: true, items: ['hell'] } },
+  });
+  const match = hooks.filterCaption('one two hell', {
+    startTime: 53.6,
+    endTime: 54.45,
+    timing: 'fallback_caption_window',
+  })[0];
+
+  assert.equal(match.timingEstimated, true);
+  assert.notEqual(match.timing, 'word_timestamp');
+  assert.equal(match.timing, 'estimated_caption_word_position');
+});
+
 test('future estimated word windows wait for playback time instead of muting immediately', async () => {
   const hooks = loadYoutubeTimingHooks();
   const video = hooks.__testVideo;
