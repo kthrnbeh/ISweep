@@ -675,6 +675,7 @@ test('selected-word mute captures one non-blocking deduplicated learning event',
     enabled: true,
     blocklist: { enabled: true, items: ['hell'] },
     categories: { language: { enabled: true } },
+    learning: { enabled: true },
   });
   hooks.applyCleanCaptionSettings({
     cleanCaptionsEnabled: true,

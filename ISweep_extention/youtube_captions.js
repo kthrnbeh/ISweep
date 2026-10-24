@@ -94,6 +94,9 @@
     const normalized = {
       enabled: raw.enabled !== false,
       sensitivity: typeof raw.sensitivity === 'number' ? raw.sensitivity : 0.9,
+      learning: {
+        enabled: raw?.learning?.enabled === true,
+      },
       categories: {
         language: normalizedLang,
         sexual: categories.sexual || {},
@@ -4170,6 +4173,10 @@
     return cachedPreferences;
   }
 
+  function isLearningCollectionEnabled() {
+    return cachedPreferences?.learning?.enabled === true;
+  }
+
   function setCachedLocalReferences(references) {
     cachedLocalReferences = references && typeof references === 'object'
       ? references
@@ -4344,6 +4351,7 @@
   }
 
   function buildLearningEventContext(match, caption, video) {
+    if (!isLearningCollectionEnabled()) return null;
     const videoId = getCurrentVideoId();
     const predictedStart = Number(match?.startTime);
     const predictedEnd = Number(match?.endTime);
