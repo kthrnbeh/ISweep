@@ -32,6 +32,7 @@ class Database:
         """Open a connection with row_factory set so rows can be dict-converted easily."""
         conn = sqlite3.connect(self.db_path)  # Open SQLite connection
         conn.row_factory = sqlite3.Row  # Return rows as dict-like objects
+        conn.execute('PRAGMA foreign_keys = ON')  # Enforce declared account/data relationships
         return conn  # Provide connection to caller
 
     def init_db(self):
@@ -130,6 +131,50 @@ class Database:
                 )
             )
         ''')  # Cache table for /audio/analyze chunk-level STT outputs
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS mute_events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NULL,
+                video_id TEXT NOT NULL,
+                matched_word TEXT NOT NULL,
+                caption_source TEXT NOT NULL,
+                timing_method TEXT NOT NULL CHECK (
+                    timing_method IN ('verified', 'estimated')
+                ),
+                predicted_start_seconds REAL NOT NULL,
+                predicted_end_seconds REAL NOT NULL,
+                actual_mute_start_seconds REAL NULL,
+                actual_mute_end_seconds REAL NULL,
+                playback_speed REAL NOT NULL DEFAULT 1.0,
+                status TEXT NOT NULL DEFAULT 'predicted' CHECK (
+                    status IN ('predicted', 'muted', 'restored', 'skipped', 'canceled', 'failed')
+                ),
+                playback_context_json TEXT NOT NULL DEFAULT '{}',
+                dedupe_key TEXT NOT NULL UNIQUE,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+        ''')  # Store opt-in playback timing metadata without raw audio
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS mute_feedback (
+                feedback_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id INTEGER NOT NULL UNIQUE,
+                result TEXT NOT NULL CHECK (
+                    result IN ('correct', 'early', 'late', 'missed')
+                ),
+                corrected_start_seconds REAL NULL,
+                corrected_end_seconds REAL NULL,
+                feedback_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (event_id) REFERENCES mute_events(event_id) ON DELETE CASCADE
+            )
+        ''')  # One replaceable feedback correction per mute event
+
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_mute_events_lookup
+            ON mute_events (user_id, video_id, matched_word, predicted_start_seconds)
+        ''')  # Support future same-video/word correction lookup
 
         conn.commit()  # Persist schema changes
         conn.close()  # Close connection

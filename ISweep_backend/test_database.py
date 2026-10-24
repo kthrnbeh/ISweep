@@ -1,4 +1,8 @@
 from datetime import datetime, timedelta
+import sqlite3
+
+import pytest
+
 from database import Database  # Database class under test
 
 
@@ -103,6 +107,76 @@ class TestDatabase:
 
         assert database.validate_token(token) is None
         assert database.get_user_by_token(token) is None
+
+    def test_learning_tables_are_additive_and_foreign_keys_are_enabled(self, database):
+        conn = database.get_connection()
+        try:
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            assert {'mute_events', 'mute_feedback'}.issubset(tables)
+            assert conn.execute('PRAGMA foreign_keys').fetchone()[0] == 1
+        finally:
+            conn.close()
+
+    def test_learning_event_duplicate_key_and_feedback_ownership_constraints(self, database):
+        user_id = create_test_user(database, 'learning')
+        conn = database.get_connection()
+        try:
+            conn.execute(
+                '''INSERT INTO mute_events (
+                       user_id, video_id, matched_word, caption_source, timing_method,
+                       predicted_start_seconds, predicted_end_seconds, dedupe_key
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                (user_id, 'video-1', 'hell', 'page_caption_dom', 'estimated', 10.0, 10.4, 'event-1'),
+            )
+            event_id = conn.execute('SELECT event_id FROM mute_events').fetchone()[0]
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    '''INSERT INTO mute_events (
+                           user_id, video_id, matched_word, caption_source, timing_method,
+                           predicted_start_seconds, predicted_end_seconds, dedupe_key
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (user_id, 'video-1', 'hell', 'page_caption_dom', 'estimated', 10.0, 10.4, 'event-1'),
+                )
+
+            conn.execute(
+                '''INSERT INTO mute_feedback (
+                       event_id, result, corrected_start_seconds, corrected_end_seconds
+                   ) VALUES (?, ?, ?, ?)''',
+                (event_id, 'late', 10.2, 10.6),
+            )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    'INSERT INTO mute_feedback (event_id, result) VALUES (?, ?)',
+                    (event_id, 'early'),
+                )
+        finally:
+            conn.close()
+
+    def test_learning_event_user_foreign_key_can_be_nullable_but_invalid_users_are_rejected(self, database):
+        conn = database.get_connection()
+        try:
+            conn.execute(
+                '''INSERT INTO mute_events (
+                       user_id, video_id, matched_word, caption_source, timing_method,
+                       predicted_start_seconds, predicted_end_seconds, dedupe_key
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                (None, 'local-video', 'hell', 'page_caption_dom', 'estimated', 1.0, 1.4, 'local-event-1'),
+            )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    '''INSERT INTO mute_events (
+                           user_id, video_id, matched_word, caption_source, timing_method,
+                           predicted_start_seconds, predicted_end_seconds, dedupe_key
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (999999, 'video-2', 'hell', 'page_caption_dom', 'estimated', 2.0, 2.4, 'event-invalid-user'),
+                )
+        finally:
+            conn.close()
 
     def test_preferences_roundtrip_json_consistency(self, database):
         user_id = create_test_user(database, 'prefroundtrip')
