@@ -148,9 +148,11 @@ class TestLearningAPI:
         )
         assert applicable.status_code == 200
         corrections = applicable.get_json()['corrections']
-        assert len(corrections) == 1
+        assert len(corrections) == 2
         assert corrections[0]['event_id'] == first_id
         assert corrections[0]['applicable'] is True
+        assert corrections[1]['event_id'] == canceled_id
+        assert corrections[1]['successful_mute_example'] is False
 
         candidates = client.get(
             '/learning/corrections?video_id=video-abc_1&word=hell',
@@ -158,7 +160,9 @@ class TestLearningAPI:
         )
         assert candidates.status_code == 200
         assert all(item['applicable'] is False for item in candidates.get_json()['corrections'])
-        assert {item['event_id'] for item in candidates.get_json()['corrections']} == {first_id, second_id}
+        assert {item['event_id'] for item in candidates.get_json()['corrections']} == {first_id, second_id, canceled_id}
+        canceled_result = next(item for item in candidates.get_json()['corrections'] if item['event_id'] == canceled_id)
+        assert canceled_result['successful_mute_example'] is False
 
         deleted = client.delete(
             f'/learning/mute-events/{first_id}/feedback', headers=headers(token)

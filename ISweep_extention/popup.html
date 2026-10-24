@@ -145,6 +145,28 @@
       <button id="btnOpenSettings" class="btn btn-primary">Open Filters →</button>
       <button id="btnSyncPrefs" class="btn btn-secondary btn-sync-prefs">Sync Preferences</button>
 
+      <section class="learning-controls" aria-labelledby="learningControlsTitle">
+        <h3 id="learningControlsTitle">Help ISweep improve mute timing</h3>
+        <label>
+          <input id="learningConsentToggle" type="checkbox">
+          Allow anonymous mute-timing events for this account
+        </label>
+        <p id="learningConsentStatus" class="subtitle">Off. No learning events are uploaded.</p>
+
+        <div id="learningEventsPanel" class="learning-events-panel hidden">
+          <h4>Recent Mute Events</h4>
+          <div id="learningEventsList" aria-live="polite">No events yet.</div>
+          <details>
+            <summary>Report missed word</summary>
+            <input id="learningMissedVideoId" type="text" placeholder="YouTube video ID">
+            <input id="learningMissedWord" type="text" placeholder="Selected word">
+            <input id="learningMissedStart" type="number" min="0" step="0.01" placeholder="Word start (seconds)">
+            <input id="learningMissedEnd" type="number" min="0" step="0.01" placeholder="Word end (seconds)">
+            <button id="btnReportMissedWord" class="btn btn-secondary" type="button">Report missed word</button>
+          </details>
+        </div>
+      </section>
+
       <div class="secondary-links-row">
         <a href="#" id="linkResetFilters" class="link-secondary">Reset Filters</a>
         <span class="link-divider">|</span>

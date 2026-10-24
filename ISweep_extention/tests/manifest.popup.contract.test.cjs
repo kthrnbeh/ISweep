@@ -165,6 +165,27 @@ test('popup shows explicit primary caption source readiness field', () => {
   assert.equal(popupSource.includes('Waiting for audio'), true);
 });
 
+test('popup exposes opt-in learning and account-scoped feedback controls', () => {
+  const popupHtml = fs.readFileSync(path.join(extensionRoot, 'popup.html'), 'utf8');
+  const popupSource = fs.readFileSync(path.join(extensionRoot, 'popup.js'), 'utf8');
+  assert.equal(popupHtml.includes('Help ISweep improve mute timing'), true);
+  assert.equal(popupHtml.includes('id="learningConsentToggle"'), true);
+  assert.equal(popupHtml.includes('Recent Mute Events'), true);
+  assert.equal(popupHtml.includes('Report missed word'), true);
+  assert.equal(popupSource.includes('isweep_set_learning_consent'), true);
+  assert.equal(popupSource.includes('isweep_learning_feedback'), true);
+  assert.equal(popupSource.includes('isweepLearningConsentConfirmed'), true);
+});
+
+test('learning uploads remain background-owned and do not include caption text', () => {
+  const backgroundSource = fs.readFileSync(path.join(extensionRoot, 'background.js'), 'utf8');
+  const youtubeSource = fs.readFileSync(path.join(extensionRoot, 'youtube_captions.js'), 'utf8');
+  assert.equal(backgroundSource.includes('isweep_learning_event'), true);
+  assert.equal(backgroundSource.includes('/learning/mute-events'), true);
+  assert.equal(youtubeSource.includes('submitLearningEvent'), true);
+  assert.equal(youtubeSource.includes('dedupe_key'), true);
+});
+
 test('local reference artifacts are gitignored and not committed as fixtures', () => {
   const gitignore = fs.readFileSync(path.join(extensionRoot, '.gitignore'), 'utf8');
   assert.equal(gitignore.includes('local_user_references/'), true);

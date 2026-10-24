@@ -122,6 +122,9 @@
   let muteStateVolumeHandler = null;
   let muteStatePlaybackHandlers = null;
   let userChangedMuteDuringWindow = false;
+  let pendingLearningEvents = [];
+  let pageSelectedWordMuteCancel = null;
+  const submittedLearningEventKeys = new Set();
 
   function watchVideoMuteChanges(video) {
     if (!video || typeof video.addEventListener !== 'function') return;
@@ -191,10 +194,12 @@
     if (hardRestoreTimeout) clearTimeout(hardRestoreTimeout);
     if (muteEnforceInterval) clearInterval(muteEnforceInterval);
     if (pageSelectedWordMuteTimer) clearTimeout(pageSelectedWordMuteTimer);
+    pageSelectedWordMuteCancel?.();
     restoreMuteTimeout = null;
     hardRestoreTimeout = null;
     muteEnforceInterval = null;
     pageSelectedWordMuteTimer = null;
+    pageSelectedWordMuteCancel = null;
     if (muteStateVideo && muteStateVolumeHandler && typeof muteStateVideo.removeEventListener === 'function') {
       muteStateVideo.removeEventListener('volumechange', muteStateVolumeHandler);
     }
@@ -377,6 +382,22 @@
 
   function restoreMuteState(reason) {
     const video = findVideo();
+    const actualEnd = Number(video?.currentTime);
+    const outcome = userChangedMuteDuringWindow
+      || ['video_changed', 'video_emptied', 'extension_context_invalidated'].includes(reason)
+      ? 'canceled'
+      : 'restored';
+    if (pendingLearningEvents.length) {
+      const pending = pendingLearningEvents.splice(0);
+      pending.forEach((event) => {
+        submitLearningEvent({
+          ...event,
+          status: outcome,
+          actual_mute_start_seconds: event.actual_mute_start_seconds,
+          actual_mute_end_seconds: Number.isFinite(actualEnd) ? actualEnd : null,
+        });
+      });
+    }
     if (video && previousMuteState !== null && isweepMuteActive
       && lastMuteOwner === 'isweep' && !userChangedMuteDuringWindow) {
       const targetMuted = shouldISweepUnmute(previousMuteState) ? false : true;
@@ -4311,9 +4332,46 @@
     return rendered + text.slice(cursor);
   }
 
-  function requestMute({ start, end, reason = 'caption_match' } = {}) {
+  function submitLearningEvent(event) {
+    if (!event || !event.dedupe_key || submittedLearningEventKeys.has(event.dedupe_key)) return;
+    submittedLearningEventKeys.add(event.dedupe_key);
+    if (submittedLearningEventKeys.size > 300) {
+      const oldest = submittedLearningEventKeys.values().next().value;
+      submittedLearningEventKeys.delete(oldest);
+    }
+    if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return;
+    void safeRuntimeSendMessage({ type: 'isweep_learning_event', event }).catch(() => null);
+  }
+
+  function buildLearningEventContext(match, caption, video) {
+    const videoId = getCurrentVideoId();
+    const predictedStart = Number(match?.startTime);
+    const predictedEnd = Number(match?.endTime);
+    const matchedWord = normalizeCaptionWord(match?.word);
+    if (!videoId || !matchedWord || !Number.isFinite(predictedStart)
+      || !Number.isFinite(predictedEnd) || predictedEnd <= predictedStart) return null;
+    const source = String(caption?.source || 'unknown').slice(0, 64);
+    const timingMethod = match?.timingEstimated ? 'estimated' : 'verified';
+    return {
+      video_id: videoId,
+      matched_word: matchedWord.slice(0, 128),
+      caption_source: source,
+      timing_method: timingMethod,
+      predicted_start_seconds: predictedStart,
+      predicted_end_seconds: predictedEnd,
+      playback_speed: Number.isFinite(Number(video?.playbackRate)) ? Number(video.playbackRate) : 1,
+      playback_context: {
+        paused: Boolean(video?.paused),
+        seeked: Boolean(video?.seeking),
+        speed_changed: Number(video?.playbackRate || 1) !== 1,
+      },
+      dedupe_key: `mute:${videoId}:${matchedWord}:${predictedStart.toFixed(3)}:${predictedEnd.toFixed(3)}:${source}`,
+    };
+  }
+
+  function requestMute({ start, end, reason = 'caption_match', learning = null } = {}) {
     console.log('[ISWEEP][MUTE] request', { start, end, reason });
-    return applyMuteWindow(start, end, reason);
+    return applyMuteWindow(start, end, reason, learning);
   }
 
   function onCaption(caption = {}) {
@@ -4349,12 +4407,14 @@
       for (const match of unseenMatches) {
         if (Number.isFinite(match.startTime) && Number.isFinite(match.endTime)) {
           const muteReason = `caption:${caption.source || 'unknown'}`;
+          const learning = buildLearningEventContext(match, caption, findVideo());
           const muteResult = match.timingEstimated
-            ? schedulePageSelectedWordMute(match.startTime, match.endTime, muteReason)
+            ? schedulePageSelectedWordMute(match.startTime, match.endTime, muteReason, learning)
             : requestMute({
               start: match.startTime,
               end: match.endTime,
               reason: muteReason,
+              learning,
             });
           console.log('[ISWEEP][FILTER] mute result', {
             matchedWord: match.word,
@@ -4539,20 +4599,33 @@
     hardRestoreTimeout = setTimeout(() => restoreMuteState('hard_timeout'), delayMs + HARD_RESTORE_GRACE_MS + 50);
   }
 
-  function applyMuteWindow(startSec, endSec, reason = 'selected_word') {
+  function applyMuteWindow(startSec, endSec, reason = 'selected_word', learning = null) {
     const video = findVideo();
-    if (!video || !Number.isFinite(Number(endSec))) return false;
+    if (!video || !Number.isFinite(Number(endSec))) {
+      if (learning) submitLearningEvent({ ...learning, status: 'failed' });
+      return false;
+    }
     const nowSec = Number(video.currentTime || 0);
     const start = Math.max(Number(startSec) || nowSec, 0);
     const end = Math.max(Number(endSec), start);
-    if (end <= nowSec) return false;
+    if (end <= nowSec) {
+      if (learning) submitLearningEvent({ ...learning, status: 'canceled' });
+      return false;
+    }
 
     if (muteLockUntilSec <= nowSec && shouldSkipMuteBecauseUserMuted(video.muted, isweepMuteActive)) {
       lastMuteOwner = 'user';
+      if (learning) submitLearningEvent({ ...learning, status: 'skipped' });
       return false;
     }
 
     if (muteLockUntilSec > nowSec) {
+      if (learning) {
+        pendingLearningEvents.push({
+          ...learning,
+          actual_mute_start_seconds: muteWindowStartSec,
+        });
+      }
       if (end <= muteLockUntilSec) return true;
       muteLockUntilSec = end;
       rescheduleMuteRestoreTimers(nowSec);
@@ -4560,12 +4633,21 @@
     }
 
     previousMuteState = Boolean(video.muted);
-    if (!setMutedState(true, `start:${reason}`)) return false;
+    if (!setMutedState(true, `start:${reason}`)) {
+      if (learning) submitLearningEvent({ ...learning, status: 'failed' });
+      return false;
+    }
     isweepMuteActive = true;
     userWasMutedBeforeIsweepMute = previousMuteState;
     lastMuteOwner = 'isweep';
     muteWindowStartSec = start;
     muteLockUntilSec = end;
+    if (learning) {
+      pendingLearningEvents.push({
+        ...learning,
+        actual_mute_start_seconds: nowSec,
+      });
+    }
     startMuteEnforcement();
     rescheduleMuteRestoreTimers(nowSec);
     console.log(WORD_MUTE_LOG_PREFIX, 'mute start', {
@@ -4607,8 +4689,9 @@
     );
   }
 
-  function schedulePageSelectedWordMute(startSec, endSec, reason) {
+  function schedulePageSelectedWordMute(startSec, endSec, reason, learning = null) {
     if (pageSelectedWordMuteTimer) clearTimeout(pageSelectedWordMuteTimer);
+    pageSelectedWordMuteCancel?.();
     pageSelectedWordMuteTimer = null;
 
     const video = findVideo();
@@ -4619,24 +4702,32 @@
     const scheduledVideo = video;
     const scheduledVideoId = getCurrentVideoId();
     let lastObservedPlaybackTime = Number(video.currentTime || 0);
+    const cancelScheduledLearning = () => {
+      if (learning) submitLearningEvent({ ...learning, status: 'canceled' });
+      if (pageSelectedWordMuteCancel === cancelScheduledLearning) pageSelectedWordMuteCancel = null;
+      return false;
+    };
+    pageSelectedWordMuteCancel = cancelScheduledLearning;
 
     const attempt = () => {
       pageSelectedWordMuteTimer = null;
+      pageSelectedWordMuteCancel = null;
       const currentVideo = findVideo();
-      if (!currentVideo || currentVideo !== scheduledVideo || getCurrentVideoId() !== scheduledVideoId) return false;
+      if (!currentVideo || currentVideo !== scheduledVideo || getCurrentVideoId() !== scheduledVideoId) return cancelScheduledLearning();
       const nowSec = Number(currentVideo.currentTime || 0);
-      if (!Number.isFinite(nowSec) || nowSec >= targetEnd) return false;
-      if (nowSec < lastObservedPlaybackTime - 0.75) return false;
+      if (!Number.isFinite(nowSec) || nowSec >= targetEnd) return cancelScheduledLearning();
+      if (nowSec < lastObservedPlaybackTime - 0.75) return cancelScheduledLearning();
       lastObservedPlaybackTime = nowSec;
       if (currentVideo.paused || nowSec < targetStart) {
+        pageSelectedWordMuteCancel = cancelScheduledLearning;
         pageSelectedWordMuteTimer = setTimeout(attempt, currentVideo.paused ? 250 : Math.min(250, Math.max((targetStart - nowSec) * 1000, 20)));
         return true;
       }
-      return requestMute({ start: nowSec, end: targetEnd, reason });
+      return requestMute({ start: nowSec, end: targetEnd, reason, learning });
     };
 
     const nowSec = Number(video.currentTime || 0);
-    if (nowSec >= targetEnd) return false;
+    if (nowSec >= targetEnd) return cancelScheduledLearning();
     pageSelectedWordMuteTimer = setTimeout(attempt, Math.max((targetStart - nowSec) * 1000, 0));
     return true;
   }
@@ -4651,7 +4742,9 @@
       lastPageCaptionText = cleanText;
       lastPageCaptionVideoTime = nowSec;
       if (pageSelectedWordMuteTimer) clearTimeout(pageSelectedWordMuteTimer);
+      pageSelectedWordMuteCancel?.();
       pageSelectedWordMuteTimer = null;
+      pageSelectedWordMuteCancel = null;
     }
     return onCaption({
       text: cleanText,

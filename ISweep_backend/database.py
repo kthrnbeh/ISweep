@@ -521,16 +521,18 @@ class Database:
                    WHERE e.user_id = ?
                      AND e.video_id = ?
                      AND e.matched_word = ?
-                     AND e.status NOT IN ('canceled', 'skipped', 'failed')
+                     AND e.status != 'failed'
                      AND f.corrected_start_seconds IS NOT NULL
                      AND f.corrected_end_seconds IS NOT NULL
+                     AND (? IS NULL OR ABS(e.predicted_start_seconds - ?) <= ?)
                    ORDER BY e.predicted_start_seconds ASC, f.feedback_at DESC
                    LIMIT ?''',
-                (user_id, video_id, matched_word, limit),
+                (user_id, video_id, matched_word, start_seconds, start_seconds, proximity_seconds, limit),
             ).fetchall()
             corrections = []
             for row in rows:
                 correction = dict(row)
+                correction['successful_mute_example'] = correction['status'] in ('muted', 'restored')
                 if start_seconds is not None:
                     correction['distance_seconds'] = abs(
                         correction['predicted_start_seconds'] - start_seconds

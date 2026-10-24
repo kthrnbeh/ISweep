@@ -17,6 +17,7 @@ const STORAGE_KEYS = {
   TOKEN: 'isweep_auth_token',      // Unified token key
   USER_ID: 'isweepUserId',         // Legacy user id key
   PREFS: 'isweepPreferences',      // Cached preferences
+  LEARNING_CONSENT_CONFIRMED: 'isweepLearningConsentConfirmed',
   BACKEND_URL: 'isweepBackendUrl', // Backend base URL
   FRONTEND_URL: 'isweepFrontendUrl',// Frontend base URL override
   CLEAN_CAPTION_SETTINGS: 'isweepCleanCaptionSettings',
@@ -161,6 +162,15 @@ const cleanCaptionStyleSelect = document.getElementById('cleanCaptionStyle');
 const cleanCaptionTextSizeSelect = document.getElementById('cleanCaptionTextSize');
 const cleanCaptionWordMuteModeSelect = document.getElementById('cleanCaptionWordMuteMode');
 const btnResetCaptionPosition = document.getElementById('btnResetCaptionPosition');
+const learningConsentToggle = document.getElementById('learningConsentToggle');
+const learningConsentStatus = document.getElementById('learningConsentStatus');
+const learningEventsPanel = document.getElementById('learningEventsPanel');
+const learningEventsList = document.getElementById('learningEventsList');
+const btnReportMissedWord = document.getElementById('btnReportMissedWord');
+const learningMissedVideoId = document.getElementById('learningMissedVideoId');
+const learningMissedWord = document.getElementById('learningMissedWord');
+const learningMissedStart = document.getElementById('learningMissedStart');
+const learningMissedEnd = document.getElementById('learningMissedEnd');
 
 let cleanCaptionSettingsCache = { ...CLEAN_CAPTION_DEFAULTS };
 
@@ -319,6 +329,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       TOKEN_KEY,
       STORAGE_KEYS.USER_ID,
       STORAGE_KEYS.PREFS,
+      STORAGE_KEYS.LEARNING_CONSENT_CONFIRMED,
       STORAGE_KEYS.DEV_LOCAL_AUTH,
       STORAGE_KEYS.BACKEND_URL,
     ]);
@@ -362,6 +373,10 @@ document.addEventListener('DOMContentLoaded', async () => {
           signedInStatus.textContent = prefs ? 'Signed in. Preferences cached.' : 'Signed in. No preferences cached yet.';
         }
       }
+      const learningEnabled = result[STORAGE_KEYS.LEARNING_CONSENT_CONFIRMED] === true
+        && result[STORAGE_KEYS.PREFS]?.learning?.enabled === true;
+      setLearningConsentUi(learningEnabled);
+      if (learningEnabled) await refreshLearningEvents();
     } else {
       renderLoggedOutState(); // Show logged-out UI
       setSyncPrefsAvailability(false);
@@ -385,6 +400,9 @@ function renderLoggedOutState() {
   console.log(LOG_PREFIX, 'rendering logged out state');
   stateLoggedOut.classList.remove('hidden'); // Show logged-out view
   stateLoggedIn.classList.add('hidden'); // Hide logged-in view
+  if (learningEventsPanel) learningEventsPanel.classList.add('hidden');
+  if (learningConsentToggle) learningConsentToggle.checked = false;
+  if (learningConsentStatus) learningConsentStatus.textContent = 'Off. No learning events are uploaded.';
 }
 
 /**
@@ -415,6 +433,168 @@ function renderLoggedInState(authData, isEnabled) {
   // Show logged in state, hide logged out state
   stateLoggedIn.classList.remove('hidden');
   stateLoggedOut.classList.add('hidden');
+}
+
+function setLearningConsentUi(enabled, message = null) {
+  const active = enabled === true;
+  if (learningConsentToggle) learningConsentToggle.checked = active;
+  if (learningConsentStatus) {
+    learningConsentStatus.textContent = message
+      || (active ? 'On. Timing events may be uploaded after backend confirmation.' : 'Off. No learning events are uploaded.');
+  }
+  if (learningEventsPanel) learningEventsPanel.classList.toggle('hidden', !active);
+}
+
+function appendLearningEventRow(event) {
+  const row = document.createElement('div');
+  row.className = 'learning-event-row';
+  const summary = document.createElement('div');
+  summary.textContent = `${event.matched_word || 'word'} · ${Number(event.predicted_start_seconds || 0).toFixed(2)}s · ${event.timing_method || 'estimated'} · ${event.status || 'unknown'}`;
+  row.appendChild(summary);
+
+  const controls = document.createElement('div');
+  ['correct', 'early', 'late', 'missed'].forEach((result) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn-link';
+    button.textContent = result === 'early' ? 'Too Early'
+      : result === 'late' ? 'Too Late'
+        : result[0].toUpperCase() + result.slice(1);
+    button.addEventListener('click', () => {
+      row.dataset.feedbackResult = result;
+      controls.querySelectorAll('button').forEach((item) => item.disabled = item === button);
+      if (learningConsentStatus) learningConsentStatus.textContent = `Selected ${result}. Add corrected times if needed, then submit.`;
+    });
+    controls.appendChild(button);
+  });
+  row.appendChild(controls);
+
+  const start = document.createElement('input');
+  start.type = 'number';
+  start.min = '0';
+  start.step = '0.01';
+  start.placeholder = 'Corrected start (seconds)';
+  const end = document.createElement('input');
+  end.type = 'number';
+  end.min = '0';
+  end.step = '0.01';
+  end.placeholder = 'Corrected end (seconds)';
+  row.append(start, end);
+
+  const submit = document.createElement('button');
+  submit.type = 'button';
+  submit.className = 'btn btn-secondary';
+  submit.textContent = 'Submit feedback';
+  submit.addEventListener('click', async () => {
+    const result = row.dataset.feedbackResult;
+    if (!result) {
+      if (learningConsentStatus) learningConsentStatus.textContent = 'Choose Correct, Too Early, Too Late, or Missed first.';
+      return;
+    }
+    const feedback = { result };
+    if (start.value || end.value) {
+      feedback.corrected_start_seconds = Number(start.value);
+      feedback.corrected_end_seconds = Number(end.value);
+    }
+    const response = await chrome.runtime.sendMessage({
+      type: 'isweep_learning_feedback',
+      eventId: event.event_id,
+      feedback,
+    });
+    if (response?.ok) {
+      if (learningConsentStatus) learningConsentStatus.textContent = 'Feedback saved.';
+      await refreshLearningEvents();
+    } else if (learningConsentStatus) {
+      learningConsentStatus.textContent = 'Feedback could not be saved.';
+    }
+  });
+  row.appendChild(submit);
+
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'btn-link';
+  remove.textContent = 'Remove correction';
+  remove.addEventListener('click', async () => {
+    const response = await chrome.runtime.sendMessage({
+      type: 'isweep_learning_feedback',
+      eventId: event.event_id,
+      delete: true,
+    });
+    if (response?.ok) await refreshLearningEvents();
+  });
+  row.appendChild(remove);
+  return row;
+}
+
+async function refreshLearningEvents() {
+  if (!learningEventsList) return;
+  const response = await chrome.runtime.sendMessage({ type: 'isweep_learning_list' });
+  learningEventsList.textContent = '';
+  if (!response?.ok || !Array.isArray(response.events) || !response.events.length) {
+    learningEventsList.textContent = response?.error ? 'Learning events are currently unavailable.' : 'No events yet.';
+    return;
+  }
+  response.events.forEach((event) => learningEventsList.appendChild(appendLearningEventRow(event)));
+}
+
+async function handleLearningConsentChange() {
+  const requested = learningConsentToggle?.checked === true;
+  if (learningConsentToggle) learningConsentToggle.disabled = true;
+  const response = await chrome.runtime.sendMessage({
+    type: 'isweep_set_learning_consent',
+    enabled: requested,
+  });
+  if (response?.ok && response.enabled === requested) {
+    setLearningConsentUi(response.enabled);
+    if (response.enabled) await refreshLearningEvents();
+  } else {
+    setLearningConsentUi(!requested, 'Backend did not confirm the learning preference; collection remains unchanged.');
+  }
+  if (learningConsentToggle) learningConsentToggle.disabled = false;
+}
+
+async function handleReportMissedWord() {
+  const videoId = learningMissedVideoId?.value.trim();
+  const word = learningMissedWord?.value.trim();
+  const start = Number(learningMissedStart?.value);
+  const end = Number(learningMissedEnd?.value);
+  if (!videoId || !word || !Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    if (learningConsentStatus) learningConsentStatus.textContent = 'Enter a video ID, word, and valid start/end times.';
+    return;
+  }
+  const eventResponse = await chrome.runtime.sendMessage({
+    type: 'isweep_learning_event',
+    event: {
+      video_id: videoId,
+      matched_word: word,
+      caption_source: 'user_report',
+      timing_method: 'estimated',
+      predicted_start_seconds: start,
+      predicted_end_seconds: end,
+      playback_speed: 1,
+      status: 'skipped',
+      playback_context: { paused: false, seeked: false, speed_changed: false },
+      dedupe_key: `missed:${videoId}:${word.toLowerCase()}:${start.toFixed(2)}`,
+    },
+  });
+  const eventId = eventResponse?.event?.event_id;
+  if (!eventResponse?.ok || !eventId) {
+    if (learningConsentStatus) learningConsentStatus.textContent = 'Missed-word report could not be saved.';
+    return;
+  }
+  const feedbackResponse = await chrome.runtime.sendMessage({
+    type: 'isweep_learning_feedback',
+    eventId,
+    feedback: {
+      result: 'missed',
+      corrected_start_seconds: start,
+      corrected_end_seconds: end,
+    },
+  });
+  if (feedbackResponse?.ok) {
+    if (learningConsentStatus) learningConsentStatus.textContent = 'Missed-word report saved.';
+    await refreshLearningEvents();
+  }
 }
 
 /**
@@ -454,6 +634,8 @@ function setupEventListeners() {
   linkResetFilters.addEventListener('click', handleResetFilters); // Open reset filters section
   linkManageAccount.addEventListener('click', handleManageAccount); // Open account page
   linkLogout.addEventListener('click', handleLogout); // Log out
+  if (learningConsentToggle) learningConsentToggle.addEventListener('change', handleLearningConsentChange);
+  if (btnReportMissedWord) btnReportMissedWord.addEventListener('click', handleReportMissedWord);
 
   if (btnCleanCaptionsToggle) {
     btnCleanCaptionsToggle.addEventListener('click', async () => {
@@ -654,6 +836,14 @@ async function handleSyncPrefs(e) {
       return;
     }
     console.log(LOG_PREFIX, 'prefs sync success', res.status || '');
+    const synced = await chrome.storage.local.get([
+      STORAGE_KEYS.PREFS,
+      STORAGE_KEYS.LEARNING_CONSENT_CONFIRMED,
+    ]);
+    const learningEnabled = synced[STORAGE_KEYS.LEARNING_CONSENT_CONFIRMED] === true
+      && synced[STORAGE_KEYS.PREFS]?.learning?.enabled === true;
+    setLearningConsentUi(learningEnabled);
+    if (learningEnabled) await refreshLearningEvents();
     alert('Preferences synced.');
   } catch (err) {
     console.error(LOG_PREFIX, 'prefs sync failed', err);
@@ -890,6 +1080,7 @@ async function handleLogout(e) {
       STORAGE_KEYS.USER_ID,
       STORAGE_KEYS.PREFS,
       TOKEN_KEY,
+      STORAGE_KEYS.LEARNING_CONSENT_CONFIRMED,
     ]);
     setSyncPrefsAvailability(false);
     

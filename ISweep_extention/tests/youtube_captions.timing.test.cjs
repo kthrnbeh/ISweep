@@ -25,6 +25,7 @@ function loadYoutubeTimingHooks() {
       this.listeners.get(name)?.forEach((handler) => handler());
     },
   };
+  const learningMessages = [];
   const context = {
     console: { log() {}, warn() {}, error() {} },
     globalThis: {},
@@ -34,6 +35,15 @@ function loadYoutubeTimingHooks() {
       location: { href: 'https://www.youtube.com/watch?v=current-video' },
     },
     URL,
+    chrome: {
+      runtime: {
+        id: 'timing-test-extension',
+        sendMessage: async (message) => {
+          learningMessages.push(message);
+          return { ok: true };
+        },
+      },
+    },
     document: {
       querySelector(selector) {
         if (selector === 'video') return fakeVideo;
@@ -82,6 +92,7 @@ function loadYoutubeTimingHooks() {
   vm.runInContext(source, context, { filename: 'youtube_captions.js' });
   const hooks = context.__ISWEEP_YT_TEST_HOOKS__;
   hooks.__testVideo = fakeVideo;
+  hooks.__getLearningMessages = () => learningMessages.slice();
   return hooks;
 }
 
@@ -656,6 +667,41 @@ test('synced canonical hell preference matches a native caption and schedules mu
   assert.equal(result.matches[0].word.toLowerCase(), 'hell');
   assert.equal(hooks.getMuteControllerState().active, true);
   hooks.restoreMuteState('test_cleanup');
+});
+
+test('selected-word mute captures one non-blocking deduplicated learning event', async () => {
+  const hooks = loadYoutubeTimingHooks();
+  hooks.setCachedPreferences({
+    enabled: true,
+    blocklist: { enabled: true, items: ['hell'] },
+    categories: { language: { enabled: true } },
+  });
+  hooks.applyCleanCaptionSettings({
+    cleanCaptionsEnabled: true,
+    cleanCaptionWordMuteMode: 'captions_word_mute',
+  }, 'test');
+  const caption = {
+    text: 'What the hell',
+    source: 'page_caption_dom',
+    startTime: 0,
+    endTime: 0.6,
+    words: [
+      { word: 'What', start: 0.0, end: 0.15 },
+      { word: 'the', start: 0.16, end: 0.25 },
+      { word: 'hell', start: 0.3, end: 0.55 },
+    ],
+  };
+  hooks.onCaption(caption);
+  hooks.onCaption(caption);
+  hooks.restoreMuteState('test_learning_restore');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const messages = hooks.__getLearningMessages().filter((message) => message.type === 'isweep_learning_event');
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].event.matched_word, 'hell');
+  assert.equal(messages[0].event.timing_method, 'verified');
+  assert.equal(messages[0].event.status, 'restored');
+  assert.equal(Object.prototype.hasOwnProperty.call(messages[0].event, 'caption_text'), false);
 });
 
 test('caption_remote preserves selected-word masking and supported caption styles', () => {
