@@ -462,6 +462,152 @@ def require_auth(fn):
     return wrapper
 
 
+LEARNING_MAX_PAGE_SIZE = 100
+LEARNING_MAX_EVENTS_LOOKUP = 50
+LEARNING_MAX_VIDEO_SECONDS = 24 * 60 * 60
+LEARNING_MIN_PLAYBACK_SPEED = 0.25
+LEARNING_MAX_PLAYBACK_SPEED = 4.0
+LEARNING_ALLOWED_TIMING_METHODS = {'verified', 'estimated'}
+LEARNING_ALLOWED_STATUSES = {'predicted', 'muted', 'restored', 'skipped', 'canceled', 'failed'}
+LEARNING_ALLOWED_FEEDBACK = {'correct', 'early', 'late', 'missed'}
+
+
+def _learning_consent_enabled(user_id: int) -> bool:
+    """Read opt-in from stored account preferences, never from an event payload."""
+    preferences = get_db().get_user_preferences(user_id) or {}
+    learning = preferences.get('learning') if isinstance(preferences, dict) else None
+    return isinstance(learning, dict) and learning.get('enabled') is True
+
+
+def _learning_consent_error():
+    return jsonify({'error': 'Learning data collection is not enabled for this account'}), 403
+
+
+def _finite_learning_number(value, field, *, required=False, maximum=LEARNING_MAX_VIDEO_SECONDS):
+    if value is None and not required:
+        return None, None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None, f'{field} must be a finite number'
+    if not math.isfinite(number) or number < 0 or number > maximum:
+        return None, f'{field} must be between 0 and {maximum}'
+    return number, None
+
+
+def _validate_learning_event(data):
+    if not isinstance(data, dict):
+        return None, 'JSON object is required'
+
+    video_id = str(data.get('video_id') or '').strip()
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', video_id):
+        return None, 'video_id must contain 1 to 128 safe video-id characters'
+
+    matched_word = str(data.get('matched_word') or '').strip().lower()
+    if not matched_word or len(matched_word) > 128 or any(ord(char) < 32 for char in matched_word):
+        return None, 'matched_word must contain 1 to 128 printable characters'
+
+    caption_source = str(data.get('caption_source') or '').strip()
+    if not caption_source or len(caption_source) > 64:
+        return None, 'caption_source must contain 1 to 64 characters'
+
+    timing_method = str(data.get('timing_method') or '').strip().lower()
+    if timing_method not in LEARNING_ALLOWED_TIMING_METHODS:
+        return None, 'timing_method must be verified or estimated'
+
+    predicted_start, error = _finite_learning_number(
+        data.get('predicted_start_seconds'), 'predicted_start_seconds', required=True
+    )
+    if error:
+        return None, error
+    predicted_end, error = _finite_learning_number(
+        data.get('predicted_end_seconds'), 'predicted_end_seconds', required=True
+    )
+    if error:
+        return None, error
+    if predicted_end <= predicted_start:
+        return None, 'predicted_end_seconds must exceed predicted_start_seconds'
+
+    actual_start, error = _finite_learning_number(data.get('actual_mute_start_seconds'), 'actual_mute_start_seconds')
+    if error:
+        return None, error
+    actual_end, error = _finite_learning_number(data.get('actual_mute_end_seconds'), 'actual_mute_end_seconds')
+    if error:
+        return None, error
+    if (actual_start is None) != (actual_end is None):
+        return None, 'actual mute timestamps must be provided together'
+    if actual_start is not None and actual_end <= actual_start:
+        return None, 'actual_mute_end_seconds must exceed actual_mute_start_seconds'
+
+    try:
+        playback_speed = float(data.get('playback_speed', 1.0))
+    except (TypeError, ValueError):
+        return None, 'playback_speed must be a finite number'
+    if not math.isfinite(playback_speed) or not (LEARNING_MIN_PLAYBACK_SPEED <= playback_speed <= LEARNING_MAX_PLAYBACK_SPEED):
+        return None, 'playback_speed must be between 0.25 and 4.0'
+
+    status = str(data.get('status') or 'predicted').strip().lower()
+    if status not in LEARNING_ALLOWED_STATUSES:
+        return None, 'status is not supported'
+
+    context = data.get('playback_context', {})
+    if not isinstance(context, dict):
+        return None, 'playback_context must be an object'
+    safe_context = {}
+    for key in ('paused', 'seeked', 'speed_changed'):
+        if key in context and not isinstance(context[key], bool):
+            return None, f'playback_context.{key} must be boolean'
+        safe_context[key] = bool(context.get(key, False))
+
+    dedupe_key = str(data.get('dedupe_key') or '').strip()
+    if not dedupe_key or len(dedupe_key) > 200:
+        return None, 'dedupe_key must contain 1 to 200 characters'
+
+    return {
+        'video_id': video_id,
+        'matched_word': matched_word,
+        'caption_source': caption_source,
+        'timing_method': timing_method,
+        'predicted_start_seconds': predicted_start,
+        'predicted_end_seconds': predicted_end,
+        'actual_mute_start_seconds': actual_start,
+        'actual_mute_end_seconds': actual_end,
+        'playback_speed': playback_speed,
+        'status': status,
+        'playback_context': safe_context,
+        'dedupe_key': dedupe_key,
+    }, None
+
+
+def _validate_learning_feedback(data):
+    if not isinstance(data, dict):
+        return None, 'JSON object is required'
+    result = str(data.get('result') or '').strip().lower()
+    if result not in LEARNING_ALLOWED_FEEDBACK:
+        return None, 'result must be correct, early, late, or missed'
+    corrected_start, error = _finite_learning_number(
+        data.get('corrected_start_seconds'), 'corrected_start_seconds'
+    )
+    if error:
+        return None, error
+    corrected_end, error = _finite_learning_number(
+        data.get('corrected_end_seconds'), 'corrected_end_seconds'
+    )
+    if error:
+        return None, error
+    if (corrected_start is None) != (corrected_end is None):
+        return None, 'corrected timestamps must be provided together'
+    if corrected_start is not None and corrected_end <= corrected_start:
+        return None, 'corrected_end_seconds must exceed corrected_start_seconds'
+    if result != 'missed' and corrected_start is None:
+        return None, 'corrected timestamps are required for this feedback result'
+    return {
+        'result': result,
+        'corrected_start_seconds': corrected_start,
+        'corrected_end_seconds': corrected_end,
+    }, None
+
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """
@@ -598,6 +744,106 @@ def update_preferences_self():
 
     prefs = db.get_user_preferences(request.user_id)
     return jsonify(prefs), 200
+
+
+@app.route('/learning/mute-events', methods=['POST'])
+@require_auth
+def create_learning_mute_event():
+    if not _learning_consent_enabled(request.user_id):
+        return _learning_consent_error()
+    event, error = _validate_learning_event(request.get_json() or {})
+    if error:
+        return jsonify({'error': error}), 400
+    try:
+        stored, created = get_db().create_mute_event(request.user_id, event)
+    except PermissionError:
+        return jsonify({'error': 'dedupe_key is already associated with another account'}), 409
+    except Exception as exc:
+        app.logger.error('learning event storage failed: %s', exc)
+        return jsonify({'error': 'Unable to store learning event'}), 500
+    return jsonify({'event': stored, 'created': created}), 201 if created else 200
+
+
+@app.route('/learning/mute-events', methods=['GET'])
+@require_auth
+def list_learning_mute_events():
+    if not _learning_consent_enabled(request.user_id):
+        return _learning_consent_error()
+    try:
+        limit = int(request.args.get('limit', 25))
+        offset = int(request.args.get('offset', 0))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'limit and offset must be integers'}), 400
+    if limit < 1 or limit > LEARNING_MAX_PAGE_SIZE or offset < 0:
+        return jsonify({'error': f'limit must be 1-{LEARNING_MAX_PAGE_SIZE} and offset must be nonnegative'}), 400
+    events, total = get_db().list_mute_events(request.user_id, limit, offset)
+    return jsonify({'events': events, 'total': total, 'limit': limit, 'offset': offset}), 200
+
+
+@app.route('/learning/mute-events/<int:event_id>/feedback', methods=['POST', 'PUT'])
+@require_auth
+def update_learning_mute_feedback(event_id):
+    if not _learning_consent_enabled(request.user_id):
+        return _learning_consent_error()
+    if not get_db().get_mute_event_for_user(request.user_id, event_id):
+        return jsonify({'error': 'Learning event not found'}), 404
+    feedback, error = _validate_learning_feedback(request.get_json() or {})
+    if error:
+        return jsonify({'error': error}), 400
+    stored = get_db().upsert_mute_feedback(request.user_id, event_id, feedback)
+    if not stored:
+        return jsonify({'error': 'Learning event not found'}), 404
+    return jsonify({'feedback': stored}), 200
+
+
+@app.route('/learning/mute-events/<int:event_id>/feedback', methods=['DELETE'])
+@require_auth
+def delete_learning_mute_feedback(event_id):
+    if not _learning_consent_enabled(request.user_id):
+        return _learning_consent_error()
+    if not get_db().delete_mute_feedback(request.user_id, event_id):
+        return jsonify({'error': 'Feedback not found'}), 404
+    return jsonify({'deleted': True}), 200
+
+
+@app.route('/learning/corrections', methods=['GET'])
+@require_auth
+def get_learning_corrections():
+    if not _learning_consent_enabled(request.user_id):
+        return _learning_consent_error()
+    video_id = str(request.args.get('video_id') or '').strip()
+    word = str(request.args.get('word') or '').strip().lower()
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', video_id):
+        return jsonify({'error': 'video_id is required and must contain safe video-id characters'}), 400
+    if not word or len(word) > 128 or any(ord(char) < 32 for char in word):
+        return jsonify({'error': 'word is required and must be printable and at most 128 characters'}), 400
+
+    start_seconds = None
+    if request.args.get('start_seconds') is not None:
+        start_seconds, error = _finite_learning_number(request.args.get('start_seconds'), 'start_seconds')
+        if error:
+            return jsonify({'error': error}), 400
+    try:
+        proximity = float(request.args.get('proximity_seconds', 1.5))
+        limit = int(request.args.get('limit', LEARNING_MAX_EVENTS_LOOKUP))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'proximity_seconds and limit must be numeric'}), 400
+    if not math.isfinite(proximity) or proximity < 0.1 or proximity > 30:
+        return jsonify({'error': 'proximity_seconds must be between 0.1 and 30'}), 400
+    if limit < 1 or limit > LEARNING_MAX_EVENTS_LOOKUP:
+        return jsonify({'error': f'limit must be 1-{LEARNING_MAX_EVENTS_LOOKUP}'}), 400
+
+    candidates = get_db().get_verified_corrections(
+        request.user_id, video_id, word, start_seconds, proximity, limit
+    )
+    # Without a playback-time context, return candidates as non-applicable only.
+    # This prevents a caller from blindly applying one correction to every occurrence.
+    corrections = candidates if start_seconds is None else [item for item in candidates if item['applicable']]
+    return jsonify({
+        'corrections': corrections,
+        'timing_context_provided': start_seconds is not None,
+        'proximity_seconds': proximity,
+    }), 200
 
 
 @app.route('/api/users/<int:user_id>/preferences', methods=['GET'])

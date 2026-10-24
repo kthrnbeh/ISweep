@@ -342,6 +342,208 @@ class Database:
 
         return success  # Return update status
 
+    @staticmethod
+    def _mute_event_dict(row):
+        if not row:
+            return None
+        data = dict(row)
+        try:
+            data['playback_context'] = json.loads(data.pop('playback_context_json') or '{}')
+        except json.JSONDecodeError:
+            data['playback_context'] = {}
+            data.pop('playback_context_json', None)
+        return data
+
+    @staticmethod
+    def _mute_feedback_dict(row):
+        return dict(row) if row else None
+
+    def create_mute_event(self, user_id: int, event: Dict) -> tuple[Dict, bool]:
+        """Create an account-owned learning event, or return its existing dedupe record."""
+        conn = self.get_connection()
+        try:
+            try:
+                conn.execute(
+                    '''INSERT INTO mute_events (
+                           user_id, video_id, matched_word, caption_source, timing_method,
+                           predicted_start_seconds, predicted_end_seconds,
+                           actual_mute_start_seconds, actual_mute_end_seconds,
+                           playback_speed, status, playback_context_json, dedupe_key
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (
+                        user_id,
+                        event['video_id'],
+                        event['matched_word'],
+                        event['caption_source'],
+                        event['timing_method'],
+                        event['predicted_start_seconds'],
+                        event['predicted_end_seconds'],
+                        event.get('actual_mute_start_seconds'),
+                        event.get('actual_mute_end_seconds'),
+                        event['playback_speed'],
+                        event['status'],
+                        json.dumps(event.get('playback_context', {}), separators=(',', ':'), sort_keys=True),
+                        event['dedupe_key'],
+                    ),
+                )
+                conn.commit()
+                created = True
+            except sqlite3.IntegrityError as error:
+                if 'dedupe_key' not in str(error).lower():
+                    raise
+                existing = conn.execute(
+                    'SELECT * FROM mute_events WHERE dedupe_key = ?',
+                    (event['dedupe_key'],),
+                ).fetchone()
+                if existing and existing['user_id'] != user_id:
+                    raise PermissionError('event dedupe key belongs to another account')
+                created = False
+
+            row = conn.execute(
+                'SELECT * FROM mute_events WHERE user_id = ? AND dedupe_key = ?',
+                (user_id, event['dedupe_key']),
+            ).fetchone()
+            if not row:
+                raise sqlite3.IntegrityError('event dedupe record is not owned by the authenticated user')
+            return self._mute_event_dict(row), created
+        finally:
+            conn.close()
+
+    def list_mute_events(self, user_id: int, limit: int, offset: int) -> tuple[list[Dict], int]:
+        conn = self.get_connection()
+        try:
+            total = conn.execute(
+                'SELECT COUNT(*) FROM mute_events WHERE user_id = ?',
+                (user_id,),
+            ).fetchone()[0]
+            rows = conn.execute(
+                '''SELECT * FROM mute_events
+                   WHERE user_id = ?
+                   ORDER BY event_id DESC
+                   LIMIT ? OFFSET ?''',
+                (user_id, limit, offset),
+            ).fetchall()
+            return [self._mute_event_dict(row) for row in rows], total
+        finally:
+            conn.close()
+
+    def get_mute_event_for_user(self, user_id: int, event_id: int) -> Optional[Dict]:
+        conn = self.get_connection()
+        try:
+            row = conn.execute(
+                'SELECT * FROM mute_events WHERE event_id = ? AND user_id = ?',
+                (event_id, user_id),
+            ).fetchone()
+            return self._mute_event_dict(row)
+        finally:
+            conn.close()
+
+    def upsert_mute_feedback(self, user_id: int, event_id: int, feedback: Dict) -> Optional[Dict]:
+        conn = self.get_connection()
+        try:
+            owned = conn.execute(
+                'SELECT event_id FROM mute_events WHERE event_id = ? AND user_id = ?',
+                (event_id, user_id),
+            ).fetchone()
+            if not owned:
+                return None
+            conn.execute(
+                '''INSERT INTO mute_feedback (
+                       event_id, result, corrected_start_seconds, corrected_end_seconds
+                   ) VALUES (?, ?, ?, ?)
+                   ON CONFLICT(event_id) DO UPDATE SET
+                       result = excluded.result,
+                       corrected_start_seconds = excluded.corrected_start_seconds,
+                       corrected_end_seconds = excluded.corrected_end_seconds,
+                       feedback_at = CURRENT_TIMESTAMP''',
+                (
+                    event_id,
+                    feedback['result'],
+                    feedback.get('corrected_start_seconds'),
+                    feedback.get('corrected_end_seconds'),
+                ),
+            )
+            conn.commit()
+            row = conn.execute(
+                'SELECT * FROM mute_feedback WHERE event_id = ?',
+                (event_id,),
+            ).fetchone()
+            return self._mute_feedback_dict(row)
+        finally:
+            conn.close()
+
+    def delete_mute_feedback(self, user_id: int, event_id: int) -> bool:
+        conn = self.get_connection()
+        try:
+            cursor = conn.execute(
+                '''DELETE FROM mute_feedback
+                   WHERE event_id = ?
+                     AND EXISTS (
+                         SELECT 1 FROM mute_events
+                         WHERE mute_events.event_id = mute_feedback.event_id
+                           AND mute_events.user_id = ?
+                     )''',
+                (event_id, user_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def get_verified_corrections(
+        self,
+        user_id: int,
+        video_id: str,
+        matched_word: str,
+        start_seconds: Optional[float],
+        proximity_seconds: float,
+        limit: int,
+    ) -> list[Dict]:
+        conn = self.get_connection()
+        try:
+            rows = conn.execute(
+                '''SELECT
+                       e.event_id,
+                       e.video_id,
+                       e.matched_word,
+                       e.caption_source,
+                       e.timing_method,
+                       e.predicted_start_seconds,
+                       e.predicted_end_seconds,
+                       e.status,
+                       f.feedback_id,
+                       f.result,
+                       f.corrected_start_seconds,
+                       f.corrected_end_seconds,
+                       f.feedback_at
+                   FROM mute_events e
+                   JOIN mute_feedback f ON f.event_id = e.event_id
+                   WHERE e.user_id = ?
+                     AND e.video_id = ?
+                     AND e.matched_word = ?
+                     AND e.status NOT IN ('canceled', 'skipped', 'failed')
+                     AND f.corrected_start_seconds IS NOT NULL
+                     AND f.corrected_end_seconds IS NOT NULL
+                   ORDER BY e.predicted_start_seconds ASC, f.feedback_at DESC
+                   LIMIT ?''',
+                (user_id, video_id, matched_word, limit),
+            ).fetchall()
+            corrections = []
+            for row in rows:
+                correction = dict(row)
+                if start_seconds is not None:
+                    correction['distance_seconds'] = abs(
+                        correction['predicted_start_seconds'] - start_seconds
+                    )
+                    correction['applicable'] = correction['distance_seconds'] <= proximity_seconds
+                else:
+                    correction['distance_seconds'] = None
+                    correction['applicable'] = False
+                corrections.append(correction)
+            return corrections
+        finally:
+            conn.close()
+
     def store_user_token(self, user_id: int, token: str, expires_at: datetime) -> None:
         conn = self.get_connection()  # Open connection
         cursor = conn.cursor()  # Get cursor
