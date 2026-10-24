@@ -4251,14 +4251,34 @@
     const hasWindow = Number.isFinite(captionStart) && Number.isFinite(captionEnd) && captionEnd > captionStart;
     const startTime = Number.isFinite(captionStart) ? captionStart : null;
     const endTime = hasWindow ? captionEnd : (startTime === null ? null : startTime + CAPTION_WINDOW_FALLBACK_SEC);
+    const timedWords = Array.isArray(options.words)
+      ? options.words
+      : (Array.isArray(options.wordTimestamps) ? options.wordTimestamps : []);
+    const estimatedWordDuration = hasWindow
+      ? estimatePageWordDurationSec(value, captionEnd - captionStart)
+      : PAGE_SELECTED_WORD_MUTE_DEFAULT_WORD_SEC;
     return Array.from(derived.values()).map((entry) => ({
       ...entry,
       word: entry.matchedVariant,
       start: tokens[entry.index]?.start ?? 0,
       end: tokens[entry.index]?.end ?? 0,
-      startTime,
-      endTime,
-      timing: options.timing || (hasWindow ? 'caption_window' : 'fallback_caption_window'),
+      startTime: Number.isFinite(Number(timedWords[entry.index]?.start))
+        ? Number(timedWords[entry.index].start)
+        : (hasWindow
+          ? startTime + ((captionEnd - captionStart) * entry.index / Math.max(tokens.length, 1))
+          : startTime),
+      endTime: Number.isFinite(Number(timedWords[entry.index]?.end))
+        ? Number(timedWords[entry.index].end)
+        : (hasWindow
+          ? Math.min(captionEnd, startTime + ((captionEnd - captionStart) * (entry.index + 1) / Math.max(tokens.length, 1)))
+          : endTime),
+      timing: Number.isFinite(Number(timedWords[entry.index]?.start))
+        && Number.isFinite(Number(timedWords[entry.index]?.end))
+        ? 'word_timestamp'
+        : (hasWindow ? 'estimated_caption_word_position' : (options.timing || 'unreliable_caption_timing')),
+      timingEstimated: !(Number.isFinite(Number(timedWords[entry.index]?.start))
+        && Number.isFinite(Number(timedWords[entry.index]?.end))),
+      estimatedWordDurationSec: estimatedWordDuration,
     }));
   }
 
@@ -4326,17 +4346,24 @@
     if (isSelectedWordMuteModeEnabled() && unseenMatches.length) {
       for (const match of unseenMatches) {
         if (Number.isFinite(match.startTime) && Number.isFinite(match.endTime)) {
-          const muteResult = requestMute({
-            start: match.startTime,
-            end: match.endTime,
-            reason: `caption:${caption.source || 'unknown'}`,
-          });
+          const muteReason = `caption:${caption.source || 'unknown'}`;
+          const muteResult = match.timingEstimated
+            ? schedulePageSelectedWordMute(match.startTime, match.endTime, muteReason)
+            : requestMute({
+              start: match.startTime,
+              end: match.endTime,
+              reason: muteReason,
+            });
           console.log('[ISWEEP][FILTER] mute result', {
             matchedWord: match.word,
             result: muteResult === true ? 'accepted' : 'skipped',
-            reason: muteResult === true ? 'mute_window_requested' : 'mute_window_rejected',
+            reason: muteResult === true
+              ? (match.timingEstimated ? 'estimated_word_window_scheduled' : 'mute_window_requested')
+              : (match.timingEstimated ? 'estimated_word_window_rejected' : 'mute_window_rejected'),
             startTime: match.startTime,
             endTime: match.endTime,
+            timing: match.timing,
+            timingEstimated: match.timingEstimated,
           });
         }
       }
@@ -4584,20 +4611,32 @@
 
     const video = findVideo();
     if (!video) return false;
+    const targetStart = Number(startSec);
+    const targetEnd = Number(endSec);
+    if (!Number.isFinite(targetStart) || !Number.isFinite(targetEnd) || targetEnd <= targetStart) return false;
+    const scheduledVideo = video;
+    const scheduledVideoId = getCurrentVideoId();
+    let lastObservedPlaybackTime = Number(video.currentTime || 0);
+
+    const attempt = () => {
+      pageSelectedWordMuteTimer = null;
+      const currentVideo = findVideo();
+      if (!currentVideo || currentVideo !== scheduledVideo || getCurrentVideoId() !== scheduledVideoId) return false;
+      const nowSec = Number(currentVideo.currentTime || 0);
+      if (!Number.isFinite(nowSec) || nowSec >= targetEnd) return false;
+      if (nowSec < lastObservedPlaybackTime - 0.75) return false;
+      lastObservedPlaybackTime = nowSec;
+      if (currentVideo.paused || nowSec < targetStart) {
+        pageSelectedWordMuteTimer = setTimeout(attempt, currentVideo.paused ? 250 : Math.min(250, Math.max((targetStart - nowSec) * 1000, 20)));
+        return true;
+      }
+      return requestMute({ start: nowSec, end: targetEnd, reason });
+    };
+
     const nowSec = Number(video.currentTime || 0);
-    const delayMs = Math.max((Number(startSec) - nowSec) * 1000, 0);
-    if (delayMs > 80 && delayMs <= 1500) {
-      pageSelectedWordMuteTimer = setTimeout(() => {
-        pageSelectedWordMuteTimer = null;
-        requestMute({ start: startSec, end: endSec, reason });
-      }, delayMs);
-      return true;
-    }
-    return requestMute({
-      start: nowSec,
-      end: nowSec + Math.max(Number(endSec) - Number(startSec), 0),
-      reason,
-    });
+    if (nowSec >= targetEnd) return false;
+    pageSelectedWordMuteTimer = setTimeout(attempt, Math.max((targetStart - nowSec) * 1000, 0));
+    return true;
   }
 
   function observePageCaption(text, source = 'page_caption_dom') {
@@ -5127,6 +5166,7 @@
       markerSourcePriority, buildSelectedWordMuteWindows, deriveWordMatches,
       filterCaption, renderMaskedCaption, onCaption, requestMute,
       estimatePageWordDurationSec, estimatePageSelectedWordMuteDurationSec,
+      schedulePageSelectedWordMute,
       isSelectedWordMuteModeEnabled, scheduleSelectedWordMutesFromAudioPayload,
       extractTimedWordsFromAudioPayload, fuseCaptionWithEvidence,
       evaluateReferenceAlignmentCandidate, resolveCaptionAlignment,

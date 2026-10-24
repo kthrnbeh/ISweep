@@ -645,6 +645,11 @@ test('synced canonical hell preference matches a native caption and schedules mu
     source: 'page_caption_dom',
     startTime: 0,
     endTime: 0.6,
+    words: [
+      { word: 'What', start: 0.0, end: 0.15 },
+      { word: 'the', start: 0.16, end: 0.25 },
+      { word: 'hell', start: 0.3, end: 0.55 },
+    ],
   });
 
   assert.equal(result.matches.length, 1);
@@ -1418,6 +1423,82 @@ test('event-driven renderer masks only matched words and preserves punctuation',
   const matches = hooks.filterCaption(caption.text);
   assert.equal(hooks.renderMaskedCaption(caption, matches), 'What the ___...');
   assert.equal(hooks.renderMaskedCaption({ text: 'What the heck' }, []), 'What the heck');
+});
+
+test('sentence-level selected words use estimated beginning, middle, and end positions', () => {
+  const hooks = loadYoutubeTimingHooks();
+  hooks.setCachedPreferences({
+    enabled: true,
+    blocklist: { enabled: true, items: ['hell'] },
+    categories: { language: { enabled: true, items: ['hell'] } },
+  });
+
+  const beginning = hooks.filterCaption('hell one two', { startTime: 100, endTime: 103 })[0];
+  const middle = hooks.filterCaption('one hell two', { startTime: 100, endTime: 103 })[0];
+  const end = hooks.filterCaption('one two hell', { startTime: 100, endTime: 103 })[0];
+
+  assert.equal(beginning.timing, 'estimated_caption_word_position');
+  assert.equal(beginning.timingEstimated, true);
+  assert.equal(beginning.startTime, 100);
+  assert.equal(middle.startTime > beginning.startTime, true);
+  assert.equal(end.startTime > middle.startTime, true);
+  assert.equal(end.endTime <= 103, true);
+});
+
+test('reliable per-word timestamps override sentence-level estimates', () => {
+  const hooks = loadYoutubeTimingHooks();
+  hooks.setCachedPreferences({
+    enabled: true,
+    blocklist: { enabled: true, items: ['hell'] },
+    categories: { language: { enabled: true, items: ['hell'] } },
+  });
+
+  const match = hooks.filterCaption('one hell two', {
+    startTime: 100,
+    endTime: 103,
+    words: [
+      { word: 'one', start: 100.1, end: 100.3 },
+      { word: 'hell', start: 101.7, end: 102.1 },
+      { word: 'two', start: 102.2, end: 102.4 },
+    ],
+  })[0];
+
+  assert.equal(match.timing, 'word_timestamp');
+  assert.equal(match.timingEstimated, false);
+  assert.equal(match.startTime, 101.7);
+  assert.equal(match.endTime, 102.1);
+});
+
+test('future estimated word windows wait for playback time instead of muting immediately', async () => {
+  const hooks = loadYoutubeTimingHooks();
+  const video = hooks.__testVideo;
+  video.currentTime = 50;
+  video.muted = false;
+
+  assert.equal(hooks.schedulePageSelectedWordMute(50.1, 50.4, 'estimated_page_word'), true);
+  assert.equal(hooks.getMuteControllerState().active, false);
+
+  video.currentTime = 50.1;
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.equal(hooks.getMuteControllerState().active, true);
+  assert.equal(video.muted, true);
+
+  hooks.schedulePageSelectedWordMute(0, 0.1, 'clear_test_timer');
+});
+
+test('pending estimated word windows are canceled after a backward seek', async () => {
+  const hooks = loadYoutubeTimingHooks();
+  const video = hooks.__testVideo;
+  video.currentTime = 50;
+  video.muted = false;
+
+  assert.equal(hooks.schedulePageSelectedWordMute(50.1, 50.4, 'estimated_page_word'), true);
+  video.currentTime = 10;
+  await new Promise((resolve) => setTimeout(resolve, 120));
+
+  assert.equal(hooks.getMuteControllerState().active, false);
+  assert.equal(video.muted, false);
+  hooks.schedulePageSelectedWordMute(0, 0.1, 'clear_test_timer');
 });
 
 test('repeated caption polling is deduplicated by the caption handler', () => {
