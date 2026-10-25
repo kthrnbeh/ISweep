@@ -1670,12 +1670,28 @@ async function handleLearningEvent(event) {
         STORAGE_KEYS.PREFS,
         STORAGE_KEYS.LEARNING_CONSENT_CONFIRMED,
       ]);
-      return { ok: false, skipped: true, reason: 'unauthorized' };
+      return { ok: false, skipped: true, reason: 'unauthorized', status: response.status, error: 'unauthorized' };
     }
-    return { ok: response.ok, status: response.status };
+    const body = await response.json().catch(() => null);
+    if (!response.ok) return { ok: false, status: response.status, error: learningApiError(response.status, body) };
+    return {
+      ok: true,
+      status: response.status,
+      created: body?.created === true,
+      event: body?.event && typeof body.event === 'object' ? body.event : undefined,
+    };
   } catch (_) {
-    return { ok: false, skipped: true, reason: 'backend_unavailable' };
+    return { ok: false, skipped: true, reason: 'backend_unavailable', error: 'backend_unavailable' };
   }
+}
+
+function learningApiError(status, body) {
+  if (status === 401) return 'unauthorized';
+  if (status === 403) return 'consent_not_confirmed';
+  if (status === 404) return 'learning_api_unavailable';
+  if (status >= 500) return 'backend_error';
+  if (body && typeof body.error === 'string') return 'request_rejected';
+  return 'unexpected_response';
 }
 
 async function handleLearningList() {
@@ -1686,8 +1702,10 @@ async function handleLearningList() {
     const response = await fetch(`${backendUrl}/learning/mute-events?limit=25&offset=0`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!response.ok) return { ok: false, error: `status ${response.status}` };
-    return { ok: true, ...(await response.json()) };
+    const body = await response.json().catch(() => null);
+    if (!response.ok) return { ok: false, status: response.status, error: learningApiError(response.status, body) };
+    if (!body || !Array.isArray(body.events)) return { ok: false, status: response.status, error: 'invalid_response' };
+    return { ok: true, ...body };
   } catch (_) {
     return { ok: false, error: 'backend_unavailable' };
   }
@@ -1705,7 +1723,9 @@ async function handleLearningFeedback(message) {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       ...(message.delete === true ? {} : { body: JSON.stringify(message.feedback || {}) }),
     });
-    return { ok: response.ok, status: response.status, ...(await response.json().catch(() => ({}))) };
+    const body = await response.json().catch(() => null);
+    if (!response.ok) return { ok: false, status: response.status, error: learningApiError(response.status, body) };
+    return { ok: true, status: response.status, ...(body && typeof body === 'object' ? body : {}) };
   } catch (_) {
     return { ok: false, error: 'backend_unavailable' };
   }

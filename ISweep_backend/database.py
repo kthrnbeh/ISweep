@@ -352,6 +352,19 @@ class Database:
         except json.JSONDecodeError:
             data['playback_context'] = {}
             data.pop('playback_context_json', None)
+        feedback_id = data.pop('feedback_id', None)
+        feedback_result = data.pop('feedback_result', None)
+        feedback_start = data.pop('feedback_corrected_start_seconds', None)
+        feedback_end = data.pop('feedback_corrected_end_seconds', None)
+        feedback_at = data.pop('feedback_at', None)
+        if feedback_id is not None:
+            data['feedback'] = {
+                'feedback_id': feedback_id,
+                'result': feedback_result,
+                'corrected_start_seconds': feedback_start,
+                'corrected_end_seconds': feedback_end,
+                'feedback_at': feedback_at,
+            }
         return data
 
     @staticmethod
@@ -417,9 +430,15 @@ class Database:
                 (user_id,),
             ).fetchone()[0]
             rows = conn.execute(
-                '''SELECT * FROM mute_events
-                   WHERE user_id = ?
-                   ORDER BY event_id DESC
+                '''SELECT e.*, f.feedback_id AS feedback_id,
+                          f.result AS feedback_result,
+                          f.corrected_start_seconds AS feedback_corrected_start_seconds,
+                          f.corrected_end_seconds AS feedback_corrected_end_seconds,
+                          f.feedback_at AS feedback_at
+                   FROM mute_events e
+                   LEFT JOIN mute_feedback f ON f.event_id = e.event_id
+                   WHERE e.user_id = ?
+                   ORDER BY e.event_id DESC
                    LIMIT ? OFFSET ?''',
                 (user_id, limit, offset),
             ).fetchall()

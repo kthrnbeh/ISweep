@@ -479,6 +479,9 @@ function appendLearningEventRow(event) {
   end.min = '0';
   end.step = '0.01';
   end.placeholder = 'Corrected end (seconds)';
+  if (event.feedback?.corrected_start_seconds != null) start.value = event.feedback.corrected_start_seconds;
+  if (event.feedback?.corrected_end_seconds != null) end.value = event.feedback.corrected_end_seconds;
+  if (event.feedback?.result) row.dataset.feedbackResult = event.feedback.result;
   row.append(start, end);
 
   const submit = document.createElement('button');
@@ -493,6 +496,11 @@ function appendLearningEventRow(event) {
     }
     const feedback = { result };
     if (start.value || end.value) {
+      if (!start.value || !end.value || !Number.isFinite(Number(start.value))
+        || !Number.isFinite(Number(end.value)) || Number(end.value) <= Number(start.value)) {
+        if (learningConsentStatus) learningConsentStatus.textContent = 'Enter both corrected times, with end after start.';
+        return;
+      }
       feedback.corrected_start_seconds = Number(start.value);
       feedback.corrected_end_seconds = Number(end.value);
     }
@@ -531,7 +539,19 @@ async function refreshLearningEvents() {
   const response = await chrome.runtime.sendMessage({ type: 'isweep_learning_list' });
   learningEventsList.textContent = '';
   if (!response?.ok || !Array.isArray(response.events) || !response.events.length) {
-    learningEventsList.textContent = response?.error ? 'Learning events are currently unavailable.' : 'No events yet.';
+    if (response?.error) {
+      const messages = {
+        unauthorized: 'Learning events unavailable: sign in again.',
+        consent_not_confirmed: 'Learning events unavailable: backend consent is not confirmed.',
+        learning_api_unavailable: 'Learning events unavailable: API route not found.',
+        backend_error: 'Learning events unavailable: backend error.',
+        backend_unavailable: 'Learning events unavailable: backend is offline.',
+        invalid_response: 'Learning events unavailable: invalid backend response.',
+      };
+      learningEventsList.textContent = messages[response.error] || 'Learning events unavailable: request failed.';
+    } else {
+      learningEventsList.textContent = 'No events recorded yet.';
+    }
     return;
   }
   response.events.forEach((event) => learningEventsList.appendChild(appendLearningEventRow(event)));
@@ -593,6 +613,9 @@ async function handleReportMissedWord() {
   });
   if (feedbackResponse?.ok) {
     if (learningConsentStatus) learningConsentStatus.textContent = 'Missed-word report saved.';
+    await refreshLearningEvents();
+  } else if (learningConsentStatus) {
+    learningConsentStatus.textContent = 'Event saved, but its feedback could not be saved. You can retry from Recent Mute Events.';
     await refreshLearningEvents();
   }
 }

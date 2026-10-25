@@ -120,6 +120,10 @@ class TestLearningAPI:
         )
         assert feedback.status_code == 200
         assert feedback.get_json()['feedback']['result'] == 'late'
+        listed_with_feedback = client.get('/learning/mute-events', headers=headers(token))
+        listed_event = next(item for item in listed_with_feedback.get_json()['events'] if item['event_id'] == first_id)
+        assert listed_event['feedback']['result'] == 'late'
+        assert listed_event['feedback']['corrected_start_seconds'] == 10.2
 
         updated = client.put(
             f'/learning/mute-events/{first_id}/feedback',

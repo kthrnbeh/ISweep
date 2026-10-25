@@ -341,7 +341,7 @@ test('confirmed learning event upload is non-sensitive and uses the authenticate
     const body = JSON.parse(options.body);
     assert.equal(body.matched_word, 'hell');
     assert.equal(Object.prototype.hasOwnProperty.call(body, 'caption_text'), false);
-    return { ok: true, status: 201, json: async () => ({ event: { event_id: 1 } }) };
+    return { ok: true, status: 201, json: async () => ({ event: { event_id: 1 }, created: true }) };
   };
 
   const result = await bg.__sendRuntimeMessage({
@@ -359,6 +359,67 @@ test('confirmed learning event upload is non-sensitive and uses the authenticate
   });
   assert.equal(result.ok, true);
   assert.equal(result.status, 201);
+  assert.equal(result.created, true);
+  assert.equal(result.event.event_id, 1);
+});
+
+test('learning list returns account-scoped events and distinguishes an API failure', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({ isweep_auth_token: 'account-token' });
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ events: [{ event_id: 7, matched_word: 'hell' }], total: 1, limit: 25, offset: 0 }),
+  });
+  const result = await bg.__sendRuntimeMessage({ type: 'isweep_learning_list' });
+  assert.equal(result.ok, true);
+  assert.equal(result.events[0].event_id, 7);
+
+  bg.fetch = async () => ({ ok: false, status: 403, json: async () => ({ error: 'private server text' }) });
+  const failed = await bg.__sendRuntimeMessage({ type: 'isweep_learning_list' });
+  assert.equal(failed.ok, false);
+  assert.equal(failed.status, 403);
+  assert.equal(failed.error, 'consent_not_confirmed');
+});
+
+test('learning list rejects malformed successful API responses', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({ isweep_auth_token: 'account-token' });
+  bg.fetch = async () => ({ ok: true, status: 200, json: async () => ({ event: {} }) });
+  const result = await bg.__sendRuntimeMessage({ type: 'isweep_learning_list' });
+  assert.equal(result.error, 'invalid_response');
+});
+
+test('missed-word flow can save an event id and then its linked feedback', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({
+    isweep_auth_token: 'account-token',
+    isweepPreferences: { blocklist: { items: ['hell'] }, learning: { enabled: true } },
+    isweepLearningConsentConfirmed: true,
+  });
+  const requests = [];
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), options });
+    if (options.method === 'PUT') {
+      return { ok: true, status: 200, json: async () => ({ feedback: { event_id: 9, result: 'missed' } }) };
+    }
+    return { ok: true, status: 201, json: async () => ({ event: { event_id: 9 }, created: true }) };
+  };
+  const event = await bg.__sendRuntimeMessage({
+    type: 'isweep_learning_event',
+    event: { video_id: 'video-1', matched_word: 'hell', dedupe_key: 'missed-event-1' },
+  });
+  assert.equal(event.event.event_id, 9);
+  const feedback = await bg.__sendRuntimeMessage({
+    type: 'isweep_learning_feedback',
+    eventId: event.event.event_id,
+    feedback: { result: 'missed', corrected_start_seconds: 10, corrected_end_seconds: 10.4 },
+  });
+  assert.equal(feedback.ok, true);
+  const feedbackRequest = requests.find((request) => request.options.method === 'PUT');
+  assert.equal(feedbackRequest.options.body.includes('corrected_start_seconds'), true);
 });
 
 test('learning upload failure is isolated and expired authentication disables future uploads', async () => {

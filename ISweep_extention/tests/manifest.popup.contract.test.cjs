@@ -175,6 +175,9 @@ test('popup exposes opt-in learning and account-scoped feedback controls', () =>
   assert.equal(popupSource.includes('isweep_set_learning_consent'), true);
   assert.equal(popupSource.includes('isweep_learning_feedback'), true);
   assert.equal(popupSource.includes('isweepLearningConsentConfirmed'), true);
+  assert.equal(popupSource.includes('No events recorded yet.'), true);
+  assert.equal(popupSource.includes('Event saved, but its feedback could not be saved.'), true);
+  assert.equal(popupSource.includes('event.feedback?.corrected_start_seconds'), true);
 });
 
 test('learning uploads remain background-owned and do not include caption text', () => {
