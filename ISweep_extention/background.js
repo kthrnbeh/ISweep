@@ -1711,6 +1711,40 @@ async function handleLearningList() {
   }
 }
 
+async function handleLearningCorrections(message = {}) {
+  const token = await getAuthToken();
+  if (!token) return { ok: false, error: 'missing token' };
+  const videoId = String(message.videoId || '').trim();
+  const word = String(message.word || '').trim().toLowerCase();
+  if (!videoId || !word) return { ok: false, error: 'invalid correction lookup' };
+  const params = `video_id=${encodeURIComponent(videoId)}&word=${encodeURIComponent(word)}&limit=25`;
+  const startSeconds = Number(message.startSeconds);
+  const query = Number.isFinite(startSeconds)
+    ? `${params}&start_seconds=${encodeURIComponent(String(startSeconds))}`
+    : params;
+  const backendUrl = await getBackendUrl();
+  try {
+    const response = await fetch(`${backendUrl}/learning/corrections?${query}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) return { ok: false, status: response.status, error: learningApiError(response.status, body) };
+    if (!body || !Array.isArray(body.corrections)) return { ok: false, status: response.status, error: 'invalid_response' };
+    return { ok: true, ...body };
+  } catch (_) {
+    return { ok: false, error: 'backend_unavailable' };
+  }
+}
+
+async function notifyLearningCorrectionInvalidation() {
+  try {
+    const tabs = await chrome.tabs.query({});
+    await Promise.all((tabs || []).map((tab) => chrome.tabs.sendMessage(
+      tab.id, { type: 'isweep_learning_corrections_changed' },
+    ).catch(() => null)));
+  } catch (_) {}
+}
+
 async function handleLearningFeedback(message) {
   const token = await getAuthToken();
   if (!token) return { ok: false, error: 'missing token' };
@@ -1725,6 +1759,7 @@ async function handleLearningFeedback(message) {
     });
     const body = await response.json().catch(() => null);
     if (!response.ok) return { ok: false, status: response.status, error: learningApiError(response.status, body) };
+    await notifyLearningCorrectionInvalidation();
     return { ok: true, status: response.status, ...(body && typeof body === 'object' ? body : {}) };
   } catch (_) {
     return { ok: false, error: 'backend_unavailable' };
@@ -1874,6 +1909,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // async
   } else if (message.type === 'isweep_learning_list') {
     handleLearningList().then(sendResponse);
+    return true; // async
+  } else if (message.type === 'isweep_learning_corrections') {
+    handleLearningCorrections(message).then(sendResponse);
     return true; // async
   } else if (message.type === 'isweep_learning_feedback') {
     handleLearningFeedback(message).then(sendResponse);

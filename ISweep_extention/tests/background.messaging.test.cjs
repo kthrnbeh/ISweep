@@ -422,6 +422,22 @@ test('missed-word flow can save an event id and then its linked feedback', async
   assert.equal(feedbackRequest.options.body.includes('corrected_start_seconds'), true);
 });
 
+test('correction lookup uses the authenticated account and video-word context', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({ isweep_auth_token: 'account-token' });
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async (url, options = {}) => {
+    assert.equal(String(url), 'http://127.0.0.1:5000/learning/corrections?video_id=video-1&word=hell&limit=25');
+    assert.equal(options.headers.Authorization, 'Bearer account-token');
+    return { ok: true, status: 200, json: async () => ({ corrections: [] }) };
+  };
+  const result = await bg.__sendRuntimeMessage({
+    type: 'isweep_learning_corrections', videoId: 'video-1', word: 'Hell',
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.corrections.length, 0);
+});
+
 test('learning upload failure is isolated and expired authentication disables future uploads', async () => {
   const bg = loadBackgroundContext();
   await bg.chrome.storage.local.set({

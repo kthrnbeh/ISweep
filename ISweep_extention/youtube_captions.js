@@ -15,6 +15,7 @@
     CLEAN_CAPTION_SETTINGS: 'isweepCleanCaptionSettings',
     AUDIO_FILTERING_ENABLED: 'audioFilteringEnabled',
     LOCAL_REFERENCES: 'isweepLocalReferences',
+    AUTH_TOKEN: 'isweep_auth_token',
   };
   // Track caption text and when it started so we can measure how long words are spoken.
   // Playback-only: ISweep never edits media or captions; it only controls live playback state (mute/unmute/seek/rate).
@@ -62,6 +63,9 @@
   let cachedPreferencesReady = typeof chrome === 'undefined' || !chrome.storage?.local;
   let cachedPreferences = null;
   let cachedLocalReferences = {};
+  const learnedCorrectionsByWord = new Map();
+  const learnedCorrectionRequests = new Map();
+  const LEARNED_CORRECTION_MATCH_PROXIMITY_SEC = 1.0;
 
   function normalizePreferences(prefs) {
     const raw = prefs && typeof prefs === 'object' ? prefs : {};
@@ -3915,6 +3919,7 @@
 
       activeVideoId =
         null;
+      clearLearnedCorrections();
 
       preAnalyzedCleanCaptions =
         [];
@@ -3957,6 +3962,8 @@
 
     activeVideoId =
       newVideoId;
+    clearLearnedCorrections();
+    warmLearningCorrections(newVideoId);
 
     preAnalyzedCleanCaptions =
       [];
@@ -4170,11 +4177,68 @@
   function setCachedPreferences(prefs) {
     cachedPreferences = normalizePreferences(prefs);
     cachedPreferencesReady = true;
+    if (!cachedPreferences.learning.enabled) {
+      learnedCorrectionsByWord.clear();
+      learnedCorrectionRequests.clear();
+    } else if (activeVideoId) {
+      warmLearningCorrections(activeVideoId);
+    }
     return cachedPreferences;
   }
 
   function isLearningCollectionEnabled() {
     return cachedPreferences?.learning?.enabled === true;
+  }
+
+  function clearLearnedCorrections() {
+    learnedCorrectionsByWord.clear();
+    learnedCorrectionRequests.clear();
+  }
+
+  function correctionCacheKey(videoId, word) {
+    return `${String(videoId || '').trim()}|${normalizeCaptionWord(word)}`;
+  }
+
+  function warmLearningCorrections(videoId = getCurrentVideoId()) {
+    if (!isLearningCollectionEnabled() || !videoId || typeof chrome === 'undefined'
+      || !chrome.runtime?.sendMessage) return;
+    getFilterWords().words.map(normalizeFilterWord).filter(Boolean).forEach((word) => {
+      const key = correctionCacheKey(videoId, word);
+      if (learnedCorrectionRequests.has(key)) return;
+      learnedCorrectionRequests.set(key, true);
+      void safeRuntimeSendMessage({ type: 'isweep_learning_corrections', videoId, word })
+        .then((response) => {
+          if (response?.ok && Array.isArray(response.corrections)) {
+            learnedCorrectionsByWord.set(key, response.corrections);
+          }
+        })
+        .catch(() => null)
+        .finally(() => learnedCorrectionRequests.delete(key));
+    });
+  }
+
+  function applyLearnedCorrection(match) {
+    if (!match?.timingEstimated || !isLearningCollectionEnabled()) return match;
+    const videoId = getCurrentVideoId();
+    const predictedStart = Number(match.startTime);
+    if (!videoId || !Number.isFinite(predictedStart)) return match;
+    const candidates = learnedCorrectionsByWord.get(correctionCacheKey(videoId, match.word)) || [];
+    const correction = candidates
+      .filter((item) => item?.successful_mute_example === true
+        && Number.isFinite(Number(item.corrected_start_seconds))
+        && Number.isFinite(Number(item.corrected_end_seconds))
+        && Number(item.corrected_end_seconds) > Number(item.corrected_start_seconds)
+        && Math.abs(Number(item.predicted_start_seconds) - predictedStart) <= LEARNED_CORRECTION_MATCH_PROXIMITY_SEC)
+      .sort((left, right) => Math.abs(Number(left.predicted_start_seconds) - predictedStart)
+        - Math.abs(Number(right.predicted_start_seconds) - predictedStart))[0];
+    if (!correction) return match;
+    return {
+      ...match,
+      startTime: Number(correction.corrected_start_seconds),
+      endTime: Number(correction.corrected_end_seconds),
+      timing: 'learned_correction',
+      learnedCorrectionEventId: correction.event_id,
+    };
   }
 
   function setCachedLocalReferences(references) {
@@ -4412,7 +4476,8 @@
     }
 
     if (isSelectedWordMuteModeEnabled() && unseenMatches.length) {
-      for (const match of unseenMatches) {
+      for (const rawMatch of unseenMatches) {
+        const match = applyLearnedCorrection(rawMatch);
         if (Number.isFinite(match.startTime) && Number.isFinite(match.endTime)) {
           const muteReason = `caption:${caption.source || 'unknown'}`;
           const learning = buildLearningEventContext(match, caption, findVideo());
@@ -4433,6 +4498,7 @@
             startTime: match.startTime,
             endTime: match.endTime,
             timing: match.timing,
+            learnedCorrectionEventId: match.learnedCorrectionEventId || null,
             timingEstimated: match.timingEstimated,
           });
         }
@@ -5193,6 +5259,13 @@
         return false;
       }
 
+      if (message?.type === 'isweep_learning_corrections_changed') {
+        clearLearnedCorrections();
+        warmLearningCorrections(activeVideoId);
+        sendResponse({ ok: true });
+        return false;
+      }
+
       return undefined;
     });
   }
@@ -5230,6 +5303,7 @@
               || Array.isArray(incomingPreferences?.categories?.language?.items)
               || Array.isArray(incomingPreferences?.categories?.language?.words)
               || Array.isArray(incomingPreferences?.categories?.language?.customWords)
+              || incomingPreferences?.learning !== undefined
             );
           if (hasCanonicalOrLegacyWordList || !cachedPreferences) {
             setCachedPreferences(incomingPreferences);
@@ -5237,6 +5311,10 @@
           }
           lastPageSelectedWordMuteSignature = '';
           lastPageSelectedWordMuteAtMs = 0;
+        }
+        if (changes[STORAGE_KEYS.AUTH_TOKEN]) {
+          clearLearnedCorrections();
+          if (changes[STORAGE_KEYS.AUTH_TOKEN].newValue) warmLearningCorrections(activeVideoId);
         }
         if (changes[STORAGE_KEYS.CLEAN_CAPTION_SETTINGS]) {
           applyCleanCaptionSettings(
@@ -5278,6 +5356,10 @@
       getCaptionStateSnapshot,
       getNormalizedCaptionPosition,
       getProcessedCaptionEventCount: () => processedCaptionEvents.size,
+      clearLearnedCorrections,
+      applyLearnedCorrection,
+      warmLearningCorrections,
+      getLearnedCorrections: () => Array.from(learnedCorrectionsByWord.entries()),
     };
   }
 

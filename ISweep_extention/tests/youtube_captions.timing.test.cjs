@@ -26,6 +26,7 @@ function loadYoutubeTimingHooks() {
     },
   };
   const learningMessages = [];
+  let learningResponse = { ok: true };
   const context = {
     console: { log() {}, warn() {}, error() {} },
     globalThis: {},
@@ -40,7 +41,7 @@ function loadYoutubeTimingHooks() {
         id: 'timing-test-extension',
         sendMessage: async (message) => {
           learningMessages.push(message);
-          return { ok: true };
+          return learningResponse;
         },
       },
     },
@@ -93,6 +94,7 @@ function loadYoutubeTimingHooks() {
   const hooks = context.__ISWEEP_YT_TEST_HOOKS__;
   hooks.__testVideo = fakeVideo;
   hooks.__getLearningMessages = () => learningMessages.slice();
+  hooks.__setLearningResponse = (response) => { learningResponse = response; };
   return hooks;
 }
 
@@ -1442,6 +1444,55 @@ test('selected word Hell normalizes to hell and matches', () => {
     ['Hell'],
   );
   assert.equal(windows.length, 1);
+});
+
+test('verified learning correction replaces only the matching estimated occurrence', async () => {
+  const hooks = loadYoutubeTimingHooks();
+  hooks.__setLearningResponse({ ok: false, error: 'backend_unavailable' });
+  hooks.setCachedPreferences({ blocklist: { enabled: true, items: ['hell'] }, learning: { enabled: true } });
+  hooks.__getLearningMessages().length = 0;
+  hooks.warmLearningCorrections('current-video');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const corrected = hooks.applyLearnedCorrection({
+    word: 'hell', timingEstimated: true, startTime: 53.623529, endTime: 54.003529,
+  });
+  assert.equal(corrected.startTime, 53.623529);
+  assert.equal(corrected.endTime, 54.003529);
+});
+
+test('learned corrections apply when returned by the authenticated API and not to repeated occurrences', async () => {
+  const hooks = loadYoutubeTimingHooks();
+  hooks.__setLearningResponse({
+    ok: true,
+    corrections: [{
+      event_id: 1,
+      predicted_start_seconds: 53.623529,
+      corrected_start_seconds: 55,
+      corrected_end_seconds: 57,
+      successful_mute_example: true,
+    }],
+  });
+  hooks.setCachedPreferences({ blocklist: { enabled: true, items: ['hell'] }, learning: { enabled: true } });
+  hooks.warmLearningCorrections('current-video');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const first = hooks.applyLearnedCorrection({ word: 'hell', timingEstimated: true, startTime: 53.62, endTime: 54.0 });
+  const repeated = hooks.applyLearnedCorrection({ word: 'hell', timingEstimated: true, startTime: 80.0, endTime: 80.4 });
+  assert.equal(first.startTime, 55);
+  assert.equal(first.endTime, 57);
+  assert.equal(first.timing, 'learned_correction');
+  assert.equal(repeated.startTime, 80);
+  assert.equal(repeated.timing, undefined);
+  const trusted = hooks.applyLearnedCorrection({ word: 'hell', timingEstimated: false, startTime: 53.62, endTime: 54.0 });
+  assert.equal(trusted.startTime, 53.62);
+});
+
+test('disabled learning, stale correction failures, and API failures leave timing unchanged', async () => {
+  const hooks = loadYoutubeTimingHooks();
+  hooks.setCachedPreferences({ blocklist: { enabled: true, items: ['hell'] }, learning: { enabled: false } });
+  hooks.clearLearnedCorrections();
+  const result = hooks.applyLearnedCorrection({ word: 'hell', timingEstimated: true, startTime: 53.62, endTime: 54.0 });
+  assert.equal(result.startTime, 53.62);
+  assert.equal(result.timing, undefined);
 });
 
 test('event-driven caption filter handles case, punctuation, and whole words', () => {
