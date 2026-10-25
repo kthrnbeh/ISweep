@@ -51,3 +51,15 @@ test('popup captures the active YouTube video clock in a human-friendly field', 
   assert.equal(await hooks.captureCurrentVideoTime(input), true);
   assert.equal(input.value, '1:15.25');
 });
+
+test('popup groups replay attempts without combining distinct occurrences', () => {
+  const hooks = loadPopupHooks();
+  const groups = hooks.groupLearningEvents([
+    { event_id: 3, video_id: 'video-1', matched_word: 'hell', predicted_start_seconds: 53.62, predicted_end_seconds: 54.0 },
+    { event_id: 2, video_id: 'video-1', matched_word: 'hell', predicted_start_seconds: 53.7, predicted_end_seconds: 54.1 },
+    { event_id: 1, video_id: 'video-1', matched_word: 'hell', predicted_start_seconds: 80.0, predicted_end_seconds: 80.4 },
+  ]);
+  assert.equal(groups.length, 2);
+  assert.equal(groups[0].attempts.length, 2);
+  assert.equal(groups[1].attempts.length, 1);
+});

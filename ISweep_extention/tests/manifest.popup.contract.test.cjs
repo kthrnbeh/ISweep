@@ -172,6 +172,8 @@ test('popup exposes opt-in learning and account-scoped feedback controls', () =>
   assert.equal(popupHtml.includes('id="learningConsentToggle"'), true);
   assert.equal(popupHtml.includes('id="btnLearningMissedStartNow"'), true);
   assert.equal(popupHtml.includes('id="btnLearningMissedEndNow"'), true);
+  assert.equal(popupHtml.includes('aria-label="Use current video time for start"'), true);
+  assert.equal(popupHtml.includes('aria-label="Use current video time for end"'), true);
   assert.equal(popupHtml.includes('Recent Mute Events'), true);
   assert.equal(popupHtml.includes('Report missed word'), true);
   assert.equal(popupSource.includes('isweep_set_learning_consent'), true);
@@ -183,6 +185,11 @@ test('popup exposes opt-in learning and account-scoped feedback controls', () =>
   assert.equal(popupSource.includes('function parsePlaybackTime'), true);
   assert.equal(popupSource.includes('formatPlaybackTime(event.predicted_start_seconds)'), true);
   assert.equal(popupSource.includes('getActiveVideoClock'), true);
+  assert.equal(popupSource.includes("setAttribute('role', 'radio')"), true);
+  assert.equal(popupSource.includes('aria-checked'), true);
+  assert.equal(popupSource.includes('Show history'), true);
+  assert.equal(popupSource.includes('function groupLearningEvents'), true);
+  assert.equal(popupSource.includes('Saved ✓'), true);
 });
 
 test('learning uploads remain background-owned and do not include caption text', () => {

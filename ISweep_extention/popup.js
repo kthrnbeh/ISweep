@@ -211,6 +211,28 @@ function formatPlaybackTime(value) {
   return `${minutes}:${remainder}`;
 }
 
+function eventOccurrenceKey(event) {
+  const start = Number(event?.predicted_start_seconds);
+  const end = Number(event?.predicted_end_seconds);
+  const rounded = (value) => Number.isFinite(value) ? (Math.round(value * 2) / 2).toFixed(1) : 'unknown';
+  return `${String(event?.video_id || '')}|${String(event?.matched_word || '').trim().toLowerCase()}|${rounded(start)}|${rounded(end)}`;
+}
+
+function groupLearningEvents(events) {
+  const groups = new Map();
+  (Array.isArray(events) ? events : [])
+    .slice()
+    .sort((left, right) => Number(right.event_id || 0) - Number(left.event_id || 0))
+    .forEach((event) => {
+      const key = eventOccurrenceKey(event);
+      const group = groups.get(key) || { key, representative: event, attempts: [] };
+      group.attempts.push(event);
+      if (event.feedback && !group.representative.feedback) group.representative = event;
+      groups.set(key, group);
+    });
+  return Array.from(groups.values());
+}
+
 async function getActiveVideoClock() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -510,9 +532,15 @@ function setLearningConsentUi(enabled, message = null) {
   if (learningEventsPanel) learningEventsPanel.classList.toggle('hidden', !active);
 }
 
-function appendLearningEventRow(event) {
+function syncCorrectionFieldVisibility(result, start, end) {
+  const useful = ['early', 'late', 'missed'].includes(result) || Boolean(start?.value || end?.value);
+  if (start) start.hidden = !useful;
+  if (end) end.hidden = !useful;
+}
+
+function appendLearningEventRow(event, { interactive = true, attempts = [event] } = {}) {
   const row = document.createElement('div');
-  row.className = 'learning-event-row';
+  row.className = `learning-event-row${interactive ? ' learning-event-primary' : ' learning-event-history-row'}`;
   const summary = document.createElement('div');
   const occurrence = `#${event.event_id ?? '?'}`;
   const corrected = event.feedback?.corrected_start_seconds != null
@@ -522,21 +550,34 @@ function appendLearningEventRow(event) {
   row.appendChild(summary);
 
   const controls = document.createElement('div');
+  controls.className = 'feedback-choice-group';
+  controls.setAttribute('role', 'radiogroup');
+  controls.setAttribute('aria-label', `Timing feedback for event ${event.event_id ?? 'unknown'}`);
   ['correct', 'early', 'late', 'missed'].forEach((result) => {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'btn-link';
-    button.textContent = result === 'early' ? 'Too Early'
+    button.className = 'feedback-choice';
+    button.setAttribute('role', 'radio');
+    button.setAttribute('aria-checked', event.feedback?.result === result ? 'true' : 'false');
+    button.textContent = `${event.feedback?.result === result ? '✓ ' : ''}${result === 'early' ? 'Too Early'
       : result === 'late' ? 'Too Late'
-        : result[0].toUpperCase() + result.slice(1);
+        : result[0].toUpperCase() + result.slice(1)}`;
     button.addEventListener('click', () => {
       row.dataset.feedbackResult = result;
-      controls.querySelectorAll('button').forEach((item) => item.disabled = item === button);
+      controls.querySelectorAll('button').forEach((item) => {
+        const selected = item === button;
+        item.setAttribute('aria-checked', selected ? 'true' : 'false');
+        item.textContent = `${selected ? '✓ ' : ''}${item.dataset.feedbackLabel}`;
+      });
+      syncCorrectionFieldVisibility(result, start, end);
       if (learningConsentStatus) learningConsentStatus.textContent = `Selected ${result}. Add corrected times if needed, then submit.`;
     });
+    button.dataset.feedbackLabel = result === 'early' ? 'Too Early'
+      : result === 'late' ? 'Too Late'
+        : result[0].toUpperCase() + result.slice(1);
     controls.appendChild(button);
   });
-  row.appendChild(controls);
+  if (interactive) row.appendChild(controls);
 
   const start = document.createElement('input');
   start.type = 'number';
@@ -551,12 +592,13 @@ function appendLearningEventRow(event) {
   if (event.feedback?.corrected_start_seconds != null) start.value = event.feedback.corrected_start_seconds;
   if (event.feedback?.corrected_end_seconds != null) end.value = event.feedback.corrected_end_seconds;
   if (event.feedback?.result) row.dataset.feedbackResult = event.feedback.result;
-  row.append(start, end);
+  syncCorrectionFieldVisibility(event.feedback?.result || '', start, end);
+  if (interactive) row.append(start, end);
 
   const submit = document.createElement('button');
   submit.type = 'button';
   submit.className = 'btn btn-secondary';
-  submit.textContent = 'Submit feedback';
+  submit.textContent = 'Save correction';
   submit.addEventListener('click', async () => {
     const result = row.dataset.feedbackResult;
     if (!result) {
@@ -579,13 +621,14 @@ function appendLearningEventRow(event) {
       feedback,
     });
     if (response?.ok) {
-      if (learningConsentStatus) learningConsentStatus.textContent = 'Feedback saved.';
+      submit.textContent = 'Saved ✓';
+      if (learningConsentStatus) learningConsentStatus.textContent = 'Saved ✓';
       await refreshLearningEvents();
     } else if (learningConsentStatus) {
       learningConsentStatus.textContent = 'Feedback could not be saved.';
     }
   });
-  row.appendChild(submit);
+  if (interactive) row.appendChild(submit);
 
   const remove = document.createElement('button');
   remove.type = 'button';
@@ -599,7 +642,20 @@ function appendLearningEventRow(event) {
     });
     if (response?.ok) await refreshLearningEvents();
   });
-  row.appendChild(remove);
+  if (interactive) row.appendChild(remove);
+  if (!interactive) {
+    const details = document.createElement('details');
+    const detailsSummary = document.createElement('summary');
+    detailsSummary.textContent = `${attempts.length} recorded attempt${attempts.length === 1 ? '' : 's'} · event details`;
+    details.appendChild(detailsSummary);
+    attempts.forEach((attempt) => {
+      const item = document.createElement('div');
+      item.className = 'learning-event-attempt';
+      item.textContent = `Event #${attempt.event_id ?? '?'} · ${formatPlaybackTime(attempt.predicted_start_seconds)} · ${attempt.status || 'unknown'}`;
+      details.appendChild(item);
+    });
+    row.appendChild(details);
+  }
   return row;
 }
 
@@ -623,7 +679,24 @@ async function refreshLearningEvents() {
     }
     return;
   }
-  response.events.forEach((event) => learningEventsList.appendChild(appendLearningEventRow(event)));
+  const groups = groupLearningEvents(response.events);
+  const primary = groups[0];
+  learningEventsList.appendChild(appendLearningEventRow(primary.representative, {
+    interactive: true,
+    attempts: primary.attempts,
+  }));
+  if (groups.length > 1) {
+    const history = document.createElement('details');
+    history.className = 'learning-history';
+    const historySummary = document.createElement('summary');
+    historySummary.textContent = `Show history (${groups.length - 1} other occurrences)`;
+    history.appendChild(historySummary);
+    groups.slice(1).forEach((group) => history.appendChild(appendLearningEventRow(group.representative, {
+      interactive: false,
+      attempts: group.attempts,
+    })));
+    learningEventsList.appendChild(history);
+  }
 }
 
 async function handleLearningConsentChange() {
@@ -1193,6 +1266,8 @@ if (typeof globalThis !== 'undefined' && globalThis.__ISWEEP_TEST_MODE__) {
   globalThis.__ISWEEP_POPUP_TEST_HOOKS__ = {
     parsePlaybackTime,
     formatPlaybackTime,
+    eventOccurrenceKey,
+    groupLearningEvents,
     getActiveVideoClock,
     captureCurrentVideoTime,
   };
