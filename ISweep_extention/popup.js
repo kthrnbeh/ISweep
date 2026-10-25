@@ -171,8 +171,69 @@ const learningMissedVideoId = document.getElementById('learningMissedVideoId');
 const learningMissedWord = document.getElementById('learningMissedWord');
 const learningMissedStart = document.getElementById('learningMissedStart');
 const learningMissedEnd = document.getElementById('learningMissedEnd');
+const btnLearningMissedStartNow = document.getElementById('btnLearningMissedStartNow');
+const btnLearningMissedEndNow = document.getElementById('btnLearningMissedEndNow');
 
 let cleanCaptionSettingsCache = { ...CLEAN_CAPTION_DEFAULTS };
+
+function parsePlaybackTime(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  if (!text.includes(':')) {
+    const seconds = Number(text);
+    return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
+  }
+  const parts = text.split(':');
+  if (parts.length === 2) {
+    const minutes = Number(parts[0]);
+    const seconds = Number(parts[1]);
+    if (!Number.isInteger(minutes) || minutes < 0 || !Number.isFinite(seconds) || seconds < 0 || seconds >= 60) return null;
+    return minutes * 60 + seconds;
+  }
+  if (parts.length === 3) {
+    const hours = Number(parts[0]);
+    const minutes = Number(parts[1]);
+    const seconds = Number(parts[2]);
+    if (!Number.isInteger(hours) || hours < 0 || !Number.isInteger(minutes) || minutes < 0 || minutes >= 60
+      || !Number.isFinite(seconds) || seconds < 0 || seconds >= 60) return null;
+    return hours * 3600 + minutes * 60 + seconds;
+  }
+  return null;
+}
+
+function formatPlaybackTime(value) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds < 0) return '--:--';
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainder = (seconds % 60).toFixed(2).padStart(5, '0');
+  if (hours > 0) return `${hours}:${String(minutes).padStart(2, '0')}:${remainder}`;
+  return `${minutes}:${remainder}`;
+}
+
+async function getActiveVideoClock() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return null;
+    const clock = await chrome.tabs.sendMessage(tab.id, { type: 'isweep_get_video_clock' });
+    return clock?.ok && Number.isFinite(Number(clock.current_time)) ? clock : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function captureCurrentVideoTime(input) {
+  const clock = await getActiveVideoClock();
+  if (!clock) {
+    if (learningConsentStatus) learningConsentStatus.textContent = 'Open an active YouTube video to capture its current time.';
+    return false;
+  }
+  if (input) input.value = formatPlaybackTime(clock.current_time);
+  if (learningMissedVideoId && clock.video_id && !learningMissedVideoId.value.trim()) {
+    learningMissedVideoId.value = clock.video_id;
+  }
+  return true;
+}
 
 function setSyncPrefsAvailability(hasToken) {
   if (!btnSyncPrefs) return;
@@ -384,6 +445,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Set up event listeners
     setupEventListeners();
+    const activeClock = await getActiveVideoClock();
+    if (activeClock?.video_id && learningMissedVideoId && !learningMissedVideoId.value.trim()) {
+      learningMissedVideoId.value = activeClock.video_id;
+    }
     await initCleanCaptionControls();
     await refreshCaptionRuntimeStatus();
     
@@ -449,7 +514,11 @@ function appendLearningEventRow(event) {
   const row = document.createElement('div');
   row.className = 'learning-event-row';
   const summary = document.createElement('div');
-  summary.textContent = `${event.matched_word || 'word'} · ${Number(event.predicted_start_seconds || 0).toFixed(2)}s · ${event.timing_method || 'estimated'} · ${event.status || 'unknown'}`;
+  const occurrence = `#${event.event_id ?? '?'}`;
+  const corrected = event.feedback?.corrected_start_seconds != null
+    ? ` → ${formatPlaybackTime(event.feedback.corrected_start_seconds)}–${formatPlaybackTime(event.feedback.corrected_end_seconds)}`
+    : '';
+  summary.textContent = `${occurrence} ${event.matched_word || 'word'} · ${formatPlaybackTime(event.predicted_start_seconds)}${corrected} · ${event.timing_method || 'estimated'} · ${event.status || 'unknown'}`;
   row.appendChild(summary);
 
   const controls = document.createElement('div');
@@ -576,8 +645,8 @@ async function handleLearningConsentChange() {
 async function handleReportMissedWord() {
   const videoId = learningMissedVideoId?.value.trim();
   const word = learningMissedWord?.value.trim();
-  const start = Number(learningMissedStart?.value);
-  const end = Number(learningMissedEnd?.value);
+  const start = parsePlaybackTime(learningMissedStart?.value);
+  const end = parsePlaybackTime(learningMissedEnd?.value);
   if (!videoId || !word || !Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
     if (learningConsentStatus) learningConsentStatus.textContent = 'Enter a video ID, word, and valid start/end times.';
     return;
@@ -659,6 +728,8 @@ function setupEventListeners() {
   linkLogout.addEventListener('click', handleLogout); // Log out
   if (learningConsentToggle) learningConsentToggle.addEventListener('change', handleLearningConsentChange);
   if (btnReportMissedWord) btnReportMissedWord.addEventListener('click', handleReportMissedWord);
+  if (btnLearningMissedStartNow) btnLearningMissedStartNow.addEventListener('click', () => captureCurrentVideoTime(learningMissedStart));
+  if (btnLearningMissedEndNow) btnLearningMissedEndNow.addEventListener('click', () => captureCurrentVideoTime(learningMissedEnd));
 
   if (btnCleanCaptionsToggle) {
     btnCleanCaptionsToggle.addEventListener('click', async () => {
@@ -1116,4 +1187,13 @@ async function handleLogout(e) {
     console.error('[ISweep Popup] Error logging out:', error);
     alert('Failed to log out. Please try again.');
   }
+}
+
+if (typeof globalThis !== 'undefined' && globalThis.__ISWEEP_TEST_MODE__) {
+  globalThis.__ISWEEP_POPUP_TEST_HOOKS__ = {
+    parsePlaybackTime,
+    formatPlaybackTime,
+    getActiveVideoClock,
+    captureCurrentVideoTime,
+  };
 }
