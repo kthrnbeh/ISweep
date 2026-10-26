@@ -479,6 +479,34 @@ test('feedback deletion reports a missing correction without deleting the mute e
   assert.equal(result.error, 'learning_api_unavailable');
 });
 
+test('review updates use the authenticated batch endpoint and invalidate correction caches', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({ isweep_auth_token: 'account-token' });
+  const requests = [];
+  const invalidations = [];
+  bg.chrome.tabs.query = async () => [{ id: 23 }];
+  bg.chrome.tabs.sendMessage = async (tabId, message) => {
+    invalidations.push({ tabId, message });
+    return { ok: true };
+  };
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), options });
+    return { ok: true, status: 200, json: async () => ({ count: 2, state: 'excluded' }) };
+  };
+
+  const result = await bg.__sendRuntimeMessage({
+    type: 'isweep_learning_review', eventIds: [11, 12], state: 'excluded', reason: 'not useful',
+  });
+  assert.equal(result.ok, true);
+  const reviewRequest = requests.find((request) => request.options.method === 'PUT');
+  assert.equal(reviewRequest.url, 'http://127.0.0.1:5000/learning/mute-events/review');
+  assert.match(reviewRequest.options.body, /"event_ids"\s*:\s*\[11,12\]/);
+  assert.match(reviewRequest.options.body, /"state"\s*:\s*"excluded"/);
+  assert.equal(invalidations.length, 1);
+  assert.equal(invalidations[0].message.type, 'isweep_learning_corrections_changed');
+});
+
 test('learning upload failure is isolated and expired authentication disables future uploads', async () => {
   const bg = loadBackgroundContext();
   await bg.chrome.storage.local.set({

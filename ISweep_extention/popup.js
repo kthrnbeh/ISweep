@@ -215,7 +215,10 @@ function eventOccurrenceKey(event) {
   const start = Number(event?.predicted_start_seconds);
   const end = Number(event?.predicted_end_seconds);
   const rounded = (value) => Number.isFinite(value) ? (Math.round(value * 2) / 2).toFixed(1) : 'unknown';
-  return `${String(event?.video_id || '')}|${String(event?.matched_word || '').trim().toLowerCase()}|${rounded(start)}|${rounded(end)}`;
+  const reviewState = ['active', 'archived', 'excluded'].includes(event?.review_state)
+    ? event.review_state
+    : 'active';
+  return `${String(event?.video_id || '')}|${String(event?.matched_word || '').trim().toLowerCase()}|${rounded(start)}|${rounded(end)}|${reviewState}`;
 }
 
 function groupLearningEvents(events) {
@@ -561,7 +564,11 @@ function learningFeedbackErrorMessage(response, action = 'save') {
   return `Could not ${verb}. The mute event was kept; retry when the backend is available.`;
 }
 
-function appendLearningEventRow(event, { interactive = true, attempts = [event] } = {}) {
+function appendLearningEventRow(event, {
+  interactive = true,
+  attempts = [event],
+  reviewSelectable = false,
+} = {}) {
   const row = document.createElement('div');
   row.className = `learning-event-row${interactive ? ' learning-event-primary' : ' learning-event-history-row'}`;
   const summary = document.createElement('div');
@@ -571,6 +578,20 @@ function appendLearningEventRow(event, { interactive = true, attempts = [event] 
     : '';
   summary.textContent = `${occurrence} ${event.matched_word || 'word'} · ${formatPlaybackTime(event.predicted_start_seconds)}${corrected} · ${event.timing_method || 'estimated'} · ${event.status || 'unknown'}`;
   row.appendChild(summary);
+  if (reviewSelectable) {
+    const reviewLabel = document.createElement('label');
+    reviewLabel.className = 'learning-review-select';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.dataset.reviewEventIds = attempts
+      .map((attempt) => Number(attempt?.event_id))
+      .filter((eventId) => Number.isInteger(eventId) && eventId > 0)
+      .join(',');
+    reviewLabel.appendChild(checkbox);
+    const stateLabel = event.review_state === 'active' ? 'Select occurrence' : `Select ${event.review_state} occurrence`;
+    reviewLabel.appendChild(document.createTextNode(` ${stateLabel} (${attempts.length} attempt${attempts.length === 1 ? '' : 's'})`));
+    row.appendChild(reviewLabel);
+  }
 
   const controls = document.createElement('div');
   controls.className = 'feedback-choice-group';
@@ -701,11 +722,94 @@ function appendLearningEventRow(event, { interactive = true, attempts = [event] 
   return row;
 }
 
+function appendLearningReviewSection(title, groups, { interactivePrimary = false } = {}) {
+  if (!groups.length) return;
+  const section = document.createElement('section');
+  section.className = 'learning-review-section';
+  const heading = document.createElement('h5');
+  heading.textContent = title;
+  section.appendChild(heading);
+
+  const primary = groups[0];
+  section.appendChild(appendLearningEventRow(primary.representative, {
+    interactive: interactivePrimary,
+    attempts: primary.attempts,
+    reviewSelectable: true,
+  }));
+  if (groups.length > 1) {
+    const history = document.createElement('details');
+    history.className = 'learning-history';
+    const historySummary = document.createElement('summary');
+    historySummary.textContent = `Show history (${groups.length - 1} other occurrences)`;
+    history.appendChild(historySummary);
+    groups.slice(1).forEach((group) => history.appendChild(appendLearningEventRow(group.representative, {
+      interactive: false,
+      attempts: group.attempts,
+      reviewSelectable: true,
+    })));
+    section.appendChild(history);
+  }
+  learningEventsList.appendChild(section);
+}
+
+function getSelectedLearningReviewEventIds() {
+  const ids = new Set();
+  learningEventsList?.querySelectorAll('input[data-review-event-ids]')?.forEach((checkbox) => {
+    if (!checkbox.checked) return;
+    String(checkbox.dataset.reviewEventIds || '').split(',').forEach((value) => {
+      const eventId = Number(value);
+      if (Number.isInteger(eventId) && eventId > 0) ids.add(eventId);
+    });
+  });
+  return Array.from(ids);
+}
+
+async function applyLearningReview(state) {
+  const eventIds = getSelectedLearningReviewEventIds();
+  if (!eventIds.length) {
+    if (learningConsentStatus) learningConsentStatus.textContent = 'Select one or more occurrences first.';
+    return;
+  }
+  const response = await chrome.runtime.sendMessage({
+    type: 'isweep_learning_review',
+    eventIds,
+    state,
+    reason: state === 'archived' ? 'hidden from recent history' : (state === 'excluded' ? 'excluded from correction reuse' : null),
+  });
+  if (response?.ok) {
+    if (learningConsentStatus) learningConsentStatus.textContent = `${eventIds.length} occurrence${eventIds.length === 1 ? '' : 's'} marked ${state}.`;
+    await refreshLearningEvents();
+  } else if (learningConsentStatus) {
+    learningConsentStatus.textContent = response?.error === 'unauthorized'
+      ? 'History update failed: sign in again.'
+      : response?.error === 'backend_unavailable'
+        ? 'History update failed: backend is offline.'
+        : 'History update failed; no events were changed.';
+  }
+}
+
+function appendLearningReviewToolbar() {
+  const toolbar = document.createElement('div');
+  toolbar.className = 'learning-review-toolbar';
+  const label = document.createElement('span');
+  label.textContent = 'Selected history:';
+  toolbar.appendChild(label);
+  [['Archive selected', 'archived'], ['Exclude selected', 'excluded'], ['Restore selected', 'active']].forEach(([text, state]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn-link';
+    button.textContent = text;
+    button.addEventListener('click', () => applyLearningReview(state));
+    toolbar.appendChild(button);
+  });
+  learningEventsList.appendChild(toolbar);
+}
+
 async function refreshLearningEvents() {
   if (!learningEventsList) return;
   const response = await chrome.runtime.sendMessage({ type: 'isweep_learning_list' });
   learningEventsList.textContent = '';
-  if (!response?.ok || !Array.isArray(response.events) || !response.events.length) {
+  if (!response?.ok || !Array.isArray(response.events)) {
     if (response?.error) {
       const messages = {
         unauthorized: 'Learning events unavailable: sign in again.',
@@ -721,24 +825,20 @@ async function refreshLearningEvents() {
     }
     return;
   }
-  const groups = groupLearningEvents(response.events);
-  const primary = groups[0];
-  learningEventsList.appendChild(appendLearningEventRow(primary.representative, {
-    interactive: true,
-    attempts: primary.attempts,
-  }));
-  if (groups.length > 1) {
-    const history = document.createElement('details');
-    history.className = 'learning-history';
-    const historySummary = document.createElement('summary');
-    historySummary.textContent = `Show history (${groups.length - 1} other occurrences)`;
-    history.appendChild(historySummary);
-    groups.slice(1).forEach((group) => history.appendChild(appendLearningEventRow(group.representative, {
-      interactive: false,
-      attempts: group.attempts,
-    })));
-    learningEventsList.appendChild(history);
+  if (!response.events.length) {
+    learningEventsList.textContent = 'No events recorded yet.';
+    return;
   }
+
+  appendLearningReviewToolbar();
+  const groups = groupLearningEvents(response.events);
+  const activeGroups = groups.filter((group) => (group.representative.review_state || 'active') === 'active');
+  const savedCorrections = activeGroups.filter((group) => hasSavedFeedback(group.representative));
+  const recentAttempts = activeGroups.filter((group) => !hasSavedFeedback(group.representative));
+  const archivedGroups = groups.filter((group) => (group.representative.review_state || 'active') !== 'active');
+  appendLearningReviewSection('Saved Corrections', savedCorrections, { interactivePrimary: true });
+  appendLearningReviewSection('Recent Mute Attempts', recentAttempts, { interactivePrimary: false });
+  appendLearningReviewSection('Archived/Excluded Attempts', archivedGroups, { interactivePrimary: false });
 }
 
 async function handleLearningConsentChange() {

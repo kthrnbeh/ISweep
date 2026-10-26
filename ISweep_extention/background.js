@@ -1766,6 +1766,37 @@ async function handleLearningFeedback(message) {
   }
 }
 
+async function handleLearningReview(message = {}) {
+  const token = await getAuthToken();
+  if (!token) return { ok: false, error: 'missing token' };
+  const eventIds = Array.isArray(message.eventIds)
+    ? message.eventIds.map((eventId) => Number(eventId))
+    : [];
+  const state = String(message.state || '').trim().toLowerCase();
+  if (!eventIds.length || eventIds.some((eventId) => !Number.isInteger(eventId) || eventId < 1)
+    || !['active', 'archived', 'excluded'].includes(state)) {
+    return { ok: false, error: 'invalid review request' };
+  }
+  const backendUrl = await getBackendUrl();
+  try {
+    const response = await fetch(`${backendUrl}/learning/mute-events/review`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        event_ids: eventIds,
+        state,
+        reason: message.reason == null ? null : String(message.reason).slice(0, 500),
+      }),
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) return { ok: false, status: response.status, error: learningApiError(response.status, body) };
+    await notifyLearningCorrectionInvalidation();
+    return { ok: true, status: response.status, ...(body && typeof body === 'object' ? body : {}) };
+  } catch (_) {
+    return { ok: false, error: 'backend_unavailable' };
+  }
+}
+
 async function fetchAuthenticatedIdentity(token, backendUrl) {
   const res = await fetch(`${backendUrl}/auth/me`, {
     method: 'GET',
@@ -1915,6 +1946,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // async
   } else if (message.type === 'isweep_learning_feedback') {
     handleLearningFeedback(message).then(sendResponse);
+    return true; // async
+  } else if (message.type === 'isweep_learning_review') {
+    handleLearningReview(message).then(sendResponse);
     return true; // async
   } else if (message.type === 'isweep_markers_analyze') {
     handleMarkerAnalyze(message.video_id, message.force_refresh === true).then(sendResponse);

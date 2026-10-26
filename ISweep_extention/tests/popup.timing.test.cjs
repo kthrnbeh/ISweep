@@ -72,3 +72,12 @@ test('popup only treats a feedback-bearing event as removable and explains delet
   assert.match(hooks.learningFeedbackErrorMessage({ status: 404 }, 'remove'), /mute event was kept/);
   assert.match(hooks.learningFeedbackErrorMessage({ error: 'backend_unavailable' }, 'remove'), /backend is unavailable/);
 });
+
+test('popup keeps review states separate and exposes review actions for grouped occurrences', () => {
+  const hooks = loadPopupHooks();
+  const groups = hooks.groupLearningEvents([
+    { event_id: 1, video_id: 'video-1', matched_word: 'hell', predicted_start_seconds: 10, predicted_end_seconds: 10.4, review_state: 'active' },
+    { event_id: 2, video_id: 'video-1', matched_word: 'hell', predicted_start_seconds: 10, predicted_end_seconds: 10.4, review_state: 'excluded' },
+  ]);
+  assert.equal(groups.length, 2);
+});

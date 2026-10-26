@@ -193,6 +193,13 @@ test('popup exposes opt-in learning and account-scoped feedback controls', () =>
   assert.equal(popupSource.includes("globalThis.confirm('Remove this saved timing correction? The mute event will remain.')"), true);
   assert.equal(popupSource.includes('Correction removed. The mute event was kept.'), true);
   assert.equal(popupSource.includes('Manage saved correction'), true);
+  assert.equal(popupSource.includes('Saved Corrections'), true);
+  assert.equal(popupSource.includes('Recent Mute Attempts'), true);
+  assert.equal(popupSource.includes('Archived/Excluded Attempts'), true);
+  assert.equal(popupSource.includes('isweep_learning_review'), true);
+  assert.equal(popupSource.includes('Archive selected'), true);
+  assert.equal(popupSource.includes('Exclude selected'), true);
+  assert.equal(popupSource.includes('Restore selected'), true);
   assert.equal(popupSource.includes('Saved ✓'), true);
 });
 
