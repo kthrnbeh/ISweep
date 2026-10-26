@@ -17,6 +17,7 @@ Key responsibilities:
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -470,6 +471,9 @@ LEARNING_MAX_PLAYBACK_SPEED = 4.0
 LEARNING_ALLOWED_TIMING_METHODS = {'verified', 'estimated'}
 LEARNING_ALLOWED_STATUSES = {'predicted', 'muted', 'restored', 'skipped', 'canceled', 'failed'}
 LEARNING_ALLOWED_FEEDBACK = {'correct', 'early', 'late', 'missed'}
+LEARNING_ALLOWED_REVIEW_STATES = {'active', 'archived', 'excluded'}
+LEARNING_MAX_REVIEW_BATCH = 100
+LEARNING_MAX_REVIEW_REASON_LENGTH = 500
 
 
 def _learning_consent_enabled(user_id: int) -> bool:
@@ -606,6 +610,40 @@ def _validate_learning_feedback(data):
         'corrected_start_seconds': corrected_start,
         'corrected_end_seconds': corrected_end,
     }, None
+
+
+def _validate_learning_review(data):
+    if not isinstance(data, dict):
+        return None, 'JSON object is required'
+    event_ids = data.get('event_ids')
+    if not isinstance(event_ids, list) or not event_ids:
+        return None, 'event_ids must be a non-empty list'
+    if len(event_ids) > LEARNING_MAX_REVIEW_BATCH:
+        return None, f'event_ids may contain at most {LEARNING_MAX_REVIEW_BATCH} items'
+
+    normalized_ids = []
+    for event_id in event_ids:
+        if isinstance(event_id, bool) or not isinstance(event_id, int) or event_id < 1:
+            return None, 'event_ids must contain positive integers'
+        normalized_ids.append(event_id)
+    if len(set(normalized_ids)) != len(normalized_ids):
+        return None, 'event_ids must not contain duplicates'
+
+    state = str(data.get('state') or '').strip().lower()
+    if state not in LEARNING_ALLOWED_REVIEW_STATES:
+        return None, 'state must be active, archived, or excluded'
+
+    reason = data.get('reason')
+    if reason is None:
+        reason = None
+    elif not isinstance(reason, str):
+        return None, 'reason must be a string'
+    elif len(reason) > LEARNING_MAX_REVIEW_REASON_LENGTH:
+        return None, f'reason must be at most {LEARNING_MAX_REVIEW_REASON_LENGTH} characters'
+    elif any(ord(char) < 32 and char not in '\t\n\r' for char in reason):
+        return None, 'reason contains unsupported control characters'
+
+    return {'event_ids': normalized_ids, 'state': state, 'reason': reason}, None
 
 
 @app.route('/api/health', methods=['GET'])
@@ -778,6 +816,33 @@ def list_learning_mute_events():
         return jsonify({'error': f'limit must be 1-{LEARNING_MAX_PAGE_SIZE} and offset must be nonnegative'}), 400
     events, total = get_db().list_mute_events(request.user_id, limit, offset)
     return jsonify({'events': events, 'total': total, 'limit': limit, 'offset': offset}), 200
+
+
+@app.route('/learning/mute-events/review', methods=['PUT'])
+@require_auth
+def review_learning_mute_events():
+    if not _learning_consent_enabled(request.user_id):
+        return _learning_consent_error()
+    review, error = _validate_learning_review(request.get_json() or {})
+    if error:
+        return jsonify({'error': error}), 400
+    try:
+        updated = get_db().update_mute_event_reviews(
+            request.user_id,
+            review['event_ids'],
+            review['state'],
+            review['reason'],
+        )
+    except PermissionError:
+        return jsonify({'error': 'Learning event not found'}), 404
+    except Exception as exc:
+        app.logger.error('learning event review update failed: %s', exc)
+        return jsonify({'error': 'Unable to update learning event review'}), 500
+    return jsonify({
+        'updated': updated,
+        'count': len(updated),
+        'state': review['state'],
+    }), 200
 
 
 @app.route('/learning/mute-events/<int:event_id>/feedback', methods=['POST', 'PUT'])
@@ -1970,6 +2035,120 @@ def transcribe_caption_audio():
         'confidence': response['confidence'],
     })
     return jsonify(response), 200
+
+
+@app.route('/captions/stt/readiness', methods=['POST'])
+@require_auth
+def stt_readiness_probe():
+    """Development-only, non-persistent STT readiness probe.
+
+    The probe accepts one captured PCM/WAV chunk, reports structural timing
+    diagnostics, and never stores the audio or transcript. Model loading is
+    opt-in because loading may download a large Whisper model.
+    """
+    development_mode = (
+        str(os.getenv('ISWEEP_DEV_MODE', '')).strip().lower() in {'1', 'true', 'yes', 'on'}
+        or str(os.getenv('FLASK_ENV', '')).strip().lower() == 'development'
+    )
+    if not development_mode:
+        return jsonify({'error': 'STT readiness is available only in development mode'}), 404
+
+    data = request.get_json() or {}
+    audio_chunk = str(data.get('audio_chunk') or data.get('audio_base64') or '').strip()
+    video_id = str(data.get('video_id') or '').strip()
+    try:
+        start_seconds = float(data.get('start_seconds', 0))
+        end_seconds = float(data.get('end_seconds', start_seconds))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'start_seconds and end_seconds must be numeric'}), 400
+    if not audio_chunk or not video_id or not math.isfinite(start_seconds) or not math.isfinite(end_seconds):
+        return jsonify({'error': 'video_id, audio_chunk, and finite timestamps are required'}), 400
+    if start_seconds < 0 or end_seconds <= start_seconds:
+        return jsonify({'error': 'end_seconds must exceed nonnegative start_seconds'}), 400
+
+    decoded_audio = _decode_base64_audio_payload(audio_chunk)
+    metrics = _measure_wav_audio(decoded_audio)
+    pcm_valid = bool(metrics.get('wav_parse_ok') and metrics.get('sample_rate') and metrics.get('duration_seconds', 0) > 0)
+    analyzer = get_analyzer()
+    stt_enabled = getattr(analyzer, 'stt_enabled', False) is True
+    package_available = importlib.util.find_spec('faster_whisper') is not None
+    result = {
+        'development_only': True,
+        'video_id_present': bool(video_id),
+        'pcm_valid': pcm_valid,
+        'pcm_sample_rate': metrics.get('sample_rate'),
+        'pcm_duration_seconds': metrics.get('duration_seconds'),
+        'stt_enabled': stt_enabled,
+        'faster_whisper_available': package_available,
+        'model_load_attempted': False,
+        'model_loadable': False,
+        'word_count': 0,
+        'timestamp_count': 0,
+        'timestamps_valid': False,
+        'timestamps_align_to_video_window': False,
+        'failure_reason': None,
+    }
+    if not pcm_valid:
+        result['failure_reason'] = 'invalid_pcm'
+        return jsonify(result), 200
+    if not stt_enabled:
+        result['failure_reason'] = 'stt_disabled'
+        return jsonify(result), 200
+    if not package_available:
+        result['failure_reason'] = 'faster_whisper_unavailable'
+        return jsonify(result), 200
+
+    probe_model = data.get('probe_model') is True
+    allow_model_load = str(os.getenv('ISWEEP_STT_READINESS_ALLOW_MODEL_LOAD', '')).strip().lower() in {'1', 'true', 'yes', 'on'}
+    if not probe_model or not allow_model_load:
+        result['failure_reason'] = 'model_load_not_requested'
+        return jsonify(result), 200
+
+    result['model_load_attempted'] = True
+    try:
+        adapter = analyzer._get_or_create_stt_adapter()
+        if adapter is None or not hasattr(adapter, '_ensure_model'):
+            raise RuntimeError('stt_adapter_missing')
+        adapter._ensure_model()
+        result['model_loadable'] = True
+        transcription = analyzer.analyze_audio_chunk(
+            audio_chunk,
+            'audio/wav',
+            start_seconds,
+            end_seconds,
+            get_db().get_user_preferences(request.user_id) or {},
+            video_id,
+            caption_only=True,
+        )
+        words = transcription.get('words') if isinstance(transcription, dict) else []
+        words = words if isinstance(words, list) else []
+        valid_words = []
+        for word in words:
+            try:
+                word_start = float(word.get('start'))
+                word_end = float(word.get('end'))
+            except (AttributeError, TypeError, ValueError):
+                continue
+            if not math.isfinite(word_start) or not math.isfinite(word_end) or word_end <= word_start:
+                continue
+            valid_words.append((word_start, word_end))
+        result['word_count'] = len(words)
+        result['timestamp_count'] = len(valid_words)
+        result['timestamps_valid'] = bool(words) and len(valid_words) == len(words)
+        result['timestamps_align_to_video_window'] = bool(valid_words) and all(
+            start_seconds - 0.25 <= word_start <= end_seconds + 0.25
+            and start_seconds - 0.25 <= word_end <= end_seconds + 0.25
+            for word_start, word_end in valid_words
+        )
+        if not result['timestamps_valid']:
+            result['failure_reason'] = 'invalid_word_timestamps'
+        elif not result['timestamps_align_to_video_window']:
+            result['failure_reason'] = 'word_timestamps_outside_video_window'
+        else:
+            result['failure_reason'] = None
+    except Exception as exc:
+        result['failure_reason'] = str(exc)[:120] or 'stt_readiness_failed'
+    return jsonify(result), 200
 
 @app.route('/captions/debug', methods=['GET'])
 def get_captions_debug():

@@ -117,8 +117,61 @@ class TestDatabase:
                     "SELECT name FROM sqlite_master WHERE type = 'table'"
                 )
             }
-            assert {'mute_events', 'mute_feedback'}.issubset(tables)
+            assert {'mute_events', 'mute_feedback', 'learning_event_reviews'}.issubset(tables)
             assert conn.execute('PRAGMA foreign_keys').fetchone()[0] == 1
+        finally:
+            conn.close()
+
+    def test_learning_event_review_updates_are_account_owned_and_atomic(self, database):
+        owner_id = create_test_user(database, 'review-owner')
+        other_id = create_test_user(database, 'review-other')
+        conn = database.get_connection()
+        try:
+            conn.execute(
+                '''INSERT INTO mute_events (
+                       user_id, video_id, matched_word, caption_source, timing_method,
+                       predicted_start_seconds, predicted_end_seconds, dedupe_key
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                (owner_id, 'video-review', 'hell', 'page_caption_dom', 'estimated', 1.0, 1.4, 'review-event-1'),
+            )
+            owner_event_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute(
+                '''INSERT INTO mute_events (
+                       user_id, video_id, matched_word, caption_source, timing_method,
+                       predicted_start_seconds, predicted_end_seconds, dedupe_key
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                (other_id, 'video-review', 'hell', 'page_caption_dom', 'estimated', 2.0, 2.4, 'review-event-2'),
+            )
+            other_event_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.commit()
+        finally:
+            conn.close()
+
+        updated = database.update_mute_event_reviews(owner_id, [owner_event_id], 'archived', 'replayed')
+        assert updated[0]['state'] == 'archived'
+        with pytest.raises(PermissionError):
+            database.update_mute_event_reviews(owner_id, [owner_event_id, other_event_id], 'excluded')
+
+        conn = database.get_connection()
+        try:
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    '''INSERT INTO learning_event_reviews (event_id, user_id, state)
+                       VALUES (?, ?, ?)''',
+                    (owner_event_id, other_id, 'excluded'),
+                )
+        finally:
+            conn.close()
+
+        conn = database.get_connection()
+        try:
+            count = conn.execute('SELECT COUNT(*) FROM learning_event_reviews').fetchone()[0]
+            assert count == 1
+            state = conn.execute(
+                'SELECT state FROM learning_event_reviews WHERE event_id = ?',
+                (owner_event_id,),
+            ).fetchone()[0]
+            assert state == 'archived'
         finally:
             conn.close()
 

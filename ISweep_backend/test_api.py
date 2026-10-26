@@ -1457,6 +1457,56 @@ class TestAPI:
         assert isinstance(after.get('last_audio_bytes'), int)
         assert isinstance(after.get('last_text_length'), int)
 
+    def test_stt_readiness_is_development_only_and_reports_disabled_without_loading_model(self, client, monkeypatch):
+        token, _ = signup_and_get_token(client, email='stt-readiness-disabled@example.com')
+        monkeypatch.setenv('ISWEEP_DEV_MODE', '1')
+
+        class AnalyzerStub:
+            stt_enabled = False
+
+        client.application.analyzer = AnalyzerStub()
+        response = client.post(
+            '/captions/stt/readiness',
+            json={
+                'video_id': 'readiness-video',
+                'audio_chunk': make_tone_wav_base64(),
+                'start_seconds': 12.0,
+                'end_seconds': 12.5,
+            },
+            headers=auth_headers(token),
+        )
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['development_only'] is True
+        assert data['pcm_valid'] is True
+        assert data['stt_enabled'] is False
+        assert data['model_load_attempted'] is False
+        assert data['failure_reason'] == 'stt_disabled'
+
+    def test_stt_readiness_does_not_load_a_model_without_explicit_opt_in(self, client, monkeypatch):
+        token, _ = signup_and_get_token(client, email='stt-readiness-no-load@example.com')
+        monkeypatch.setenv('ISWEEP_DEV_MODE', '1')
+
+        class AnalyzerStub:
+            stt_enabled = True
+
+        client.application.analyzer = AnalyzerStub()
+        response = client.post(
+            '/captions/stt/readiness',
+            json={
+                'video_id': 'readiness-video',
+                'audio_chunk': make_tone_wav_base64(),
+                'start_seconds': 12.0,
+                'end_seconds': 12.5,
+            },
+            headers=auth_headers(token),
+        )
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['pcm_valid'] is True
+        assert data['model_load_attempted'] is False
+        assert data['failure_reason'] == 'model_load_not_requested'
+
     def test_audio_analyze_uses_chunk_cache_on_second_call(self, client):
         token, _ = signup_and_get_token(client, email='audio-cache@example.com')
 

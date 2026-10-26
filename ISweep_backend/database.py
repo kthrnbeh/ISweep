@@ -172,6 +172,51 @@ class Database:
         ''')  # One replaceable feedback correction per mute event
 
         cursor.execute('''
+            CREATE TABLE IF NOT EXISTS learning_event_reviews (
+                event_id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                state TEXT NOT NULL CHECK (
+                    state IN ('active', 'archived', 'excluded')
+                ),
+                reason TEXT NULL,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (event_id) REFERENCES mute_events(event_id),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        ''')  # Reversible per-account review state; historical events remain intact
+
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_learning_event_reviews_user_state
+            ON learning_event_reviews (user_id, state, updated_at)
+        ''')
+
+        cursor.execute('''
+            CREATE TRIGGER IF NOT EXISTS trg_learning_event_reviews_owner_insert
+            BEFORE INSERT ON learning_event_reviews
+            FOR EACH ROW
+            WHEN NOT EXISTS (
+                SELECT 1 FROM mute_events
+                WHERE event_id = NEW.event_id AND user_id = NEW.user_id
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'learning event review owner mismatch');
+            END
+        ''')
+
+        cursor.execute('''
+            CREATE TRIGGER IF NOT EXISTS trg_learning_event_reviews_owner_update
+            BEFORE UPDATE OF event_id, user_id ON learning_event_reviews
+            FOR EACH ROW
+            WHEN NOT EXISTS (
+                SELECT 1 FROM mute_events
+                WHERE event_id = NEW.event_id AND user_id = NEW.user_id
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'learning event review owner mismatch');
+            END
+        ''')
+
+        cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_mute_events_lookup
             ON mute_events (user_id, video_id, matched_word, predicted_start_seconds)
         ''')  # Support future same-video/word correction lookup
@@ -430,19 +475,71 @@ class Database:
                 (user_id,),
             ).fetchone()[0]
             rows = conn.execute(
-                '''SELECT e.*, f.feedback_id AS feedback_id,
+                '''SELECT e.*, COALESCE(r.state, 'active') AS review_state,
+                          r.reason AS review_reason,
+                          r.updated_at AS review_updated_at,
+                          f.feedback_id AS feedback_id,
                           f.result AS feedback_result,
                           f.corrected_start_seconds AS feedback_corrected_start_seconds,
                           f.corrected_end_seconds AS feedback_corrected_end_seconds,
                           f.feedback_at AS feedback_at
                    FROM mute_events e
                    LEFT JOIN mute_feedback f ON f.event_id = e.event_id
+                   LEFT JOIN learning_event_reviews r ON r.event_id = e.event_id
                    WHERE e.user_id = ?
                    ORDER BY e.event_id DESC
                    LIMIT ? OFFSET ?''',
                 (user_id, limit, offset),
             ).fetchall()
             return [self._mute_event_dict(row) for row in rows], total
+        finally:
+            conn.close()
+
+    def update_mute_event_reviews(
+        self,
+        user_id: int,
+        event_ids: list[int],
+        state: str,
+        reason: Optional[str] = None,
+    ) -> list[Dict]:
+        """Atomically set review state for account-owned learning events."""
+        if not event_ids:
+            raise ValueError('event_ids must not be empty')
+        conn = self.get_connection()
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            placeholders = ','.join('?' for _ in event_ids)
+            rows = conn.execute(
+                f'''SELECT event_id FROM mute_events
+                    WHERE user_id = ? AND event_id IN ({placeholders})''',
+                [user_id, *event_ids],
+            ).fetchall()
+            owned_ids = {int(row['event_id']) for row in rows}
+            if owned_ids != set(event_ids):
+                raise PermissionError('one or more learning events are not owned by this account')
+
+            conn.executemany(
+                '''INSERT INTO learning_event_reviews (event_id, user_id, state, reason)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(event_id) DO UPDATE SET
+                       user_id = excluded.user_id,
+                       state = excluded.state,
+                       reason = excluded.reason,
+                       updated_at = CURRENT_TIMESTAMP''',
+                [(event_id, user_id, state, reason) for event_id in event_ids],
+            )
+            updated = conn.execute(
+                f'''SELECT event_id, user_id, state, reason, updated_at
+                    FROM learning_event_reviews
+                    WHERE user_id = ? AND event_id IN ({placeholders})
+                    ORDER BY event_id''',
+                [user_id, *event_ids],
+            ).fetchall()
+            conn.commit()
+            return [dict(row) for row in updated]
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
 
@@ -534,13 +631,17 @@ class Database:
                        f.result,
                        f.corrected_start_seconds,
                        f.corrected_end_seconds,
-                       f.feedback_at
+                       f.feedback_at,
+                       COALESCE(r.state, 'active') AS review_state,
+                       r.reason AS review_reason
                    FROM mute_events e
                    JOIN mute_feedback f ON f.event_id = e.event_id
+                   LEFT JOIN learning_event_reviews r ON r.event_id = e.event_id
                    WHERE e.user_id = ?
                      AND e.video_id = ?
                      AND e.matched_word = ?
                      AND e.status != 'failed'
+                     AND COALESCE(r.state, 'active') != 'excluded'
                      AND f.corrected_start_seconds IS NOT NULL
                      AND f.corrected_end_seconds IS NOT NULL
                      AND (? IS NULL OR ABS(e.predicted_start_seconds - ?) <= ?)

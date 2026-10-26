@@ -202,6 +202,117 @@ class TestLearningAPI:
         assert corrections.status_code == 200
         assert corrections.get_json()['corrections'] == []
 
+    def test_review_batch_requires_authentication_and_validates_atomically(self, client):
+        unauthenticated = client.put(
+            '/learning/mute-events/review',
+            json={'event_ids': [1], 'state': 'archived'},
+        )
+        assert unauthenticated.status_code == 401
+
+        token, _ = signup(client, 'learning-review-validation@example.com')
+        enable_learning(client, token)
+        first = client.post(
+            '/learning/mute-events', json=event_payload('review-first'), headers=headers(token)
+        ).get_json()['event']['event_id']
+        second = client.post(
+            '/learning/mute-events', json=event_payload('review-second', predicted_start_seconds=20.0, predicted_end_seconds=20.4), headers=headers(token)
+        ).get_json()['event']['event_id']
+
+        invalid = client.put(
+            '/learning/mute-events/review',
+            json={'event_ids': [first, first], 'state': 'archived'},
+            headers=headers(token),
+        )
+        assert invalid.status_code == 400
+        too_long = client.put(
+            '/learning/mute-events/review',
+            json={'event_ids': [first], 'state': 'archived', 'reason': 'x' * 501},
+            headers=headers(token),
+        )
+        assert too_long.status_code == 400
+
+        updated = client.put(
+            '/learning/mute-events/review',
+            json={'event_ids': [first, second], 'state': 'archived', 'reason': 'replayed'},
+            headers=headers(token),
+        )
+        assert updated.status_code == 200
+        assert updated.get_json()['count'] == 2
+        listed = client.get('/learning/mute-events', headers=headers(token)).get_json()['events']
+        assert {item['review_state'] for item in listed} == {'archived'}
+
+    def test_review_batch_rejects_foreign_event_and_can_restore(self, client):
+        owner_token, _ = signup(client, 'learning-review-owner@example.com')
+        other_token, _ = signup(client, 'learning-review-other@example.com')
+        enable_learning(client, owner_token)
+        enable_learning(client, other_token)
+        owner_event = client.post(
+            '/learning/mute-events', json=event_payload('review-owner-event'), headers=headers(owner_token)
+        ).get_json()['event']['event_id']
+        foreign_event = client.post(
+            '/learning/mute-events', json=event_payload('review-foreign-event'), headers=headers(other_token)
+        ).get_json()['event']['event_id']
+
+        rejected = client.put(
+            '/learning/mute-events/review',
+            json={'event_ids': [owner_event, foreign_event], 'state': 'excluded'},
+            headers=headers(owner_token),
+        )
+        assert rejected.status_code == 404
+        owner_list = client.get('/learning/mute-events', headers=headers(owner_token)).get_json()['events']
+        assert owner_list[0].get('review_state', 'active') == 'active'
+
+        archived = client.put(
+            '/learning/mute-events/review',
+            json={'event_ids': [owner_event], 'state': 'archived'},
+            headers=headers(owner_token),
+        )
+        assert archived.status_code == 200
+        restored = client.put(
+            '/learning/mute-events/review',
+            json={'event_ids': [owner_event], 'state': 'active'},
+            headers=headers(owner_token),
+        )
+        assert restored.status_code == 200
+        assert restored.get_json()['updated'][0]['state'] == 'active'
+
+    def test_excluded_correction_is_not_applicable_but_archived_correction_remains_eligible(self, client):
+        token, _ = signup(client, 'learning-review-correction@example.com')
+        enable_learning(client, token)
+        event_id = client.post(
+            '/learning/mute-events', json=event_payload('review-correction'), headers=headers(token)
+        ).get_json()['event']['event_id']
+        feedback = client.put(
+            f'/learning/mute-events/{event_id}/feedback',
+            json={'result': 'late', 'corrected_start_seconds': 10.2, 'corrected_end_seconds': 10.6},
+            headers=headers(token),
+        )
+        assert feedback.status_code == 200
+
+        archived = client.put(
+            '/learning/mute-events/review',
+            json={'event_ids': [event_id], 'state': 'archived'},
+            headers=headers(token),
+        )
+        assert archived.status_code == 200
+        corrections = client.get(
+            '/learning/corrections?video_id=video-abc_1&word=hell&start_seconds=10.05',
+            headers=headers(token),
+        ).get_json()['corrections']
+        assert len(corrections) == 1
+        assert corrections[0]['review_state'] == 'archived'
+
+        excluded = client.put(
+            '/learning/mute-events/review',
+            json={'event_ids': [event_id], 'state': 'excluded'},
+            headers=headers(token),
+        )
+        assert excluded.status_code == 200
+        assert client.get(
+            '/learning/corrections?video_id=video-abc_1&word=hell&start_seconds=10.05',
+            headers=headers(token),
+        ).get_json()['corrections'] == []
+
     def test_learning_cannot_promote_estimated_event_without_feedback(self, client):
         token, _ = signup(client, 'learning-no-promotion@example.com')
         enable_learning(client, token)
