@@ -233,7 +233,10 @@ function groupLearningEvents(events) {
       if (event.feedback && !group.representative.feedback) group.representative = event;
       groups.set(key, group);
     });
-  return Array.from(groups.values());
+  return Array.from(groups.values()).map((group) => ({
+    ...group,
+    savedCorrections: group.attempts.filter((attempt) => hasSavedFeedback(attempt)),
+  }));
 }
 
 async function getActiveVideoClock() {
@@ -568,6 +571,7 @@ function appendLearningEventRow(event, {
   interactive = true,
   attempts = [event],
   reviewSelectable = false,
+  savedCorrections = [],
 } = {}) {
   const row = document.createElement('div');
   row.className = `learning-event-row${interactive ? ' learning-event-primary' : ' learning-event-history-row'}`;
@@ -674,6 +678,23 @@ function appendLearningEventRow(event, {
   });
   if (interactive) row.appendChild(submit);
 
+  const corrections = savedCorrections.length
+    ? savedCorrections
+    : (hasSavedFeedback(event) ? [event] : []);
+  if (interactive && corrections.length > 1) {
+    const correctionDetails = document.createElement('details');
+    correctionDetails.className = 'learning-history-correction';
+    const correctionSummary = document.createElement('summary');
+    correctionSummary.textContent = `${corrections.length} saved corrections · manage exact events`;
+    correctionDetails.appendChild(correctionSummary);
+    corrections
+      .filter((correction) => Number(correction.event_id) !== Number(event.event_id))
+      .forEach((correction) => correctionDetails.appendChild(appendLearningEventRow(correction, {
+        interactive: true,
+        attempts: [correction],
+      })));
+    row.appendChild(correctionDetails);
+  }
   if (interactive && hasSavedFeedback(event)) {
     const remove = document.createElement('button');
     remove.type = 'button';
@@ -698,13 +719,18 @@ function appendLearningEventRow(event, {
     row.appendChild(remove);
   }
   if (!interactive) {
-    if (hasSavedFeedback(event)) {
+    if (corrections.length) {
       const manage = document.createElement('details');
       manage.className = 'learning-history-correction';
       const manageSummary = document.createElement('summary');
-      manageSummary.textContent = 'Manage saved correction';
+      manageSummary.textContent = corrections.length === 1
+        ? 'Manage saved correction'
+        : `Manage saved corrections (${corrections.length})`;
       manage.appendChild(manageSummary);
-      manage.appendChild(appendLearningEventRow(event, { interactive: true, attempts: [event] }));
+      corrections.forEach((correction) => manage.appendChild(appendLearningEventRow(correction, {
+        interactive: true,
+        attempts: [correction],
+      })));
       row.appendChild(manage);
     }
     const details = document.createElement('details');
@@ -735,6 +761,7 @@ function appendLearningReviewSection(title, groups, { interactivePrimary = false
     interactive: interactivePrimary,
     attempts: primary.attempts,
     reviewSelectable: true,
+    savedCorrections: primary.savedCorrections,
   }));
   if (groups.length > 1) {
     const history = document.createElement('details');
@@ -746,6 +773,7 @@ function appendLearningReviewSection(title, groups, { interactivePrimary = false
       interactive: false,
       attempts: group.attempts,
       reviewSelectable: true,
+      savedCorrections: group.savedCorrections,
     })));
     section.appendChild(history);
   }
@@ -833,8 +861,8 @@ async function refreshLearningEvents() {
   appendLearningReviewToolbar();
   const groups = groupLearningEvents(response.events);
   const activeGroups = groups.filter((group) => (group.representative.review_state || 'active') === 'active');
-  const savedCorrections = activeGroups.filter((group) => hasSavedFeedback(group.representative));
-  const recentAttempts = activeGroups.filter((group) => !hasSavedFeedback(group.representative));
+  const savedCorrections = activeGroups.filter((group) => group.savedCorrections.length > 0);
+  const recentAttempts = activeGroups.filter((group) => group.savedCorrections.length === 0);
   const archivedGroups = groups.filter((group) => (group.representative.review_state || 'active') !== 'active');
   appendLearningReviewSection('Saved Corrections', savedCorrections, { interactivePrimary: true });
   appendLearningReviewSection('Recent Mute Attempts', recentAttempts, { interactivePrimary: false });

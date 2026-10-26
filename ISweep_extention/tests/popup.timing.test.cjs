@@ -80,4 +80,25 @@ test('popup keeps review states separate and exposes review actions for grouped 
     { event_id: 2, video_id: 'video-1', matched_word: 'hell', predicted_start_seconds: 10, predicted_end_seconds: 10.4, review_state: 'excluded' },
   ]);
   assert.equal(groups.length, 2);
+  const active = groups.find((group) => group.representative.review_state !== 'excluded');
+  const excluded = groups.find((group) => group.representative.review_state === 'excluded');
+  assert.deepEqual(Array.from(active.attempts, (event) => event.event_id), [1]);
+  assert.deepEqual(Array.from(excluded.attempts, (event) => event.event_id), [2]);
+});
+
+test('popup keeps every saved correction discoverable when feedback is not on the representative attempt', () => {
+  const hooks = loadPopupHooks();
+  const groups = hooks.groupLearningEvents([
+    { event_id: 10, video_id: 'video-2', matched_word: 'hell', predicted_start_seconds: 20, predicted_end_seconds: 20.4 },
+    { event_id: 9, video_id: 'video-2', matched_word: 'hell', predicted_start_seconds: 20, predicted_end_seconds: 20.4, feedback: { result: 'early', corrected_start_seconds: 21, corrected_end_seconds: 21.4 } },
+    { event_id: 8, video_id: 'video-2', matched_word: 'hell', predicted_start_seconds: 20, predicted_end_seconds: 20.4, feedback: { result: 'late', corrected_start_seconds: 22, corrected_end_seconds: 22.4 } },
+    { event_id: 7, video_id: 'video-2', matched_word: 'hell', predicted_start_seconds: 20, predicted_end_seconds: 20.4, review_state: 'excluded', feedback: { result: 'correct', corrected_start_seconds: 20, corrected_end_seconds: 20.4 } },
+  ]);
+  assert.equal(groups.length, 2);
+  const active = groups.find((group) => group.representative.review_state !== 'excluded');
+  assert.equal(active.representative.event_id, 9);
+  assert.deepEqual(Array.from(active.savedCorrections, (event) => event.event_id), [9, 8]);
+  assert.deepEqual(Array.from(active.attempts, (event) => event.event_id), [10, 9, 8]);
+  const excluded = groups.find((group) => group.representative.review_state === 'excluded');
+  assert.deepEqual(Array.from(excluded.savedCorrections, (event) => event.event_id), [7]);
 });
