@@ -438,6 +438,47 @@ test('correction lookup uses the authenticated account and video-word context', 
   assert.equal(result.corrections.length, 0);
 });
 
+test('deleting feedback uses the account-owned event id and invalidates correction caches', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({ isweep_auth_token: 'account-token' });
+  const requests = [];
+  const invalidations = [];
+  bg.chrome.tabs.query = async () => [{ id: 17 }];
+  bg.chrome.tabs.sendMessage = async (tabId, message) => {
+    invalidations.push({ tabId, message });
+    return { ok: true };
+  };
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), options });
+    return { ok: true, status: 200, json: async () => ({ deleted: true }) };
+  };
+
+  const result = await bg.__sendRuntimeMessage({
+    type: 'isweep_learning_feedback', eventId: 42, delete: true,
+  });
+  assert.equal(result.ok, true);
+  const deleteRequest = requests.find((request) => request.options.method === 'DELETE');
+  assert.equal(deleteRequest.url, 'http://127.0.0.1:5000/learning/mute-events/42/feedback');
+  assert.equal(deleteRequest.options.method, 'DELETE');
+  assert.equal(invalidations.length, 1);
+  assert.equal(invalidations[0].tabId, 17);
+  assert.equal(invalidations[0].message.type, 'isweep_learning_corrections_changed');
+});
+
+test('feedback deletion reports a missing correction without deleting the mute event', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({ isweep_auth_token: 'account-token' });
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async () => ({ ok: false, status: 404, json: async () => ({ error: 'Feedback not found' }) });
+  const result = await bg.__sendRuntimeMessage({
+    type: 'isweep_learning_feedback', eventId: 42, delete: true,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 404);
+  assert.equal(result.error, 'learning_api_unavailable');
+});
+
 test('learning upload failure is isolated and expired authentication disables future uploads', async () => {
   const bg = loadBackgroundContext();
   await bg.chrome.storage.local.set({

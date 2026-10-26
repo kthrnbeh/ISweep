@@ -538,6 +538,29 @@ function syncCorrectionFieldVisibility(result, start, end) {
   if (end) end.hidden = !useful;
 }
 
+function hasSavedFeedback(event) {
+  return Boolean(event?.feedback && typeof event.feedback.result === 'string' && event.feedback.result);
+}
+
+function learningFeedbackErrorMessage(response, action = 'save') {
+  const verb = action === 'remove' ? 'remove the saved correction' : 'save the correction';
+  if (response?.error === 'unauthorized' || response?.status === 401) {
+    return `Could not ${verb}: your session expired. Sign in again and retry.`;
+  }
+  if (response?.error === 'backend_unavailable') {
+    return `Could not ${verb}: the backend is unavailable. Check that Flask is running and retry.`;
+  }
+  if (response?.error === 'learning_api_unavailable' || response?.status === 404) {
+    return action === 'remove'
+      ? 'Could not remove the saved correction: it was not found. The mute event was kept.'
+      : 'Could not save the correction: the learning endpoint was not found.';
+  }
+  if (response?.error === 'consent_not_confirmed') {
+    return `Could not ${verb}: learning consent is not confirmed for this account.`;
+  }
+  return `Could not ${verb}. The mute event was kept; retry when the backend is available.`;
+}
+
 function appendLearningEventRow(event, { interactive = true, attempts = [event] } = {}) {
   const row = document.createElement('div');
   row.className = `learning-event-row${interactive ? ' learning-event-primary' : ' learning-event-history-row'}`;
@@ -625,25 +648,44 @@ function appendLearningEventRow(event, { interactive = true, attempts = [event] 
       if (learningConsentStatus) learningConsentStatus.textContent = 'Saved ✓';
       await refreshLearningEvents();
     } else if (learningConsentStatus) {
-      learningConsentStatus.textContent = 'Feedback could not be saved.';
+      learningConsentStatus.textContent = learningFeedbackErrorMessage(response, 'save');
     }
   });
   if (interactive) row.appendChild(submit);
 
-  const remove = document.createElement('button');
-  remove.type = 'button';
-  remove.className = 'btn-link';
-  remove.textContent = 'Remove correction';
-  remove.addEventListener('click', async () => {
-    const response = await chrome.runtime.sendMessage({
-      type: 'isweep_learning_feedback',
-      eventId: event.event_id,
-      delete: true,
+  if (interactive && hasSavedFeedback(event)) {
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'btn-link';
+    remove.textContent = 'Remove correction';
+    remove.addEventListener('click', async () => {
+      const confirmed = typeof globalThis.confirm !== 'function'
+        || globalThis.confirm('Remove this saved timing correction? The mute event will remain.');
+      if (!confirmed) return;
+      const response = await chrome.runtime.sendMessage({
+        type: 'isweep_learning_feedback',
+        eventId: event.event_id,
+        delete: true,
+      });
+      if (response?.ok) {
+        if (learningConsentStatus) learningConsentStatus.textContent = 'Correction removed. The mute event was kept.';
+        await refreshLearningEvents();
+      } else if (learningConsentStatus) {
+        learningConsentStatus.textContent = learningFeedbackErrorMessage(response, 'remove');
+      }
     });
-    if (response?.ok) await refreshLearningEvents();
-  });
-  if (interactive) row.appendChild(remove);
+    row.appendChild(remove);
+  }
   if (!interactive) {
+    if (hasSavedFeedback(event)) {
+      const manage = document.createElement('details');
+      manage.className = 'learning-history-correction';
+      const manageSummary = document.createElement('summary');
+      manageSummary.textContent = 'Manage saved correction';
+      manage.appendChild(manageSummary);
+      manage.appendChild(appendLearningEventRow(event, { interactive: true, attempts: [event] }));
+      row.appendChild(manage);
+    }
     const details = document.createElement('details');
     const detailsSummary = document.createElement('summary');
     detailsSummary.textContent = `${attempts.length} recorded attempt${attempts.length === 1 ? '' : 's'} · event details`;
@@ -1268,6 +1310,8 @@ if (typeof globalThis !== 'undefined' && globalThis.__ISWEEP_TEST_MODE__) {
     formatPlaybackTime,
     eventOccurrenceKey,
     groupLearningEvents,
+    hasSavedFeedback,
+    learningFeedbackErrorMessage,
     getActiveVideoClock,
     captureCurrentVideoTime,
   };

@@ -502,6 +502,18 @@ body {
   background: var(--color-bg-primary);
 }
 
+.learning-feedback-editor {
+  margin-top: 8px;
+}
+
+.learning-history-correction {
+  margin-top: 6px;
+}
+
+.learning-history-edit {
+  margin-top: 4px;
+}
+
 .learning-event-attempt {
   border-top: 1px solid var(--color-border);
   padding: 5px 0;

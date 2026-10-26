@@ -63,3 +63,12 @@ test('popup groups replay attempts without combining distinct occurrences', () =
   assert.equal(groups[0].attempts.length, 2);
   assert.equal(groups[1].attempts.length, 1);
 });
+
+test('popup only treats a feedback-bearing event as removable and explains delete failures', () => {
+  const hooks = loadPopupHooks();
+  assert.equal(hooks.hasSavedFeedback({ event_id: 1 }), false);
+  assert.equal(hooks.hasSavedFeedback({ event_id: 2, feedback: { result: 'early' } }), true);
+  assert.match(hooks.learningFeedbackErrorMessage({ status: 401 }, 'remove'), /session expired/);
+  assert.match(hooks.learningFeedbackErrorMessage({ status: 404 }, 'remove'), /mute event was kept/);
+  assert.match(hooks.learningFeedbackErrorMessage({ error: 'backend_unavailable' }, 'remove'), /backend is unavailable/);
+});

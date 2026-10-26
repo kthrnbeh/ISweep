@@ -189,6 +189,10 @@ test('popup exposes opt-in learning and account-scoped feedback controls', () =>
   assert.equal(popupSource.includes('aria-checked'), true);
   assert.equal(popupSource.includes('Show history'), true);
   assert.equal(popupSource.includes('function groupLearningEvents'), true);
+  assert.equal(popupSource.includes('function hasSavedFeedback'), true);
+  assert.equal(popupSource.includes("globalThis.confirm('Remove this saved timing correction? The mute event will remain.')"), true);
+  assert.equal(popupSource.includes('Correction removed. The mute event was kept.'), true);
+  assert.equal(popupSource.includes('Manage saved correction'), true);
   assert.equal(popupSource.includes('Saved ✓'), true);
 });
 
