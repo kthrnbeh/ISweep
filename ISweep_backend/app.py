@@ -18,6 +18,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import hashlib
 import importlib.util
+import binascii
 import json
 import math
 import os
@@ -474,6 +475,11 @@ LEARNING_ALLOWED_FEEDBACK = {'correct', 'early', 'late', 'missed'}
 LEARNING_ALLOWED_REVIEW_STATES = {'active', 'archived', 'excluded'}
 LEARNING_MAX_REVIEW_BATCH = 100
 LEARNING_MAX_REVIEW_REASON_LENGTH = 500
+# Readiness probes accept short development audio chunks only. These limits
+# prevent a diagnostic request from becoming an unbounded upload or model job.
+STT_READINESS_MAX_REQUEST_BYTES = 8 * 1024 * 1024
+STT_READINESS_MAX_AUDIO_BASE64_CHARS = 6 * 1024 * 1024
+STT_READINESS_MAX_AUDIO_BYTES = 4 * 1024 * 1024
 
 
 def _learning_consent_enabled(user_id: int) -> bool:
@@ -2043,8 +2049,10 @@ def stt_readiness_probe():
     """Development-only, non-persistent STT readiness probe.
 
     The probe accepts one captured PCM/WAV chunk, reports structural timing
-    diagnostics, and never stores the audio or transcript. Model loading is
-    opt-in because loading may download a large Whisper model.
+    diagnostics, and never stores the audio or transcript. Requests are
+    limited to 8 MiB, with at most 6 MiB of base64 audio and 4 MiB decoded
+    audio. Model loading is opt-in because loading may download a large
+    Whisper model.
     """
     development_mode = (
         str(os.getenv('ISWEEP_DEV_MODE', '')).strip().lower() in {'1', 'true', 'yes', 'on'}
@@ -2053,7 +2061,11 @@ def stt_readiness_probe():
     if not development_mode:
         return jsonify({'error': 'STT readiness is available only in development mode'}), 404
 
-    data = request.get_json() or {}
+    if request.content_length is not None and request.content_length > STT_READINESS_MAX_REQUEST_BYTES:
+        return jsonify({'error': 'STT readiness request is too large'}), 413
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'a JSON object is required'}), 400
     audio_chunk = str(data.get('audio_chunk') or data.get('audio_base64') or '').strip()
     video_id = str(data.get('video_id') or '').strip()
     try:
@@ -2065,10 +2077,20 @@ def stt_readiness_probe():
         return jsonify({'error': 'video_id, audio_chunk, and finite timestamps are required'}), 400
     if start_seconds < 0 or end_seconds <= start_seconds:
         return jsonify({'error': 'end_seconds must exceed nonnegative start_seconds'}), 400
+    if len(audio_chunk) > STT_READINESS_MAX_AUDIO_BASE64_CHARS:
+        return jsonify({'error': 'audio payload is too large for STT readiness'}), 413
 
-    decoded_audio = _decode_base64_audio_payload(audio_chunk)
+    encoded_audio = audio_chunk.split(',', 1)[1] if audio_chunk.startswith('data:') and ',' in audio_chunk else audio_chunk
+    try:
+        decoded_audio = base64.b64decode(encoded_audio, validate=True)
+    except (binascii.Error, ValueError):
+        return jsonify({'error': 'audio payload is not valid base64'}), 400
+    if not decoded_audio or len(decoded_audio) > STT_READINESS_MAX_AUDIO_BYTES:
+        return jsonify({'error': 'audio payload is empty or too large'}), 400
     metrics = _measure_wav_audio(decoded_audio)
     pcm_valid = bool(metrics.get('wav_parse_ok') and metrics.get('sample_rate') and metrics.get('duration_seconds', 0) > 0)
+    if not pcm_valid:
+        return jsonify({'error': 'audio payload is not a valid non-empty WAV stream'}), 400
     analyzer = get_analyzer()
     stt_enabled = getattr(analyzer, 'stt_enabled', False) is True
     package_available = importlib.util.find_spec('faster_whisper') is not None

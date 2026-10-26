@@ -112,6 +112,36 @@ class TestLearningAPI:
             headers=headers(token),
         )
         canceled_id = canceled.get_json()['event']['event_id']
+        skipped = client.post(
+            '/learning/mute-events',
+            json=event_payload('skipped', status='skipped', predicted_start_seconds=10.2, predicted_end_seconds=10.6),
+            headers=headers(token),
+        )
+        skipped_id = skipped.get_json()['event']['event_id']
+        failed = client.post(
+            '/learning/mute-events',
+            json=event_payload('failed', status='failed', predicted_start_seconds=10.3, predicted_end_seconds=10.7),
+            headers=headers(token),
+        )
+        failed_id = failed.get_json()['event']['event_id']
+        restored_missed = client.post(
+            '/learning/mute-events',
+            json=event_payload('restored-missed', status='restored', predicted_start_seconds=30.0, predicted_end_seconds=30.4),
+            headers=headers(token),
+        )
+        restored_missed_id = restored_missed.get_json()['event']['event_id']
+        manual_missed = client.post(
+            '/learning/mute-events',
+            json=event_payload(
+                'manual-missed',
+                caption_source='user_report',
+                status='skipped',
+                predicted_start_seconds=10.4,
+                predicted_end_seconds=10.8,
+            ),
+            headers=headers(token),
+        )
+        manual_missed_id = manual_missed.get_json()['event']['event_id']
 
         feedback = client.post(
             f'/learning/mute-events/{first_id}/feedback',
@@ -145,6 +175,30 @@ class TestLearningAPI:
             headers=headers(token),
         )
         assert canceled_feedback.status_code == 200
+        skipped_feedback = client.post(
+            f'/learning/mute-events/{skipped_id}/feedback',
+            json={'result': 'late', 'corrected_start_seconds': 10.2, 'corrected_end_seconds': 10.6},
+            headers=headers(token),
+        )
+        assert skipped_feedback.status_code == 200
+        failed_feedback = client.post(
+            f'/learning/mute-events/{failed_id}/feedback',
+            json={'result': 'late', 'corrected_start_seconds': 10.2, 'corrected_end_seconds': 10.6},
+            headers=headers(token),
+        )
+        assert failed_feedback.status_code == 200
+        restored_missed_feedback = client.post(
+            f'/learning/mute-events/{restored_missed_id}/feedback',
+            json={'result': 'missed', 'corrected_start_seconds': 30.5, 'corrected_end_seconds': 30.8},
+            headers=headers(token),
+        )
+        assert restored_missed_feedback.status_code == 200
+        manual_missed_feedback = client.post(
+            f'/learning/mute-events/{manual_missed_id}/feedback',
+            json={'result': 'missed', 'corrected_start_seconds': 10.7, 'corrected_end_seconds': 11.0},
+            headers=headers(token),
+        )
+        assert manual_missed_feedback.status_code == 200
 
         applicable = client.get(
             '/learning/corrections?video_id=video-abc_1&word=HELL&start_seconds=10.05',
@@ -155,7 +209,7 @@ class TestLearningAPI:
         assert len(corrections) == 2
         assert corrections[0]['event_id'] == first_id
         assert corrections[0]['applicable'] is True
-        assert corrections[1]['event_id'] == canceled_id
+        assert corrections[1]['event_id'] == manual_missed_id
         assert corrections[1]['successful_mute_example'] is False
 
         candidates = client.get(
@@ -164,9 +218,15 @@ class TestLearningAPI:
         )
         assert candidates.status_code == 200
         assert all(item['applicable'] is False for item in candidates.get_json()['corrections'])
-        assert {item['event_id'] for item in candidates.get_json()['corrections']} == {first_id, second_id, canceled_id}
-        canceled_result = next(item for item in candidates.get_json()['corrections'] if item['event_id'] == canceled_id)
-        assert canceled_result['successful_mute_example'] is False
+        assert {item['event_id'] for item in candidates.get_json()['corrections']} == {first_id, second_id, manual_missed_id}
+        manual_result = next(item for item in candidates.get_json()['corrections'] if item['event_id'] == manual_missed_id)
+        assert manual_result['successful_mute_example'] is False
+
+        for excluded_id in (canceled_id, skipped_id, failed_id, restored_missed_id):
+            assert all(
+                item['event_id'] != excluded_id
+                for item in candidates.get_json()['corrections']
+            )
 
         deleted = client.delete(
             f'/learning/mute-events/{first_id}/feedback', headers=headers(token)

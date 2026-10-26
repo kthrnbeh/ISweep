@@ -1507,6 +1507,37 @@ class TestAPI:
         assert data['model_load_attempted'] is False
         assert data['failure_reason'] == 'model_load_not_requested'
 
+    def test_stt_readiness_requires_auth_dev_mode_and_bounded_valid_audio(self, client, monkeypatch):
+        import app as app_module
+
+        monkeypatch.setenv('ISWEEP_DEV_MODE', '1')
+        unauthenticated = client.post(
+            '/captions/stt/readiness',
+            json={'video_id': 'readiness-video', 'audio_chunk': 'not-base64', 'start_seconds': 1, 'end_seconds': 2},
+        )
+        assert unauthenticated.status_code == 401
+
+        token, _ = signup_and_get_token(client, email='stt-readiness-validation@example.com')
+        malformed = client.post(
+            '/captions/stt/readiness',
+            json={'video_id': 'readiness-video', 'audio_chunk': 'not-base64', 'start_seconds': 1, 'end_seconds': 2},
+            headers=auth_headers(token),
+        )
+        assert malformed.status_code == 400
+        assert malformed.get_json()['error'] == 'audio payload is not valid base64'
+
+        oversized = client.post(
+            '/captions/stt/readiness',
+            json={
+                'video_id': 'readiness-video',
+                'audio_chunk': 'A' * (app_module.STT_READINESS_MAX_AUDIO_BASE64_CHARS + 1),
+                'start_seconds': 1,
+                'end_seconds': 2,
+            },
+            headers=auth_headers(token),
+        )
+        assert oversized.status_code == 413
+
     def test_audio_analyze_uses_chunk_cache_on_second_call(self, client):
         token, _ = signup_and_get_token(client, email='audio-cache@example.com')
 

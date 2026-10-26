@@ -640,10 +640,22 @@ class Database:
                    WHERE e.user_id = ?
                      AND e.video_id = ?
                      AND e.matched_word = ?
-                     AND e.status != 'failed'
+                     AND (
+                         (
+                             e.status IN ('muted', 'restored')
+                             AND f.result IN ('correct', 'early', 'late')
+                         )
+                         OR (
+                             e.status = 'skipped'
+                             AND e.caption_source = 'user_report'
+                             AND f.result = 'missed'
+                         )
+                     )
                      AND COALESCE(r.state, 'active') != 'excluded'
                      AND f.corrected_start_seconds IS NOT NULL
                      AND f.corrected_end_seconds IS NOT NULL
+                     AND f.corrected_start_seconds >= 0
+                     AND f.corrected_end_seconds > f.corrected_start_seconds
                      AND (? IS NULL OR ABS(e.predicted_start_seconds - ?) <= ?)
                    ORDER BY e.predicted_start_seconds ASC, f.feedback_at DESC
                    LIMIT ?''',
@@ -652,7 +664,10 @@ class Database:
             corrections = []
             for row in rows:
                 correction = dict(row)
-                correction['successful_mute_example'] = correction['status'] in ('muted', 'restored')
+                correction['successful_mute_example'] = (
+                    correction['status'] in ('muted', 'restored')
+                    and correction['result'] in ('correct', 'early', 'late')
+                )
                 if start_seconds is not None:
                     correction['distance_seconds'] = abs(
                         correction['predicted_start_seconds'] - start_seconds
