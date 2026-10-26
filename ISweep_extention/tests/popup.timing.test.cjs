@@ -75,6 +75,9 @@ test('popup only treats a feedback-bearing event as removable and explains delet
 
 test('popup keeps review states separate and exposes review actions for grouped occurrences', () => {
   const hooks = loadPopupHooks();
+  assert.equal(hooks.learningReviewState({ event_id: 0 }), 'active');
+  assert.equal(hooks.learningReviewState({ event_id: 0, review_state: 'unknown' }), 'active');
+  assert.equal(hooks.learningReviewState({ event_id: 0, review_state: 'archived' }), 'archived');
   const groups = hooks.groupLearningEvents([
     { event_id: 1, video_id: 'video-1', matched_word: 'hell', predicted_start_seconds: 10, predicted_end_seconds: 10.4, review_state: 'active' },
     { event_id: 2, video_id: 'video-1', matched_word: 'hell', predicted_start_seconds: 10, predicted_end_seconds: 10.4, review_state: 'excluded' },

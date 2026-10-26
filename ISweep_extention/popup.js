@@ -211,17 +211,26 @@ function formatPlaybackTime(value) {
   return `${minutes}:${remainder}`;
 }
 
+function learningReviewState(event) {
+  // Older event responses may omit the LEFT-JOIN review row. Treating that
+  // absence as active matches the backend default and avoids an undefined UI label.
+  return ['active', 'archived', 'excluded'].includes(event?.review_state)
+    ? event.review_state
+    : 'active';
+}
+
 function eventOccurrenceKey(event) {
   const start = Number(event?.predicted_start_seconds);
   const end = Number(event?.predicted_end_seconds);
   const rounded = (value) => Number.isFinite(value) ? (Math.round(value * 2) / 2).toFixed(1) : 'unknown';
-  const reviewState = ['active', 'archived', 'excluded'].includes(event?.review_state)
-    ? event.review_state
-    : 'active';
+  const reviewState = learningReviewState(event);
   return `${String(event?.video_id || '')}|${String(event?.matched_word || '').trim().toLowerCase()}|${rounded(start)}|${rounded(end)}|${reviewState}`;
 }
 
 function groupLearningEvents(events) {
+  // Group replay attempts only when video, word, timing, and review state
+  // agree. The individual attempts remain attached so feedback can always be
+  // edited or removed with its original event_id.
   const groups = new Map();
   (Array.isArray(events) ? events : [])
     .slice()
@@ -545,6 +554,8 @@ function syncCorrectionFieldVisibility(result, start, end) {
 }
 
 function hasSavedFeedback(event) {
+  // The popup treats feedback as user-reviewable state; backend correction
+  // eligibility separately requires validated timing fields.
   return Boolean(event?.feedback && typeof event.feedback.result === 'string' && event.feedback.result);
 }
 
@@ -592,7 +603,8 @@ function appendLearningEventRow(event, {
       .filter((eventId) => Number.isInteger(eventId) && eventId > 0)
       .join(',');
     reviewLabel.appendChild(checkbox);
-    const stateLabel = event.review_state === 'active' ? 'Select occurrence' : `Select ${event.review_state} occurrence`;
+    const reviewState = learningReviewState(event);
+    const stateLabel = reviewState === 'active' ? 'Select occurrence' : `Select ${reviewState} occurrence`;
     reviewLabel.appendChild(document.createTextNode(` ${stateLabel} (${attempts.length} attempt${attempts.length === 1 ? '' : 's'})`));
     row.appendChild(reviewLabel);
   }
@@ -793,6 +805,9 @@ function getSelectedLearningReviewEventIds() {
 }
 
 async function applyLearningReview(state) {
+  // A selected occurrence may represent several replay attempts. Sending all
+  // of their IDs keeps archive/exclude/restore reversible without deleting or
+  // silently hiding the underlying event records.
   const eventIds = getSelectedLearningReviewEventIds();
   if (!eventIds.length) {
     if (learningConsentStatus) learningConsentStatus.textContent = 'Select one or more occurrences first.';
@@ -808,11 +823,19 @@ async function applyLearningReview(state) {
     if (learningConsentStatus) learningConsentStatus.textContent = `${eventIds.length} occurrence${eventIds.length === 1 ? '' : 's'} marked ${state}.`;
     await refreshLearningEvents();
   } else if (learningConsentStatus) {
-    learningConsentStatus.textContent = response?.error === 'unauthorized'
-      ? 'History update failed: sign in again.'
-      : response?.error === 'backend_unavailable'
-        ? 'History update failed: backend is offline.'
-        : 'History update failed; no events were changed.';
+    const messages = {
+      unauthorized: 'History update failed: sign in again.',
+      'missing token': 'History update failed: sign in through the extension first.',
+      consent_not_confirmed: 'History update failed: enable learning consent first.',
+      backend_unavailable: 'History update failed: backend is offline.',
+      learning_api_unavailable: 'History update failed: the learning API route was not found.',
+      backend_error: 'History update failed: the backend reported an error.',
+      'invalid review request': 'History update failed: the selected occurrence data was invalid.',
+    };
+    learningConsentStatus.textContent = messages[response?.error]
+      || (response?.status === 404
+        ? 'History update failed: the learning API route was not found.'
+        : 'History update failed; no events were changed.');
   }
 }
 
@@ -860,10 +883,10 @@ async function refreshLearningEvents() {
 
   appendLearningReviewToolbar();
   const groups = groupLearningEvents(response.events);
-  const activeGroups = groups.filter((group) => (group.representative.review_state || 'active') === 'active');
+  const activeGroups = groups.filter((group) => learningReviewState(group.representative) === 'active');
   const savedCorrections = activeGroups.filter((group) => group.savedCorrections.length > 0);
   const recentAttempts = activeGroups.filter((group) => group.savedCorrections.length === 0);
-  const archivedGroups = groups.filter((group) => (group.representative.review_state || 'active') !== 'active');
+  const archivedGroups = groups.filter((group) => learningReviewState(group.representative) !== 'active');
   appendLearningReviewSection('Saved Corrections', savedCorrections, { interactivePrimary: true });
   appendLearningReviewSection('Recent Mute Attempts', recentAttempts, { interactivePrimary: false });
   appendLearningReviewSection('Archived/Excluded Attempts', archivedGroups, { interactivePrimary: false });
@@ -1439,6 +1462,7 @@ if (typeof globalThis !== 'undefined' && globalThis.__ISWEEP_TEST_MODE__) {
     eventOccurrenceKey,
     groupLearningEvents,
     hasSavedFeedback,
+    learningReviewState,
     learningFeedbackErrorMessage,
     getActiveVideoClock,
     captureCurrentVideoTime,
