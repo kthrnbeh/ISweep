@@ -248,3 +248,78 @@ On sign-in, store token/user_id
 Fetch preferences from backend
 
 On captions/transcripts, call /event and apply action immediately
+
+
+ISweep Master Development Roadmap
+=================================
+
+Mission
+-------
+
+ISweep is a universal video-filtering system that identifies user-selected
+words and automatically mutes and unmutes playback at precisely the correct
+moments.
+
+Golden Rule
+-----------
+
+ISweep must never modify, edit, cut, trim, skip, shorten, replace, or remove
+original video or audio content. Filtering must operate like a precision
+remote control using mute/unmute only.
+
+Development Roadmap
+-------------------
+
+1. **Learning History Cleanup** — Archive, exclude, restore, and manage
+   learning records.
+2. **Whisper/STT Readiness** — Validate speech recognition, audio capture, and
+   word-level timestamps.
+3. **Unified Detection Engine** — Combine captions, speech recognition, and
+   verified corrections.
+4. **AI Preview Engine** — Analyze accessible captions and audio before
+   playback or ahead of the viewer, using full preview, rolling preview, or
+   live fallback.
+5. **Precision Remote Controller** — Improve mute/unmute timing, playback
+   synchronization, and manual mute protection.
+6. **Universal Video Compatibility** — Expand to supported video players and
+   streaming platforms.
+7. **Adaptive AI Learning** — Improve accuracy across unfamiliar videos using
+   validated feedback.
+
+AI Preview Rules
+----------------
+
+- Full-video analysis is preferred when technically and legally accessible.
+- Rolling look-ahead is the next option.
+- Live detection is the fallback.
+- Optional initial buffering is acceptable if it preserves all content.
+- Never assume that browser buffering provides access to future audio.
+- Never claim that live STT can mute words before recognition without
+  sufficient look-ahead.
+
+Development Standards
+---------------------
+
+- Preserve working features.
+- Use the existing Flask backend and Chrome extension architecture.
+- Test changes with pytest, JavaScript tests, and real Chrome playback.
+- Protect authentication, preferences, and database integrity.
+- Keep inaccurate learning data out of correction reuse.
+- Obtain approval before new database schema changes, permanent data deletion,
+  or major playback architecture changes.
+
+Current Project Status
+----------------------
+
+- **Learning Engine phases A–D:** Implemented in development.
+- **Correction editing/removal improvements:** Implemented; live Chrome
+  verification pending.
+- **Learning History Cleanup:** Approved, implementation pending for the
+  remaining cleanup workflow; reversible review API and popup controls are
+  implemented in development.
+- **Whisper/STT audit:** Complete; STT not yet operational.
+- **Unified Detection Engine:** Planned.
+- **AI Preview Engine:** Planned.
+
+Keep this status list easy to update as milestones progress. Automated tests
+do not replace real Chrome playback verification.
