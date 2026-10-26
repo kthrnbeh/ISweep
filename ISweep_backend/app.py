@@ -4,6 +4,11 @@ ISWEEP COMPONENT: Backend API + Decision Gateway
 This module hosts the Flask server that the Chrome extension and frontend call
 for authentication, preferences, health checks, and real-time caption decisions.
 
+The backend is a coordination layer: it authenticates the account, validates
+timing data, and delegates content analysis to ContentAnalyzer. Playback stays
+in the extension so a backend failure can fall back to captions without taking
+control of the user's media away from the browser.
+
 System flow:
     Extension/frontend -> /auth, /preferences, /event -> Decision engine -> JSON response
 
@@ -97,8 +102,9 @@ def handle_options():
         resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, OPTIONS'
         return resp
 
-# Initialize database and content analyzer
-# These will be created once and reused for the lifetime of the app
+# Create expensive shared dependencies lazily. This keeps imports cheap for
+# tests and avoids opening a database or loading a speech model until a route
+# actually needs one; after creation, each instance is reused by the server.
 def get_db():
     """Get or create the shared Database instance for user data and tokens."""
     if not hasattr(app, 'database'):
@@ -112,7 +118,7 @@ def get_db():
     return app.database
 
 def get_analyzer():
-    """Get or create the shared ContentAnalyzer that scores caption text."""
+    """Get or create the shared ContentAnalyzer used by caption/STT routes."""
     if not hasattr(app, 'analyzer'):
         app.analyzer = ContentAnalyzer()
     return app.analyzer
@@ -192,6 +198,9 @@ def _reset_rolling_state(state: dict, sample_rate: int = AUDIO_SAMPLE_RATE) -> N
 
 
 def _get_or_create_rolling_state(user_id: int | None, tab_id: int | None, video_id: str, session_id: str | None) -> tuple[str, dict, bool]:
+    # Audio chunks overlap in time. Keeping one buffer per account/tab/video
+    # prevents a late chunk from one YouTube tab from contaminating another
+    # tab's transcript or word timestamps.
     key = _rolling_state_key(user_id, tab_id, video_id, session_id)
     if key not in rolling_caption_state:
         rolling_caption_state[key] = {}
@@ -450,6 +459,8 @@ def require_auth(fn):
     """Decorator that enforces bearer auth and attaches user_id to request."""
     @wraps(fn)
     def wrapper(*args, **kwargs):
+        # The server derives the account from its token table. A client-supplied
+        # user_id is deliberately ignored because it cannot prove ownership.
         auth_header = request.headers.get('Authorization', '')
         if not auth_header.startswith('Bearer '):
             return jsonify({'error': 'Unauthorized'}), 401
@@ -506,6 +517,9 @@ def _finite_learning_number(value, field, *, required=False, maximum=LEARNING_MA
 
 
 def _validate_learning_event(data):
+    # Learning data is user-generated and may later influence mute timing.
+    # Reject invalid ranges and unsupported states before they reach SQLite so
+    # an accidental or malicious event cannot become training evidence.
     if not isinstance(data, dict):
         return None, 'JSON object is required'
 
@@ -590,6 +604,9 @@ def _validate_learning_event(data):
 
 
 def _validate_learning_feedback(data):
+    # A correction is useful only when its two endpoints form a real interval.
+    # "missed" may be recorded without times while the user is still entering
+    # them, but every correction eligible for reuse must have both timestamps.
     if not isinstance(data, dict):
         return None, 'JSON object is required'
     result = str(data.get('result') or '').strip().lower()
@@ -904,6 +921,9 @@ def get_learning_corrections():
     if limit < 1 or limit > LEARNING_MAX_EVENTS_LOOKUP:
         return jsonify({'error': f'limit must be 1-{LEARNING_MAX_EVENTS_LOOKUP}'}), 400
 
+    # Passing the current playback time is required for an applicable result;
+    # without it the API returns only non-applicable candidates so one learned
+    # occurrence cannot silently shift every repeated word in a video.
     candidates = get_db().get_verified_corrections(
         request.user_id, video_id, word, start_seconds, proximity, limit
     )
@@ -1355,6 +1375,9 @@ def transcribe_caption_audio():
     This route stays safe when STT is disabled: it returns a disabled/unavailable
     response instead of requiring faster-whisper to be installed.
     """
+    # This route is deliberately non-blocking from the player's perspective:
+    # a missing model, short rolling buffer, or transient STT error is returned
+    # as structured fallback state so caption filtering can continue.
     data = request.get_json() or {}
     transcribe_started_at = int(time.time() * 1000)
     audio_chunk = str(data.get('audio_chunk') or data.get('audio_base64') or data.get('audio_b64') or '').strip()

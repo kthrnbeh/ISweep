@@ -8,6 +8,13 @@ auth, prefs sync, and icon state.
 System flow:
   youtube_captions.js -> chrome.runtime.sendMessage('caption') -> handleCaptionDecision
   handleCaptionDecision -> POST /event -> decision -> content script applies action
+
+Important ownership rules:
+  - This service worker owns backend requests, account validation, and preference
+    synchronization; page scripts cannot write extension credentials directly.
+  - Caption/STT network work is best-effort and must never delay mute restoration.
+  - Selected-word mute timing comes from the content script's shared controller,
+    not from a second mute implementation in this file.
 */
 
 // Storage Keys
@@ -24,7 +31,9 @@ const STORAGE_KEYS = {
   LOCAL_REFERENCES: 'isweepLocalReferences'
 };
 
-const TOKEN_KEY = 'isweep_auth_token'; // Shared with site_token_bridge and frontend localStorage
+// Keep one canonical key across the website bridge and extension storage so a
+// successful account validation cannot leave two credentials disagreeing.
+const TOKEN_KEY = 'isweep_auth_token';
 
 const LOG_PREFIX = '[ISWEEP][BG]';
 const CAPTION_LOG_PREFIX = '[ISWEEP][CAPTIONS]';
@@ -453,6 +462,9 @@ function shouldSuppressDuplicateCaption(text, source, windowMs = AUDIO_CAPTION_D
 
 // Normalize preferences into a stable shape with blocklist.items always present.
 function normalizePreferences(raw) {
+  // blocklist.items is the canonical contract. Legacy fields are read only
+  // when no canonical list exists, preventing stale data from being merged
+  // into a newer, intentionally smaller selection.
   const prefs = raw && typeof raw === 'object' ? raw : {};
   const categories = prefs.categories && typeof prefs.categories === 'object' ? prefs.categories : {};
   const lang = categories.language && typeof categories.language === 'object' ? categories.language : {};
@@ -1653,6 +1665,8 @@ async function handleLearningEvent(event) {
     return { ok: false, skipped: true, reason: 'learning_not_confirmed' };
   }
   const backendUrl = await getBackendUrl();
+  // Learning uploads are optional telemetry. Keep them outside the playback
+  // critical path so a slow backend cannot delay mute restoration.
   try {
     const response = await fetch(`${backendUrl}/learning/mute-events`, {
       method: 'POST',

@@ -1,44 +1,41 @@
 """
 ISWEEP COMPONENT: Persistence Layer
-# Notes that this file is the persistence component
 
-This module wraps SQLite access for users, preferences, and auth tokens. The Flask
-# Explains it manages SQLite for users/preferences/tokens
-app imports Database to store user accounts, bearer tokens, and filtering settings
-# States that the Flask app uses this class to store auth and filtering data
-that drive ContentAnalyzer decisions.
-# Clarifies data supports ContentAnalyzer
+This module wraps SQLite access for users, preferences, auth tokens, and
+account-owned learning records. The Flask app uses this class so ownership
+checks, foreign-key enforcement, and transaction boundaries are consistent
+across every endpoint.
 
 System connection:
-    Backend endpoints -> Database -> persist/fetch users, preferences, tokens -> /event
-# Shows how API endpoints flow through the DB layer to event processing
+    Backend endpoints -> Database -> users/preferences/tokens/learning records
 """
 
-import sqlite3  # Standard library SQLite interface
-import json  # JSON serialization for preferences
-from datetime import datetime  # Timestamp handling
-from typing import Dict, Optional  # Type annotations for clarity
+import sqlite3
+import json
+from datetime import datetime
+from typing import Dict, Optional
 
 
 class Database:
-    """Simple SQLite database handler for user preferences."""
-    # Class docstring describing database handler purpose
+    """SQLite gateway that keeps account ownership close to every query."""
 
     def __init__(self, db_path: str = 'isweep.db'):
-        self.db_path = db_path  # Store DB file path
-        self.init_db()  # Ensure schema exists on creation
+        self.db_path = db_path
+        self.init_db()
 
     def get_connection(self):
-        """Open a connection with row_factory set so rows can be dict-converted easily."""
-        conn = sqlite3.connect(self.db_path)  # Open SQLite connection
-        conn.row_factory = sqlite3.Row  # Return rows as dict-like objects
-        conn.execute('PRAGMA foreign_keys = ON')  # Enforce declared account/data relationships
-        return conn  # Provide connection to caller
+        """Open a dict-friendly connection with foreign keys enabled per connection."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        # SQLite does not persist this pragma in the file; set it on every
+        # connection so deleting an account cannot leave orphaned learning data.
+        conn.execute('PRAGMA foreign_keys = ON')
+        return conn
 
     def init_db(self):
-        """Initialize database schema for users, preferences, and auth tokens."""
-        conn = self.get_connection()  # Open connection for schema creation
-        cursor = conn.cursor()  # Get cursor for executing SQL
+        """Create missing tables and additive compatibility structures."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
 
         # Create users table with email/password support
         cursor.execute('''
@@ -215,6 +212,9 @@ class Database:
                 SELECT RAISE(ABORT, 'learning event review owner mismatch');
             END
         ''')
+
+        # Review state is separate from the event so archive/exclude remains
+        # reversible and the original playback history is never deleted.
 
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_mute_events_lookup
@@ -502,7 +502,12 @@ class Database:
         state: str,
         reason: Optional[str] = None,
     ) -> list[Dict]:
-        """Atomically set review state for account-owned learning events."""
+        """Atomically set review state for account-owned learning events.
+
+        The ownership query runs inside the same write transaction as the
+        upsert. If even one requested event belongs to another account, the
+        transaction rolls back instead of partially changing the batch.
+        """
         if not event_ids:
             raise ValueError('event_ids must not be empty')
         conn = self.get_connection()
@@ -615,6 +620,10 @@ class Database:
         proximity_seconds: float,
         limit: int,
     ) -> list[Dict]:
+        # Only validated feedback attached to a trusted event can affect a
+        # future mute. User-reported missed words are the one intentional
+        # exception: they carry their own corrected interval and are marked
+        # separately from successful mute examples below.
         conn = self.get_connection()
         try:
             rows = conn.execute(

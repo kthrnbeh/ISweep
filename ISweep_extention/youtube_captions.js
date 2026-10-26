@@ -1,7 +1,8 @@
 // ISWEEP COMPONENT: YouTube Caption Listener
-// Listens to on-page caption DOM changes, sends text to the background script,
-// and applies the returned decision (mute/skip/fast-forward). Safety logic keeps
-// mutes aligned to caption changes with a timeout fallback.
+// Listens to on-page caption changes, combines them with timed audio evidence,
+// and applies playback-only decisions. The selected-word path is intentionally
+// conservative: it masks the displayed word and uses one mute owner so another
+// detection source cannot restore audio while an overlapping window is active.
 (function () {
   'use strict';
 
@@ -17,8 +18,9 @@
     LOCAL_REFERENCES: 'isweepLocalReferences',
     AUTH_TOKEN: 'isweep_auth_token',
   };
-  // Track caption text and when it started so we can measure how long words are spoken.
-  // Playback-only: ISweep never edits media or captions; it only controls live playback state (mute/unmute/seek/rate).
+  // Track caption text and its video-time observation. A DOM appearance is not
+  // proof of an individual word's onset, so estimated windows remain labeled
+  // separately from reliable word timestamps.
   let lastCaptionText = '';
   let captionStartTime = null; // When the current caption started; used to time how long it was spoken.
   let videoEl = null;
@@ -120,7 +122,9 @@
   let muteEnforceInterval = null;
   let previousRate = null;
   let muteUntilNextCaption = false;
-  let muteLockUntilSec = 0; // Active mute window end (seconds, video time)
+  // The lock uses the player's currentTime rather than wall-clock time. This
+  // keeps pause, seek, and playback-rate changes from restoring audio early.
+  let muteLockUntilSec = 0;
   let hardRestoreTimeout = null; // Final fail-safe unmute
   let extensionContextInvalidated = false;
   let muteControlInProgress = 0;
@@ -390,6 +394,8 @@
   function restoreMuteState(reason) {
     const video = findVideo();
     const actualEnd = Number(video?.currentTime);
+    // A user mute change or video lifecycle transition cancels the example;
+    // it must not be recorded as proof that ISweep timed a successful mute.
     const outcome = userChangedMuteDuringWindow
       || ['video_changed', 'video_emptied', 'extension_context_invalidated'].includes(reason)
       ? 'canceled'
@@ -4323,6 +4329,9 @@
   }
 
   function filterCaption(text, options = {}) {
+    // Keep token positions separate from normalized words: matching is
+    // case/punctuation tolerant, while masking must preserve the original
+    // caption's spacing and punctuation for the viewer.
     const value = String(text || '');
     const tokens = [];
     const tokenPattern = /[^\s]+|\s+/g;
@@ -4347,6 +4356,9 @@
     const timedWords = Array.isArray(options.words)
       ? options.words
       : (Array.isArray(options.wordTimestamps) ? options.wordTimestamps : []);
+    // Sentence-level timing is divided by word position only as a bounded
+    // estimate. Real per-word timestamps always win because caption display
+    // time can precede the spoken word by several seconds.
     const estimatedWordDuration = hasWindow
       ? estimatePageWordDurationSec(value, captionEnd - captionStart)
       : PAGE_SELECTED_WORD_MUTE_DEFAULT_WORD_SEC;
@@ -4464,6 +4476,9 @@
       muteMode: cleanCaptionSettings.cleanCaptionWordMuteMode,
     });
     const eventKey = `${caption.source || 'caption'}|${normalizeCaptionText(text)}|${Number(caption.startTime).toFixed(3)}`;
+    // Caption polling repeats the same DOM text. Deduplicate by source, caption
+    // time, word index, and normalized word so repeated polling cannot schedule
+    // duplicate mute windows or learning events.
     const unseenMatches = matches.filter((match) => {
       const key = `${eventKey}|${match.index}|${normalizeCaptionWord(match.word)}`;
       if (processedCaptionEvents.has(key)) return false;
@@ -4693,6 +4708,8 @@
       return false;
     }
 
+    // Extend the existing lock when windows overlap. Restoring here would let
+    // the first detector unmute audio while a second detector still needs it.
     if (muteLockUntilSec > nowSec) {
       if (learning) {
         pendingLearningEvents.push({
@@ -4783,6 +4800,8 @@
     };
     pageSelectedWordMuteCancel = cancelScheduledLearning;
 
+    // Estimated caption windows wait for the media playhead. They are not
+    // allowed to mute immediately merely because the caption appeared early.
     const attempt = () => {
       pageSelectedWordMuteTimer = null;
       pageSelectedWordMuteCancel = null;
@@ -4813,6 +4832,8 @@
     const nowSec = Number(video?.currentTime || 0);
     const captionChanged = normalizeCaptionText(cleanText) !== normalizeCaptionText(lastPageCaptionText);
     if (captionChanged) {
+      // Replacing a caption invalidates a pending estimate. Otherwise a seek or
+      // rapid caption update could fire a stale word from the previous line.
       lastPageCaptionText = cleanText;
       lastPageCaptionVideoTime = nowSec;
       if (pageSelectedWordMuteTimer) clearTimeout(pageSelectedWordMuteTimer);
