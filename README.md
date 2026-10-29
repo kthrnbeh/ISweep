@@ -2,13 +2,11 @@ ISweep (Monorepo)
 
 ISweep is an AI-driven media content filtering system that helps users watch content with their own boundaries — without editing the original media.
 
-ISweep observes captions/transcripts in real time and sends playback-control decisions to the client (extension/app), such as:
+ISweep observes captions/transcripts in real time and sends playback-control decisions to the client (extension/app), limited to:
 
 mute (temporarily mute audio)
 
-skip (jump forward past a scene)
-
-fast_forward (speed through a segment)
+unmute (restore the viewer's previous audio state)
 
 none (do nothing)
 
@@ -25,7 +23,7 @@ Frontend = website UX: create account, choose plan, set filters, parental PIN, e
 
 README
 
-Extension = runs in the browser and actually controls playback (mute/skip/ff) based on settings and backend decisions 
+Extension = runs in the browser and controls the current player's audio state (mute/unmute) based on settings and backend decisions
 
 README
 
@@ -51,7 +49,7 @@ the extension observes captions/transcript text
 
 sends events to the backend
 
-receives a decision: mute | skip | fast_forward | none
+receives a decision: mute | unmute | none
 
 applies the action seamlessly in the player without editing the content
 
@@ -75,7 +73,7 @@ POST /event
 Response (backend → client)
 
 {
-  "action": "mute | skip | fast_forward | none",
+  "action": "mute | unmute | none",
   "duration_seconds": 4,
   "matched_category": "language | sexual | violence | null",
   "reason": "short explanation"
@@ -157,7 +155,7 @@ End-to-end smoke test checklist
 - Frontend signup/login works; preferences save via PUT /preferences and reload via GET /preferences.
 - Extension configured with backend URL; popup login succeeds and stores token/user id.
 - Open YouTube with captions on; console shows [ISWEEP][YT] caption captured → [ISWEEP][BG] calling /event → [ISWEEP][BG] decision received → [ISWEEP][YT] applying action.
-- Observe mute/skip/fast_forward applied for matching captions; no console errors.
+- Observe mute/unmute applied for matching captions; no console errors.
 
 3) Chrome Extension
 
