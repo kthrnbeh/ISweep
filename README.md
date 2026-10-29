@@ -49,7 +49,7 @@ the extension observes captions/transcript text
 
 sends events to the backend
 
-receives a decision: mute | skip | fast_forward | none
+receives a decision: mute | unmute | none
 
 applies the action seamlessly in the player without editing the content
 
