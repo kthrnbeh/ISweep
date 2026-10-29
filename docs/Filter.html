@@ -9,7 +9,6 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;500&display=swap" rel="stylesheet">
   <script src="main.js" defer></script>
-  <script src="filter_sync_guard.js" defer></script>
 </head>
 <body>
   <header class="site-header">
@@ -30,7 +29,7 @@
           <a href="Plans.html">Plans</a>
         </nav>
       </div>
-
+      
       <div class="nav-right">
         <a href="Help.html" class="help-link">Help</a>
 
@@ -41,7 +40,11 @@
             <div class="dropdown-section">
               <button id="themeToggleDropdown">Toggle Theme</button>
             </div>
-            <div class="dropdown-section">
+            <div class="dropdown-section" data-auth-signed-out>
+              <button type="button" data-open-auth="signin">Sign In</button>
+              <button type="button" data-open-auth="create">Create Account</button>
+            </div>
+            <div class="dropdown-section" data-auth-signed-in>
               <a href="Account.html">Account</a>
               <a href="Settings.html">Settings</a>
               <button id="signOutBtn" data-logout>Sign Out</button>
@@ -237,6 +240,39 @@
       </div>
     </section>
   </main>
+
+  <div id="authModal" class="auth-modal" style="display:none;">
+    <div class="auth-backdrop" data-close-auth style="position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 2000;">
+      <div class="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="filterAuthTitle" style="background: #ffffff; border-radius: 12px; padding: 18px; width: min(480px, 90vw); box-shadow: 0 18px 40px rgba(0,0,0,0.22); position: relative;">
+        <button type="button" class="auth-close" data-close-auth aria-label="Close sign-in dialog" style="position: absolute; top: 10px; right: 10px; border: none; background: transparent; font-size: 1.1rem; cursor: pointer;">×</button>
+        <div data-auth-panel="signin" style="display: none;">
+          <h2 id="filterAuthTitle" style="margin-top: 0;">Sign In</h2>
+          <form id="signInForm" style="display: grid; gap: 0.75rem;">
+            <label style="display: grid; gap: 0.25rem;"><span>Email</span><input type="email" name="email" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" /></label>
+            <label style="display: grid; gap: 0.25rem;"><span>Password</span><input type="password" name="password" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" /></label>
+            <button type="submit" style="padding: 0.75rem; border-radius: 10px; border: none; background: #2563eb; color: #fff; font-weight: 700;">Continue</button>
+            <button type="button" data-switch-auth="create" style="padding: 0.65rem; border-radius: 10px; border: 1px solid #e5e7eb; background: #fff;">Need an account? Create one</button>
+          </form>
+        </div>
+        <div data-auth-panel="create" style="display: none;">
+          <h2 style="margin-top: 0;">Create Account</h2>
+          <form id="createAccountForm" style="display: grid; gap: 0.75rem;">
+            <label style="display: grid; gap: 0.25rem;"><span>Full Name</span><input type="text" name="name" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" /></label>
+            <label style="display: grid; gap: 0.25rem;"><span>Email</span><input type="email" name="email" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" /></label>
+            <label style="display: grid; gap: 0.25rem;"><span>Password</span><input type="password" name="password" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" /></label>
+            <label style="display: grid; gap: 0.25rem;"><span>Confirm Password</span><input type="password" name="confirm" required style="padding: 0.65rem; border: 1px solid #e5e7eb; border-radius: 10px;" /></label>
+            <button type="submit" style="padding: 0.75rem; border-radius: 10px; border: none; background: #2563eb; color: #fff; font-weight: 700;">Create Account</button>
+            <button type="button" data-switch-auth="signin" style="padding: 0.65rem; border-radius: 10px; border: 1px solid #e5e7eb; background: #fff;">Already have an account? Sign in</button>
+          </form>
+        </div>
+        <div data-auth-panel="account" style="display: none;">
+          <h2 style="margin-top: 0;">Account</h2>
+          <p id="accountSummary" style="margin: 0 0 0.75rem 0;">Not signed in.</p>
+          <button type="button" data-logout style="padding: 0.75rem; border-radius: 10px; border: none; background: #ef4444; color: #fff; font-weight: 700;">Log Out</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script>
     // Toggle the developer panel without disturbing the existing layout or styling.

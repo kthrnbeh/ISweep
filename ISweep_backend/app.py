@@ -4,6 +4,11 @@ ISWEEP COMPONENT: Backend API + Decision Gateway
 This module hosts the Flask server that the Chrome extension and frontend call
 for authentication, preferences, health checks, and real-time caption decisions.
 
+The backend is a coordination layer: it authenticates the account, validates
+timing data, and delegates content analysis to ContentAnalyzer. Playback stays
+in the extension so a backend failure can fall back to captions without taking
+control of the user's media away from the browser.
+
 System flow:
     Extension/frontend -> /auth, /preferences, /event -> Decision engine -> JSON response
 
@@ -17,6 +22,8 @@ Key responsibilities:
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import hashlib
+import importlib.util
+import binascii
 import json
 import math
 import os
@@ -95,8 +102,9 @@ def handle_options():
         resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, OPTIONS'
         return resp
 
-# Initialize database and content analyzer
-# These will be created once and reused for the lifetime of the app
+# Create expensive shared dependencies lazily. This keeps imports cheap for
+# tests and avoids opening a database or loading a speech model until a route
+# actually needs one; after creation, each instance is reused by the server.
 def get_db():
     """Get or create the shared Database instance for user data and tokens."""
     if not hasattr(app, 'database'):
@@ -110,7 +118,7 @@ def get_db():
     return app.database
 
 def get_analyzer():
-    """Get or create the shared ContentAnalyzer that scores caption text."""
+    """Get or create the shared ContentAnalyzer used by caption/STT routes."""
     if not hasattr(app, 'analyzer'):
         app.analyzer = ContentAnalyzer()
     return app.analyzer
@@ -190,6 +198,9 @@ def _reset_rolling_state(state: dict, sample_rate: int = AUDIO_SAMPLE_RATE) -> N
 
 
 def _get_or_create_rolling_state(user_id: int | None, tab_id: int | None, video_id: str, session_id: str | None) -> tuple[str, dict, bool]:
+    # Audio chunks overlap in time. Keeping one buffer per account/tab/video
+    # prevents a late chunk from one YouTube tab from contaminating another
+    # tab's transcript or word timestamps.
     key = _rolling_state_key(user_id, tab_id, video_id, session_id)
     if key not in rolling_caption_state:
         rolling_caption_state[key] = {}
@@ -448,6 +459,8 @@ def require_auth(fn):
     """Decorator that enforces bearer auth and attaches user_id to request."""
     @wraps(fn)
     def wrapper(*args, **kwargs):
+        # The server derives the account from its token table. A client-supplied
+        # user_id is deliberately ignored because it cannot prove ownership.
         auth_header = request.headers.get('Authorization', '')
         if not auth_header.startswith('Bearer '):
             return jsonify({'error': 'Unauthorized'}), 401
@@ -460,6 +473,200 @@ def require_auth(fn):
         return fn(*args, **kwargs)
 
     return wrapper
+
+
+LEARNING_MAX_PAGE_SIZE = 100
+LEARNING_MAX_EVENTS_LOOKUP = 50
+LEARNING_MAX_VIDEO_SECONDS = 24 * 60 * 60
+LEARNING_MIN_PLAYBACK_SPEED = 0.25
+LEARNING_MAX_PLAYBACK_SPEED = 4.0
+LEARNING_ALLOWED_TIMING_METHODS = {'verified', 'estimated'}
+LEARNING_ALLOWED_STATUSES = {'predicted', 'muted', 'restored', 'skipped', 'canceled', 'failed'}
+LEARNING_ALLOWED_FEEDBACK = {'correct', 'early', 'late', 'missed'}
+LEARNING_ALLOWED_REVIEW_STATES = {'active', 'archived', 'excluded'}
+LEARNING_MAX_REVIEW_BATCH = 100
+LEARNING_MAX_REVIEW_REASON_LENGTH = 500
+# Readiness probes accept short development audio chunks only. These limits
+# prevent a diagnostic request from becoming an unbounded upload or model job.
+STT_READINESS_MAX_REQUEST_BYTES = 8 * 1024 * 1024
+STT_READINESS_MAX_AUDIO_BASE64_CHARS = 6 * 1024 * 1024
+STT_READINESS_MAX_AUDIO_BYTES = 4 * 1024 * 1024
+
+
+def _learning_consent_enabled(user_id: int) -> bool:
+    """Read opt-in from stored account preferences, never from an event payload."""
+    preferences = get_db().get_user_preferences(user_id) or {}
+    learning = preferences.get('learning') if isinstance(preferences, dict) else None
+    return isinstance(learning, dict) and learning.get('enabled') is True
+
+
+def _learning_consent_error():
+    return jsonify({'error': 'Learning data collection is not enabled for this account'}), 403
+
+
+def _finite_learning_number(value, field, *, required=False, maximum=LEARNING_MAX_VIDEO_SECONDS):
+    if value is None and not required:
+        return None, None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None, f'{field} must be a finite number'
+    if not math.isfinite(number) or number < 0 or number > maximum:
+        return None, f'{field} must be between 0 and {maximum}'
+    return number, None
+
+
+def _validate_learning_event(data):
+    # Learning data is user-generated and may later influence mute timing.
+    # Reject invalid ranges and unsupported states before they reach SQLite so
+    # an accidental or malicious event cannot become training evidence.
+    if not isinstance(data, dict):
+        return None, 'JSON object is required'
+
+    video_id = str(data.get('video_id') or '').strip()
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', video_id):
+        return None, 'video_id must contain 1 to 128 safe video-id characters'
+
+    matched_word = str(data.get('matched_word') or '').strip().lower()
+    if not matched_word or len(matched_word) > 128 or any(ord(char) < 32 for char in matched_word):
+        return None, 'matched_word must contain 1 to 128 printable characters'
+
+    caption_source = str(data.get('caption_source') or '').strip()
+    if not caption_source or len(caption_source) > 64:
+        return None, 'caption_source must contain 1 to 64 characters'
+
+    timing_method = str(data.get('timing_method') or '').strip().lower()
+    if timing_method not in LEARNING_ALLOWED_TIMING_METHODS:
+        return None, 'timing_method must be verified or estimated'
+
+    predicted_start, error = _finite_learning_number(
+        data.get('predicted_start_seconds'), 'predicted_start_seconds', required=True
+    )
+    if error:
+        return None, error
+    predicted_end, error = _finite_learning_number(
+        data.get('predicted_end_seconds'), 'predicted_end_seconds', required=True
+    )
+    if error:
+        return None, error
+    if predicted_end <= predicted_start:
+        return None, 'predicted_end_seconds must exceed predicted_start_seconds'
+
+    actual_start, error = _finite_learning_number(data.get('actual_mute_start_seconds'), 'actual_mute_start_seconds')
+    if error:
+        return None, error
+    actual_end, error = _finite_learning_number(data.get('actual_mute_end_seconds'), 'actual_mute_end_seconds')
+    if error:
+        return None, error
+    if (actual_start is None) != (actual_end is None):
+        return None, 'actual mute timestamps must be provided together'
+    if actual_start is not None and actual_end <= actual_start:
+        return None, 'actual_mute_end_seconds must exceed actual_mute_start_seconds'
+
+    try:
+        playback_speed = float(data.get('playback_speed', 1.0))
+    except (TypeError, ValueError):
+        return None, 'playback_speed must be a finite number'
+    if not math.isfinite(playback_speed) or not (LEARNING_MIN_PLAYBACK_SPEED <= playback_speed <= LEARNING_MAX_PLAYBACK_SPEED):
+        return None, 'playback_speed must be between 0.25 and 4.0'
+
+    status = str(data.get('status') or 'predicted').strip().lower()
+    if status not in LEARNING_ALLOWED_STATUSES:
+        return None, 'status is not supported'
+
+    context = data.get('playback_context', {})
+    if not isinstance(context, dict):
+        return None, 'playback_context must be an object'
+    safe_context = {}
+    for key in ('paused', 'seeked', 'speed_changed'):
+        if key in context and not isinstance(context[key], bool):
+            return None, f'playback_context.{key} must be boolean'
+        safe_context[key] = bool(context.get(key, False))
+
+    dedupe_key = str(data.get('dedupe_key') or '').strip()
+    if not dedupe_key or len(dedupe_key) > 200:
+        return None, 'dedupe_key must contain 1 to 200 characters'
+
+    return {
+        'video_id': video_id,
+        'matched_word': matched_word,
+        'caption_source': caption_source,
+        'timing_method': timing_method,
+        'predicted_start_seconds': predicted_start,
+        'predicted_end_seconds': predicted_end,
+        'actual_mute_start_seconds': actual_start,
+        'actual_mute_end_seconds': actual_end,
+        'playback_speed': playback_speed,
+        'status': status,
+        'playback_context': safe_context,
+        'dedupe_key': dedupe_key,
+    }, None
+
+
+def _validate_learning_feedback(data):
+    # A correction is useful only when its two endpoints form a real interval.
+    # "missed" may be recorded without times while the user is still entering
+    # them, but every correction eligible for reuse must have both timestamps.
+    if not isinstance(data, dict):
+        return None, 'JSON object is required'
+    result = str(data.get('result') or '').strip().lower()
+    if result not in LEARNING_ALLOWED_FEEDBACK:
+        return None, 'result must be correct, early, late, or missed'
+    corrected_start, error = _finite_learning_number(
+        data.get('corrected_start_seconds'), 'corrected_start_seconds'
+    )
+    if error:
+        return None, error
+    corrected_end, error = _finite_learning_number(
+        data.get('corrected_end_seconds'), 'corrected_end_seconds'
+    )
+    if error:
+        return None, error
+    if (corrected_start is None) != (corrected_end is None):
+        return None, 'corrected timestamps must be provided together'
+    if corrected_start is not None and corrected_end <= corrected_start:
+        return None, 'corrected_end_seconds must exceed corrected_start_seconds'
+    if result != 'missed' and corrected_start is None:
+        return None, 'corrected timestamps are required for this feedback result'
+    return {
+        'result': result,
+        'corrected_start_seconds': corrected_start,
+        'corrected_end_seconds': corrected_end,
+    }, None
+
+
+def _validate_learning_review(data):
+    if not isinstance(data, dict):
+        return None, 'JSON object is required'
+    event_ids = data.get('event_ids')
+    if not isinstance(event_ids, list) or not event_ids:
+        return None, 'event_ids must be a non-empty list'
+    if len(event_ids) > LEARNING_MAX_REVIEW_BATCH:
+        return None, f'event_ids may contain at most {LEARNING_MAX_REVIEW_BATCH} items'
+
+    normalized_ids = []
+    for event_id in event_ids:
+        if isinstance(event_id, bool) or not isinstance(event_id, int) or event_id < 1:
+            return None, 'event_ids must contain positive integers'
+        normalized_ids.append(event_id)
+    if len(set(normalized_ids)) != len(normalized_ids):
+        return None, 'event_ids must not contain duplicates'
+
+    state = str(data.get('state') or '').strip().lower()
+    if state not in LEARNING_ALLOWED_REVIEW_STATES:
+        return None, 'state must be active, archived, or excluded'
+
+    reason = data.get('reason')
+    if reason is None:
+        reason = None
+    elif not isinstance(reason, str):
+        return None, 'reason must be a string'
+    elif len(reason) > LEARNING_MAX_REVIEW_REASON_LENGTH:
+        return None, f'reason must be at most {LEARNING_MAX_REVIEW_REASON_LENGTH} characters'
+    elif any(ord(char) < 32 and char not in '\t\n\r' for char in reason):
+        return None, 'reason contains unsupported control characters'
+
+    return {'event_ids': normalized_ids, 'state': state, 'reason': reason}, None
 
 
 @app.route('/api/health', methods=['GET'])
@@ -527,6 +734,13 @@ def login():
     return jsonify({'token': token, 'user_id': user['id']}), 200
 
 
+@app.route('/auth/me', methods=['GET'])
+@require_auth
+def authenticated_identity():
+    """Return only the backend-authenticated identity for a bearer token."""
+    return jsonify({'user_id': request.user_id}), 200
+
+
 @app.route('/api/users', methods=['POST'])
 def create_user():
     """
@@ -591,6 +805,136 @@ def update_preferences_self():
 
     prefs = db.get_user_preferences(request.user_id)
     return jsonify(prefs), 200
+
+
+@app.route('/learning/mute-events', methods=['POST'])
+@require_auth
+def create_learning_mute_event():
+    if not _learning_consent_enabled(request.user_id):
+        return _learning_consent_error()
+    event, error = _validate_learning_event(request.get_json() or {})
+    if error:
+        return jsonify({'error': error}), 400
+    try:
+        stored, created = get_db().create_mute_event(request.user_id, event)
+    except PermissionError:
+        return jsonify({'error': 'dedupe_key is already associated with another account'}), 409
+    except Exception as exc:
+        app.logger.error('learning event storage failed: %s', exc)
+        return jsonify({'error': 'Unable to store learning event'}), 500
+    return jsonify({'event': stored, 'created': created}), 201 if created else 200
+
+
+@app.route('/learning/mute-events', methods=['GET'])
+@require_auth
+def list_learning_mute_events():
+    if not _learning_consent_enabled(request.user_id):
+        return _learning_consent_error()
+    try:
+        limit = int(request.args.get('limit', 25))
+        offset = int(request.args.get('offset', 0))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'limit and offset must be integers'}), 400
+    if limit < 1 or limit > LEARNING_MAX_PAGE_SIZE or offset < 0:
+        return jsonify({'error': f'limit must be 1-{LEARNING_MAX_PAGE_SIZE} and offset must be nonnegative'}), 400
+    events, total = get_db().list_mute_events(request.user_id, limit, offset)
+    return jsonify({'events': events, 'total': total, 'limit': limit, 'offset': offset}), 200
+
+
+@app.route('/learning/mute-events/review', methods=['PUT'])
+@require_auth
+def review_learning_mute_events():
+    if not _learning_consent_enabled(request.user_id):
+        return _learning_consent_error()
+    review, error = _validate_learning_review(request.get_json() or {})
+    if error:
+        return jsonify({'error': error}), 400
+    try:
+        updated = get_db().update_mute_event_reviews(
+            request.user_id,
+            review['event_ids'],
+            review['state'],
+            review['reason'],
+        )
+    except PermissionError:
+        return jsonify({'error': 'Learning event not found'}), 404
+    except Exception as exc:
+        app.logger.error('learning event review update failed: %s', exc)
+        return jsonify({'error': 'Unable to update learning event review'}), 500
+    return jsonify({
+        'updated': updated,
+        'count': len(updated),
+        'state': review['state'],
+    }), 200
+
+
+@app.route('/learning/mute-events/<int:event_id>/feedback', methods=['POST', 'PUT'])
+@require_auth
+def update_learning_mute_feedback(event_id):
+    if not _learning_consent_enabled(request.user_id):
+        return _learning_consent_error()
+    if not get_db().get_mute_event_for_user(request.user_id, event_id):
+        return jsonify({'error': 'Learning event not found'}), 404
+    feedback, error = _validate_learning_feedback(request.get_json() or {})
+    if error:
+        return jsonify({'error': error}), 400
+    stored = get_db().upsert_mute_feedback(request.user_id, event_id, feedback)
+    if not stored:
+        return jsonify({'error': 'Learning event not found'}), 404
+    return jsonify({'feedback': stored}), 200
+
+
+@app.route('/learning/mute-events/<int:event_id>/feedback', methods=['DELETE'])
+@require_auth
+def delete_learning_mute_feedback(event_id):
+    if not _learning_consent_enabled(request.user_id):
+        return _learning_consent_error()
+    if not get_db().delete_mute_feedback(request.user_id, event_id):
+        return jsonify({'error': 'Feedback not found'}), 404
+    return jsonify({'deleted': True}), 200
+
+
+@app.route('/learning/corrections', methods=['GET'])
+@require_auth
+def get_learning_corrections():
+    if not _learning_consent_enabled(request.user_id):
+        return _learning_consent_error()
+    video_id = str(request.args.get('video_id') or '').strip()
+    word = str(request.args.get('word') or '').strip().lower()
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', video_id):
+        return jsonify({'error': 'video_id is required and must contain safe video-id characters'}), 400
+    if not word or len(word) > 128 or any(ord(char) < 32 for char in word):
+        return jsonify({'error': 'word is required and must be printable and at most 128 characters'}), 400
+
+    start_seconds = None
+    if request.args.get('start_seconds') is not None:
+        start_seconds, error = _finite_learning_number(request.args.get('start_seconds'), 'start_seconds')
+        if error:
+            return jsonify({'error': error}), 400
+    try:
+        proximity = float(request.args.get('proximity_seconds', 1.5))
+        limit = int(request.args.get('limit', LEARNING_MAX_EVENTS_LOOKUP))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'proximity_seconds and limit must be numeric'}), 400
+    if not math.isfinite(proximity) or proximity < 0.1 or proximity > 30:
+        return jsonify({'error': 'proximity_seconds must be between 0.1 and 30'}), 400
+    if limit < 1 or limit > LEARNING_MAX_EVENTS_LOOKUP:
+        return jsonify({'error': f'limit must be 1-{LEARNING_MAX_EVENTS_LOOKUP}'}), 400
+
+    # Passing the current playback time is required for an applicable result;
+    # without it the API returns only non-applicable candidates so one learned
+    # occurrence cannot silently shift every repeated word in a video.
+    candidates = get_db().get_verified_corrections(
+        request.user_id, video_id, word, start_seconds, proximity, limit
+    )
+    # Without a playback-time context, return candidates as non-applicable only.
+    # This prevents a caller from blindly applying one correction to every occurrence.
+    corrections = candidates if start_seconds is None else [item for item in candidates if item['applicable']]
+    return jsonify({
+        'corrections': corrections,
+        'timing_context_provided': start_seconds is not None,
+        'proximity_seconds': proximity,
+    }), 200
 
 
 @app.route('/api/users/<int:user_id>/preferences', methods=['GET'])
@@ -1031,6 +1375,9 @@ def transcribe_caption_audio():
     This route stays safe when STT is disabled: it returns a disabled/unavailable
     response instead of requiring faster-whisper to be installed.
     """
+    # This route is deliberately non-blocking from the player's perspective:
+    # a missing model, short rolling buffer, or transient STT error is returned
+    # as structured fallback state so caption filtering can continue.
     data = request.get_json() or {}
     transcribe_started_at = int(time.time() * 1000)
     audio_chunk = str(data.get('audio_chunk') or data.get('audio_base64') or data.get('audio_b64') or '').strip()
@@ -1717,6 +2064,136 @@ def transcribe_caption_audio():
         'confidence': response['confidence'],
     })
     return jsonify(response), 200
+
+
+@app.route('/captions/stt/readiness', methods=['POST'])
+@require_auth
+def stt_readiness_probe():
+    """Development-only, non-persistent STT readiness probe.
+
+    The probe accepts one captured PCM/WAV chunk, reports structural timing
+    diagnostics, and never stores the audio or transcript. Requests are
+    limited to 8 MiB, with at most 6 MiB of base64 audio and 4 MiB decoded
+    audio. Model loading is opt-in because loading may download a large
+    Whisper model.
+    """
+    development_mode = (
+        str(os.getenv('ISWEEP_DEV_MODE', '')).strip().lower() in {'1', 'true', 'yes', 'on'}
+        or str(os.getenv('FLASK_ENV', '')).strip().lower() == 'development'
+    )
+    if not development_mode:
+        return jsonify({'error': 'STT readiness is available only in development mode'}), 404
+
+    if request.content_length is not None and request.content_length > STT_READINESS_MAX_REQUEST_BYTES:
+        return jsonify({'error': 'STT readiness request is too large'}), 413
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'a JSON object is required'}), 400
+    audio_chunk = str(data.get('audio_chunk') or data.get('audio_base64') or '').strip()
+    video_id = str(data.get('video_id') or '').strip()
+    try:
+        start_seconds = float(data.get('start_seconds', 0))
+        end_seconds = float(data.get('end_seconds', start_seconds))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'start_seconds and end_seconds must be numeric'}), 400
+    if not audio_chunk or not video_id or not math.isfinite(start_seconds) or not math.isfinite(end_seconds):
+        return jsonify({'error': 'video_id, audio_chunk, and finite timestamps are required'}), 400
+    if start_seconds < 0 or end_seconds <= start_seconds:
+        return jsonify({'error': 'end_seconds must exceed nonnegative start_seconds'}), 400
+    if len(audio_chunk) > STT_READINESS_MAX_AUDIO_BASE64_CHARS:
+        return jsonify({'error': 'audio payload is too large for STT readiness'}), 413
+
+    encoded_audio = audio_chunk.split(',', 1)[1] if audio_chunk.startswith('data:') and ',' in audio_chunk else audio_chunk
+    try:
+        decoded_audio = base64.b64decode(encoded_audio, validate=True)
+    except (binascii.Error, ValueError):
+        return jsonify({'error': 'audio payload is not valid base64'}), 400
+    if not decoded_audio or len(decoded_audio) > STT_READINESS_MAX_AUDIO_BYTES:
+        return jsonify({'error': 'audio payload is empty or too large'}), 400
+    metrics = _measure_wav_audio(decoded_audio)
+    pcm_valid = bool(metrics.get('wav_parse_ok') and metrics.get('sample_rate') and metrics.get('duration_seconds', 0) > 0)
+    if not pcm_valid:
+        return jsonify({'error': 'audio payload is not a valid non-empty WAV stream'}), 400
+    analyzer = get_analyzer()
+    stt_enabled = getattr(analyzer, 'stt_enabled', False) is True
+    package_available = importlib.util.find_spec('faster_whisper') is not None
+    result = {
+        'development_only': True,
+        'video_id_present': bool(video_id),
+        'pcm_valid': pcm_valid,
+        'pcm_sample_rate': metrics.get('sample_rate'),
+        'pcm_duration_seconds': metrics.get('duration_seconds'),
+        'stt_enabled': stt_enabled,
+        'faster_whisper_available': package_available,
+        'model_load_attempted': False,
+        'model_loadable': False,
+        'word_count': 0,
+        'timestamp_count': 0,
+        'timestamps_valid': False,
+        'timestamps_align_to_video_window': False,
+        'failure_reason': None,
+    }
+    if not pcm_valid:
+        result['failure_reason'] = 'invalid_pcm'
+        return jsonify(result), 200
+    if not stt_enabled:
+        result['failure_reason'] = 'stt_disabled'
+        return jsonify(result), 200
+    if not package_available:
+        result['failure_reason'] = 'faster_whisper_unavailable'
+        return jsonify(result), 200
+
+    probe_model = data.get('probe_model') is True
+    allow_model_load = str(os.getenv('ISWEEP_STT_READINESS_ALLOW_MODEL_LOAD', '')).strip().lower() in {'1', 'true', 'yes', 'on'}
+    if not probe_model or not allow_model_load:
+        result['failure_reason'] = 'model_load_not_requested'
+        return jsonify(result), 200
+
+    result['model_load_attempted'] = True
+    try:
+        adapter = analyzer._get_or_create_stt_adapter()
+        if adapter is None or not hasattr(adapter, '_ensure_model'):
+            raise RuntimeError('stt_adapter_missing')
+        adapter._ensure_model()
+        result['model_loadable'] = True
+        transcription = analyzer.analyze_audio_chunk(
+            audio_chunk,
+            'audio/wav',
+            start_seconds,
+            end_seconds,
+            get_db().get_user_preferences(request.user_id) or {},
+            video_id,
+            caption_only=True,
+        )
+        words = transcription.get('words') if isinstance(transcription, dict) else []
+        words = words if isinstance(words, list) else []
+        valid_words = []
+        for word in words:
+            try:
+                word_start = float(word.get('start'))
+                word_end = float(word.get('end'))
+            except (AttributeError, TypeError, ValueError):
+                continue
+            if not math.isfinite(word_start) or not math.isfinite(word_end) or word_end <= word_start:
+                continue
+            valid_words.append((word_start, word_end))
+        result['word_count'] = len(words)
+        result['timestamp_count'] = len(valid_words)
+        result['timestamps_valid'] = bool(words) and len(valid_words) == len(words)
+        result['timestamps_align_to_video_window'] = bool(valid_words) and all(
+            start_seconds - 0.25 <= word_start <= end_seconds + 0.25
+            and start_seconds - 0.25 <= word_end <= end_seconds + 0.25
+            for word_start, word_end in valid_words
+        )
+        if not result['timestamps_valid']:
+            result['failure_reason'] = 'invalid_word_timestamps'
+        elif not result['timestamps_align_to_video_window']:
+            result['failure_reason'] = 'word_timestamps_outside_video_window'
+        else:
+            result['failure_reason'] = None
+    except Exception as exc:
+        result['failure_reason'] = str(exc)[:120] or 'stt_readiness_failed'
+    return jsonify(result), 200
 
 @app.route('/captions/debug', methods=['GET'])
 def get_captions_debug():

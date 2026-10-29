@@ -50,6 +50,17 @@ test('popup account links use preferred frontend base URL helper', () => {
   assert.equal(popupSource.includes('Account.html#create'), true);
 });
 
+test('site token bridge matches the local docs server root', () => {
+  const manifest = readJson('manifest.json');
+  const contentScript = manifest.content_scripts.find((entry) =>
+    Array.isArray(entry.js) && entry.js.includes('site_token_bridge.js')
+  );
+  assert.ok(contentScript);
+  assert.equal(contentScript.matches.includes('http://127.0.0.1:5500/*'), true);
+  assert.equal(contentScript.matches.includes('http://127.0.0.1:5500/docs/*'), true);
+  assert.equal(contentScript.matches.includes('http://localhost:5500/*'), true);
+});
+
 test('offscreen.js routes captured tab audio back to speakers', () => {
   const offscreenSource = fs.readFileSync(path.join(extensionRoot, 'offscreen.js'), 'utf8');
   // Verify audio routing: source → monitorGain → destination (for speakers)
@@ -152,6 +163,53 @@ test('popup shows explicit primary caption source readiness field', () => {
   assert.equal(popupHtml.includes('id="primaryCaptionSourceValue"'), true);
   assert.equal(popupSource.includes('primaryCaptionSourceValue'), true);
   assert.equal(popupSource.includes('Waiting for audio'), true);
+});
+
+test('popup exposes opt-in learning and account-scoped feedback controls', () => {
+  const popupHtml = fs.readFileSync(path.join(extensionRoot, 'popup.html'), 'utf8');
+  const popupSource = fs.readFileSync(path.join(extensionRoot, 'popup.js'), 'utf8');
+  assert.equal(popupHtml.includes('Help ISweep improve mute timing'), true);
+  assert.equal(popupHtml.includes('id="learningConsentToggle"'), true);
+  assert.equal(popupHtml.includes('id="btnLearningMissedStartNow"'), true);
+  assert.equal(popupHtml.includes('id="btnLearningMissedEndNow"'), true);
+  assert.equal(popupHtml.includes('aria-label="Use current video time for start"'), true);
+  assert.equal(popupHtml.includes('aria-label="Use current video time for end"'), true);
+  assert.equal(popupHtml.includes('Recent Mute Events'), true);
+  assert.equal(popupHtml.includes('Report missed word'), true);
+  assert.equal(popupSource.includes('isweep_set_learning_consent'), true);
+  assert.equal(popupSource.includes('isweep_learning_feedback'), true);
+  assert.equal(popupSource.includes('isweepLearningConsentConfirmed'), true);
+  assert.equal(popupSource.includes('No events recorded yet.'), true);
+  assert.equal(popupSource.includes('Event saved, but its feedback could not be saved.'), true);
+  assert.equal(popupSource.includes('event.feedback?.corrected_start_seconds'), true);
+  assert.equal(popupSource.includes('function parsePlaybackTime'), true);
+  assert.equal(popupSource.includes('formatPlaybackTime(event.predicted_start_seconds)'), true);
+  assert.equal(popupSource.includes('getActiveVideoClock'), true);
+  assert.equal(popupSource.includes("setAttribute('role', 'radio')"), true);
+  assert.equal(popupSource.includes('aria-checked'), true);
+  assert.equal(popupSource.includes('Show history'), true);
+  assert.equal(popupSource.includes('function groupLearningEvents'), true);
+  assert.equal(popupSource.includes('function hasSavedFeedback'), true);
+  assert.equal(popupSource.includes("globalThis.confirm('Remove this saved timing correction? The mute event will remain.')"), true);
+  assert.equal(popupSource.includes('Correction removed. The mute event was kept.'), true);
+  assert.equal(popupSource.includes('Manage saved correction'), true);
+  assert.equal(popupSource.includes('Saved Corrections'), true);
+  assert.equal(popupSource.includes('Recent Mute Attempts'), true);
+  assert.equal(popupSource.includes('Archived/Excluded Attempts'), true);
+  assert.equal(popupSource.includes('isweep_learning_review'), true);
+  assert.equal(popupSource.includes('Archive selected'), true);
+  assert.equal(popupSource.includes('Exclude selected'), true);
+  assert.equal(popupSource.includes('Restore selected'), true);
+  assert.equal(popupSource.includes('Saved ✓'), true);
+});
+
+test('learning uploads remain background-owned and do not include caption text', () => {
+  const backgroundSource = fs.readFileSync(path.join(extensionRoot, 'background.js'), 'utf8');
+  const youtubeSource = fs.readFileSync(path.join(extensionRoot, 'youtube_captions.js'), 'utf8');
+  assert.equal(backgroundSource.includes('isweep_learning_event'), true);
+  assert.equal(backgroundSource.includes('/learning/mute-events'), true);
+  assert.equal(youtubeSource.includes('submitLearningEvent'), true);
+  assert.equal(youtubeSource.includes('dedupe_key'), true);
 });
 
 test('local reference artifacts are gitignored and not committed as fixtures', () => {

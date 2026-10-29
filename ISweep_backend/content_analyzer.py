@@ -1,19 +1,18 @@
 ﻿"""
 ISWEEP COMPONENT: Content Analyzer
-# Explains this file belongs to the ISWEEP content analyzer module
 
-This module inspects caption text and assigns playback actions (mute/skip/fast_forward/none)
-# States the main purpose: map captions to playback controls
-based on user preferences. It is invoked by /event so the extension can react in real time.
-# Notes when this analyzer is called (via /event)
+This module normalizes caption/audio text, applies the user's selected-word
+preferences, and produces timestamped evidence for the Flask routes. The
+faster-whisper adapter is optional: when it is disabled, unavailable, or too
+slow to initialize, the analyzer returns a structured fallback instead of
+making caption filtering depend on a speech model.
 
 System connection:
-    Extension sends caption -> Backend /event -> ContentAnalyzer.analyze_decision -> decision JSON
-# Shows end-to-end data flow from extension to backend decision
+    Extension audio/caption -> Flask route -> ContentAnalyzer -> decision/evidence JSON
 """
 
-import re  # Imports regex utilities for pattern matching
-import hashlib  # Stable marker ids for deterministic scheduling
+import re
+import hashlib  # Stable marker ids keep repeated polling from duplicating events.
 import importlib
 import os
 import base64
@@ -68,6 +67,9 @@ class FasterWhisperSpeechToTextAdapter(SpeechToTextAdapter):
             return self._model
         fw_module = importlib.import_module('faster_whisper')
         WhisperModel = getattr(fw_module, 'WhisperModel')
+        # Loading is lazy so importing the backend never downloads a large
+        # model. A fallback is explicit configuration, not a silent accuracy
+        # change during normal playback.
         attempted = [self.model_size]
         if self.fallback_model_size and self.fallback_model_size not in attempted:
             attempted.append(self.fallback_model_size)
@@ -135,6 +137,9 @@ class FasterWhisperSpeechToTextAdapter(SpeechToTextAdapter):
                     continue
                 if word_start is None or word_end is None:
                     continue
+                # Whisper reports offsets relative to this audio chunk. Convert
+                # them to the absolute video timeline before scheduling so a
+                # later chunk does not incorrectly start at time zero.
                 words.append({
                     'word': word_text,
                     'start': round(max(start_seconds + float(word_start), 0.0), 3),
@@ -306,6 +311,9 @@ class ContentAnalyzer:
         return normalized[:32]
 
     def _estimate_word_timings(self, text: str, start_seconds: float, duration: float) -> List[Dict]:
+        # Equal word spans are only an evidence fallback. Marking them as
+        # estimated lets the extension avoid treating a sentence boundary as a
+        # precise spoken-word onset.
         tokens = [match.group(0) for match in re.finditer(r"[A-Za-z0-9']+", text)]
         if not tokens:
             return []
@@ -1045,6 +1053,9 @@ class ContentAnalyzer:
                         'video_id': video_id,
                         'model': self.stt_model_size,
                     })
+                    # faster-whisper accepts a temporary file efficiently. The
+                    # finally block removes it so raw captured audio is not
+                    # retained after this request.
                     stt_audio_path = self._persist_audio_for_stt(decoded_audio, mime_type)
                     try:
                         stt_result = adapter.transcribe_with_word_timestamps(
@@ -1091,6 +1102,9 @@ class ContentAnalyzer:
                         except OSError:
                             pass
 
+        # Prefer real STT output when it contains text. If it does not, retain
+        # the existing fallback so a model outage cannot disable caption
+        # filtering or prevent normal playback restoration.
         if whisper_words or whisper_text:
             transcript_text = whisper_text or ' '.join(str(word.get('word') or '').strip() for word in whisper_words).strip()
             segments = [{

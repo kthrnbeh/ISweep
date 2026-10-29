@@ -44,7 +44,7 @@
           <button id="kbToggle" class="kb-avatar">KB</button>
 
           <div id="kbDropdown" class="kb-dropdown hidden">
-            <div class="dropdown-section">
+            <div class="dropdown-section" data-auth-signed-out>
   <button
     type="button"
     data-open-auth="signin"
@@ -60,7 +60,8 @@
   >
     Create Account
   </button>
-
+            </div>
+            <div class="dropdown-section" data-auth-signed-in>
   <a href="Account.html">Account</a>
   <a href="Settings.html">Settings</a>
 

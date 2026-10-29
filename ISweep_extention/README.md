@@ -10,8 +10,8 @@ Wires the browser to the ISweep backend: signs in, syncs preferences, and applie
    - Use **Test Connection** to verify `/health`.
 4) Click the toolbar icon → **Log in with Email**:
    - Enter the same email/password created via the frontend/backend.
-   - On success we store `isweepToken` + `isweepUserId` in `chrome.storage.local`.
-5) (Optional) Open Settings or Account links to the frontend at `http://127.0.0.1:5500/ISweep_frontend/docs/`.
+   - On success we store the canonical `isweep_auth_token` and backend user id in `chrome.storage.local`.
+5) (Optional) Open Settings or Account links to the frontend at `http://127.0.0.1:5500/docs/`.
 
 ## YouTube testing flow
 - Open any YouTube video with captions on (`*://*.youtube.com/watch*`).
@@ -24,7 +24,7 @@ Wires the browser to the ISweep backend: signs in, syncs preferences, and applie
 - Watch DevTools console for `[ISWEEP]` logs (content + background).
 
 ## Storage keys (chrome.storage.local)
-- `isweepToken`, `isweepUserId`: auth session for backend calls.
+- `isweep_auth_token`, `isweepUserId`: auth session for backend calls.
 - `isweepBackendUrl`: configured backend base URL.
 - `isweepPreferences`: last downloaded preferences (fallback).
 - `isweepEnabled`: toggle for icon state.

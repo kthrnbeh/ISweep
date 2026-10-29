@@ -102,6 +102,13 @@ class TestAPI:
         assert isinstance(data.get('token'), str) and data['token']
         assert isinstance(data.get('user_id'), int)
 
+    def test_auth_me_returns_backend_authenticated_user_id(self, client):
+        response = client.post('/auth/signup', json={'email': 'auth-me@example.com', 'password': 'Password123!'})
+        data = json.loads(response.data)
+        identity = client.get('/auth/me', headers=auth_headers(data['token']))
+        assert identity.status_code == 200
+        assert identity.get_json() == {'user_id': data['user_id']}
+
     def test_auth_login_invalid_credentials_returns_clear_401_json(self, client):
         client.post('/auth/signup', json={'email': 'login-fail@example.com', 'password': 'Password123!'})
         response = client.post('/auth/login', json={'email': 'login-fail@example.com', 'password': 'WrongPass123!'})
@@ -1449,6 +1456,87 @@ class TestAPI:
         assert after['transcribe_requests'] >= before_count + 1
         assert isinstance(after.get('last_audio_bytes'), int)
         assert isinstance(after.get('last_text_length'), int)
+
+    def test_stt_readiness_is_development_only_and_reports_disabled_without_loading_model(self, client, monkeypatch):
+        token, _ = signup_and_get_token(client, email='stt-readiness-disabled@example.com')
+        monkeypatch.setenv('ISWEEP_DEV_MODE', '1')
+
+        class AnalyzerStub:
+            stt_enabled = False
+
+        client.application.analyzer = AnalyzerStub()
+        response = client.post(
+            '/captions/stt/readiness',
+            json={
+                'video_id': 'readiness-video',
+                'audio_chunk': make_tone_wav_base64(),
+                'start_seconds': 12.0,
+                'end_seconds': 12.5,
+            },
+            headers=auth_headers(token),
+        )
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['development_only'] is True
+        assert data['pcm_valid'] is True
+        assert data['stt_enabled'] is False
+        assert data['model_load_attempted'] is False
+        assert data['failure_reason'] == 'stt_disabled'
+
+    def test_stt_readiness_does_not_load_a_model_without_explicit_opt_in(self, client, monkeypatch):
+        token, _ = signup_and_get_token(client, email='stt-readiness-no-load@example.com')
+        monkeypatch.setenv('ISWEEP_DEV_MODE', '1')
+
+        class AnalyzerStub:
+            stt_enabled = True
+
+        client.application.analyzer = AnalyzerStub()
+        response = client.post(
+            '/captions/stt/readiness',
+            json={
+                'video_id': 'readiness-video',
+                'audio_chunk': make_tone_wav_base64(),
+                'start_seconds': 12.0,
+                'end_seconds': 12.5,
+            },
+            headers=auth_headers(token),
+        )
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['pcm_valid'] is True
+        assert data['model_load_attempted'] is False
+        assert data['failure_reason'] == 'model_load_not_requested'
+
+    def test_stt_readiness_requires_auth_dev_mode_and_bounded_valid_audio(self, client, monkeypatch):
+        import app as app_module
+
+        monkeypatch.setenv('ISWEEP_DEV_MODE', '1')
+        unauthenticated = client.post(
+            '/captions/stt/readiness',
+            json={'video_id': 'readiness-video', 'audio_chunk': 'not-base64', 'start_seconds': 1, 'end_seconds': 2},
+        )
+        assert unauthenticated.status_code == 401
+
+        token, _ = signup_and_get_token(client, email='stt-readiness-validation@example.com')
+        malformed = client.post(
+            '/captions/stt/readiness',
+            json={'video_id': 'readiness-video', 'audio_chunk': 'not-base64', 'start_seconds': 1, 'end_seconds': 2},
+            headers=auth_headers(token),
+        )
+        assert malformed.status_code == 400
+        assert malformed.get_json()['error'] == 'audio payload is not valid base64'
+
+        oversized = client.post(
+            '/captions/stt/readiness',
+            json={
+                'video_id': 'readiness-video',
+                'audio_chunk': 'A' * (app_module.STT_READINESS_MAX_AUDIO_BASE64_CHARS + 1),
+                'start_seconds': 1,
+                'end_seconds': 2,
+            },
+            headers=auth_headers(token),
+        )
+        assert oversized.status_code == 413
 
     def test_audio_analyze_uses_chunk_cache_on_second_call(self, client):
         token, _ = signup_and_get_token(client, email='audio-cache@example.com')

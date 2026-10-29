@@ -1,3 +1,38 @@
 # ISweep runtime logs
 /isweep_backend.log
 /isweep_backend_error.log
+
+# Local Python environments and generated caches
+.venv/
+.venv-*/
+**/.venv/
+**/.venv-*/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+**/.pytest_cache/
+.mypy_cache/
+**/.mypy_cache/
+
+# Local databases, SQLite journals, and runtime logs
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.log
+
+# Local credentials and environment files; keep safe examples tracked
+.env
+.env.*
+!.env.example
+
+# Downloaded model and tool caches
+.cache/
+**/.cache/
+.huggingface/
+**/.huggingface/
+models--*/
+**/models--*/

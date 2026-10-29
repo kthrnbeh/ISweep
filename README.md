@@ -2,13 +2,11 @@ ISweep (Monorepo)
 
 ISweep is an AI-driven media content filtering system that helps users watch content with their own boundaries — without editing the original media.
 
-ISweep observes captions/transcripts in real time and sends playback-control decisions to the client (extension/app), such as:
+ISweep observes captions/transcripts in real time and sends playback-control decisions to the client (extension/app), limited to:
 
 mute (temporarily mute audio)
 
-skip (jump forward past a scene)
-
-fast_forward (speed through a segment)
+unmute (restore the viewer's previous audio state)
 
 none (do nothing)
 
@@ -25,7 +23,7 @@ Frontend = website UX: create account, choose plan, set filters, parental PIN, e
 
 README
 
-Extension = runs in the browser and actually controls playback (mute/skip/ff) based on settings and backend decisions 
+Extension = runs in the browser and controls the current player's audio state (mute/unmute) based on settings and backend decisions
 
 README
 
@@ -51,7 +49,7 @@ the extension observes captions/transcript text
 
 sends events to the backend
 
-receives a decision: mute | skip | fast_forward | none
+receives a decision: mute | unmute | none
 
 applies the action seamlessly in the player without editing the content
 
@@ -75,7 +73,7 @@ POST /event
 Response (backend → client)
 
 {
-  "action": "mute | skip | fast_forward | none",
+  "action": "mute | unmute | none",
   "duration_seconds": 4,
   "matched_category": "language | sexual | violence | null",
   "reason": "short explanation"
@@ -94,17 +92,23 @@ Important: if backend is down, the extension should still have a “local fallba
 Local dev: run all 3 parts
 1) Frontend (website prototype)
 
+Use one canonical development website origin for extension integration:
+
+http://127.0.0.1:5500/docs/
+
+Open Filter.html, Account.html, and Settings.html from that same origin. Do not switch between port 5501, localhost, and GitHub Pages while testing one session; each origin has separate browser storage. The extension manifest includes the canonical 127.0.0.1:5500 origin and its /docs/* pages.
+
 This is static HTML/JS/Tailwind.
 
 Recommended: VS Code → Live Server
 
-Right-click ISweep_frontend/docs/index.html → Open with Live Server
+Right-click `docs/index.html` → Open with Live Server
 
 You’ll get something like:
 
 http://127.0.0.1:5500/docs/
 
-Frontend details live here: ISweep_frontend/README.md 
+Frontend details live here: `docs/`
 
 README
 
@@ -136,21 +140,22 @@ Or if it’s Flask:
 flask run
 
 
-Expected: backend running at something like:
+Expected backend URL:
 
-http://127.0.0.1:8000 or http://127.0.0.1:5000
+http://127.0.0.1:5000
 
 Quick HOW TO RUN LOCALLY
 - Backend: in ISweep_backend/ `python app.py` (uses SQLite file isweep.db and .env SECRET_KEY/DATABASE_PATH if set)
-- Frontend: open ISweep_frontend/docs/index.html with Live Server → http://127.0.0.1:5500/ISweep_frontend/docs/
-- Extension: chrome://extensions → Load unpacked → ISweep_extention/; set backend URL to http://127.0.0.1:5000 in Options; login via popup with the same email/password as backend.
+- Frontend: open `docs/index.html` with Live Server → http://127.0.0.1:5500/docs/
+- Extension: chrome://extensions → Load unpacked → `ISweep_extention/`; set backend URL to http://127.0.0.1:5000 in Options; login via popup with the same development account as the website.
+- For testing, set `DATABASE_PATH` to a new temporary SQLite path before starting Flask. Never use the production database for experiments.
 
 End-to-end smoke test checklist
 - Backend up at http://127.0.0.1:5000 and /health returns healthy.
 - Frontend signup/login works; preferences save via PUT /preferences and reload via GET /preferences.
 - Extension configured with backend URL; popup login succeeds and stores token/user id.
 - Open YouTube with captions on; console shows [ISWEEP][YT] caption captured → [ISWEEP][BG] calling /event → [ISWEEP][BG] decision received → [ISWEEP][YT] applying action.
-- Observe mute/skip/fast_forward applied for matching captions; no console errors.
+- Observe mute/unmute applied for matching captions; no console errors.
 
 3) Chrome Extension
 
@@ -241,3 +246,78 @@ On sign-in, store token/user_id
 Fetch preferences from backend
 
 On captions/transcripts, call /event and apply action immediately
+
+
+ISweep Master Development Roadmap
+=================================
+
+Mission
+-------
+
+ISweep is a universal video-filtering system that identifies user-selected
+words and automatically mutes and unmutes playback at precisely the correct
+moments.
+
+Golden Rule
+-----------
+
+ISweep must never modify, edit, cut, trim, skip, shorten, replace, or remove
+original video or audio content. Filtering must operate like a precision
+remote control using mute/unmute only.
+
+Development Roadmap
+-------------------
+
+1. **Learning History Cleanup** — Archive, exclude, restore, and manage
+   learning records.
+2. **Whisper/STT Readiness** — Validate speech recognition, audio capture, and
+   word-level timestamps.
+3. **Unified Detection Engine** — Combine captions, speech recognition, and
+   verified corrections.
+4. **AI Preview Engine** — Analyze accessible captions and audio before
+   playback or ahead of the viewer, using full preview, rolling preview, or
+   live fallback.
+5. **Precision Remote Controller** — Improve mute/unmute timing, playback
+   synchronization, and manual mute protection.
+6. **Universal Video Compatibility** — Expand to supported video players and
+   streaming platforms.
+7. **Adaptive AI Learning** — Improve accuracy across unfamiliar videos using
+   validated feedback.
+
+AI Preview Rules
+----------------
+
+- Full-video analysis is preferred when technically and legally accessible.
+- Rolling look-ahead is the next option.
+- Live detection is the fallback.
+- Optional initial buffering is acceptable if it preserves all content.
+- Never assume that browser buffering provides access to future audio.
+- Never claim that live STT can mute words before recognition without
+  sufficient look-ahead.
+
+Development Standards
+---------------------
+
+- Preserve working features.
+- Use the existing Flask backend and Chrome extension architecture.
+- Test changes with pytest, JavaScript tests, and real Chrome playback.
+- Protect authentication, preferences, and database integrity.
+- Keep inaccurate learning data out of correction reuse.
+- Obtain approval before new database schema changes, permanent data deletion,
+  or major playback architecture changes.
+
+Current Project Status
+----------------------
+
+- **Learning Engine phases A–D:** Implemented in development.
+- **Correction editing/removal improvements:** Implemented; live Chrome
+  verification pending.
+- **Learning History Cleanup:** Approved, implementation pending for the
+  remaining cleanup workflow; reversible review API and popup controls are
+  implemented in development.
+- **Whisper/STT audit:** Complete; STT not yet operational.
+- **Unified Detection Engine:** Planned.
+- **AI Preview Engine:** Planned.
+
+Keep this status list easy to update as milestones progress. Automated tests
+do not replace real Chrome playback verification.

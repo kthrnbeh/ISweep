@@ -12,7 +12,7 @@
   <script src="Settings.js" defer></script>
 
   <!-- Loads the shared JavaScript files from this folder; "defer" waits to run until HTML is parsed. -->
-
+  <!--test-->
   <meta charset="UTF-8" />
   <!-- Uses UTF-8 character encoding so special characters display correctly. -->
 
@@ -64,7 +64,11 @@
             <div class="dropdown-section">
               <button id="themeToggleDropdown">Toggle Theme</button>
             </div>
-            <div class="dropdown-section">
+            <div class="dropdown-section" data-auth-signed-out>
+              <button type="button" data-open-auth="signin">Sign In</button>
+              <button type="button" data-open-auth="create">Create Account</button>
+            </div>
+            <div class="dropdown-section" data-auth-signed-in>
               <a href="Account.html">Account</a>
               <a href="Settings.html">Settings</a>
               <button id="signOutBtn" data-logout>Sign Out</button>
