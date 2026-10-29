@@ -1,11 +1,13 @@
-// Bridges site-localStorage auth token into extension storage so popup/background share the same Bearer.
-const TOKEN_KEY = 'isweep_auth_token'; // Shared token key between site and extension
-const PREFS_CACHE_KEY = 'isweep-preferences'; // Frontend cache updated after /preferences saves
+// Requests a background-owned credential sync. The page may read its own
+// localStorage, but it never writes extension storage or decides whether two
+// accounts are compatible; the service worker validates the bearer token.
+const TOKEN_KEY = 'isweep_auth_token';
+const PREFS_CACHE_KEY = 'isweep-preferences'; // Updated after a successful backend save.
 const USER_ID_KEY = 'isweep-user-id';
 
 async function pushTokenToExtension() {
   try {
-    const token = window.localStorage.getItem(TOKEN_KEY); // Read token from site localStorage
+    const token = window.localStorage.getItem(TOKEN_KEY);
 
     if (!token) {
       return { ok: true, hasToken: false };

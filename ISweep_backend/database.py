@@ -1,43 +1,41 @@
 """
 ISWEEP COMPONENT: Persistence Layer
-# Notes that this file is the persistence component
 
-This module wraps SQLite access for users, preferences, and auth tokens. The Flask
-# Explains it manages SQLite for users/preferences/tokens
-app imports Database to store user accounts, bearer tokens, and filtering settings
-# States that the Flask app uses this class to store auth and filtering data
-that drive ContentAnalyzer decisions.
-# Clarifies data supports ContentAnalyzer
+This module wraps SQLite access for users, preferences, auth tokens, and
+account-owned learning records. The Flask app uses this class so ownership
+checks, foreign-key enforcement, and transaction boundaries are consistent
+across every endpoint.
 
 System connection:
-    Backend endpoints -> Database -> persist/fetch users, preferences, tokens -> /event
-# Shows how API endpoints flow through the DB layer to event processing
+    Backend endpoints -> Database -> users/preferences/tokens/learning records
 """
 
-import sqlite3  # Standard library SQLite interface
-import json  # JSON serialization for preferences
-from datetime import datetime  # Timestamp handling
-from typing import Dict, Optional  # Type annotations for clarity
+import sqlite3
+import json
+from datetime import datetime
+from typing import Dict, Optional
 
 
 class Database:
-    """Simple SQLite database handler for user preferences."""
-    # Class docstring describing database handler purpose
+    """SQLite gateway that keeps account ownership close to every query."""
 
     def __init__(self, db_path: str = 'isweep.db'):
-        self.db_path = db_path  # Store DB file path
-        self.init_db()  # Ensure schema exists on creation
+        self.db_path = db_path
+        self.init_db()
 
     def get_connection(self):
-        """Open a connection with row_factory set so rows can be dict-converted easily."""
-        conn = sqlite3.connect(self.db_path)  # Open SQLite connection
-        conn.row_factory = sqlite3.Row  # Return rows as dict-like objects
-        return conn  # Provide connection to caller
+        """Open a dict-friendly connection with foreign keys enabled per connection."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        # SQLite does not persist this pragma in the file; set it on every
+        # connection so deleting an account cannot leave orphaned learning data.
+        conn.execute('PRAGMA foreign_keys = ON')
+        return conn
 
     def init_db(self):
-        """Initialize database schema for users, preferences, and auth tokens."""
-        conn = self.get_connection()  # Open connection for schema creation
-        cursor = conn.cursor()  # Get cursor for executing SQL
+        """Create missing tables and additive compatibility structures."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
 
         # Create users table with email/password support
         cursor.execute('''
@@ -130,6 +128,98 @@ class Database:
                 )
             )
         ''')  # Cache table for /audio/analyze chunk-level STT outputs
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS mute_events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NULL,
+                video_id TEXT NOT NULL,
+                matched_word TEXT NOT NULL,
+                caption_source TEXT NOT NULL,
+                timing_method TEXT NOT NULL CHECK (
+                    timing_method IN ('verified', 'estimated')
+                ),
+                predicted_start_seconds REAL NOT NULL,
+                predicted_end_seconds REAL NOT NULL,
+                actual_mute_start_seconds REAL NULL,
+                actual_mute_end_seconds REAL NULL,
+                playback_speed REAL NOT NULL DEFAULT 1.0,
+                status TEXT NOT NULL DEFAULT 'predicted' CHECK (
+                    status IN ('predicted', 'muted', 'restored', 'skipped', 'canceled', 'failed')
+                ),
+                playback_context_json TEXT NOT NULL DEFAULT '{}',
+                dedupe_key TEXT NOT NULL UNIQUE,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+        ''')  # Store opt-in playback timing metadata without raw audio
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS mute_feedback (
+                feedback_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id INTEGER NOT NULL UNIQUE,
+                result TEXT NOT NULL CHECK (
+                    result IN ('correct', 'early', 'late', 'missed')
+                ),
+                corrected_start_seconds REAL NULL,
+                corrected_end_seconds REAL NULL,
+                feedback_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (event_id) REFERENCES mute_events(event_id) ON DELETE CASCADE
+            )
+        ''')  # One replaceable feedback correction per mute event
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS learning_event_reviews (
+                event_id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                state TEXT NOT NULL CHECK (
+                    state IN ('active', 'archived', 'excluded')
+                ),
+                reason TEXT NULL,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (event_id) REFERENCES mute_events(event_id),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        ''')  # Reversible per-account review state; historical events remain intact
+
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_learning_event_reviews_user_state
+            ON learning_event_reviews (user_id, state, updated_at)
+        ''')
+
+        cursor.execute('''
+            CREATE TRIGGER IF NOT EXISTS trg_learning_event_reviews_owner_insert
+            BEFORE INSERT ON learning_event_reviews
+            FOR EACH ROW
+            WHEN NOT EXISTS (
+                SELECT 1 FROM mute_events
+                WHERE event_id = NEW.event_id AND user_id = NEW.user_id
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'learning event review owner mismatch');
+            END
+        ''')
+
+        cursor.execute('''
+            CREATE TRIGGER IF NOT EXISTS trg_learning_event_reviews_owner_update
+            BEFORE UPDATE OF event_id, user_id ON learning_event_reviews
+            FOR EACH ROW
+            WHEN NOT EXISTS (
+                SELECT 1 FROM mute_events
+                WHERE event_id = NEW.event_id AND user_id = NEW.user_id
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'learning event review owner mismatch');
+            END
+        ''')
+
+        # Review state is separate from the event so archive/exclude remains
+        # reversible and the original playback history is never deleted.
+
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_mute_events_lookup
+            ON mute_events (user_id, video_id, matched_word, predicted_start_seconds)
+        ''')  # Support future same-video/word correction lookup
 
         conn.commit()  # Persist schema changes
         conn.close()  # Close connection
@@ -296,6 +386,309 @@ class Database:
         conn.close()  # Close connection
 
         return success  # Return update status
+
+    @staticmethod
+    def _mute_event_dict(row):
+        if not row:
+            return None
+        data = dict(row)
+        try:
+            data['playback_context'] = json.loads(data.pop('playback_context_json') or '{}')
+        except json.JSONDecodeError:
+            data['playback_context'] = {}
+            data.pop('playback_context_json', None)
+        feedback_id = data.pop('feedback_id', None)
+        feedback_result = data.pop('feedback_result', None)
+        feedback_start = data.pop('feedback_corrected_start_seconds', None)
+        feedback_end = data.pop('feedback_corrected_end_seconds', None)
+        feedback_at = data.pop('feedback_at', None)
+        if feedback_id is not None:
+            data['feedback'] = {
+                'feedback_id': feedback_id,
+                'result': feedback_result,
+                'corrected_start_seconds': feedback_start,
+                'corrected_end_seconds': feedback_end,
+                'feedback_at': feedback_at,
+            }
+        return data
+
+    @staticmethod
+    def _mute_feedback_dict(row):
+        return dict(row) if row else None
+
+    def create_mute_event(self, user_id: int, event: Dict) -> tuple[Dict, bool]:
+        """Create an account-owned learning event, or return its existing dedupe record."""
+        conn = self.get_connection()
+        try:
+            try:
+                conn.execute(
+                    '''INSERT INTO mute_events (
+                           user_id, video_id, matched_word, caption_source, timing_method,
+                           predicted_start_seconds, predicted_end_seconds,
+                           actual_mute_start_seconds, actual_mute_end_seconds,
+                           playback_speed, status, playback_context_json, dedupe_key
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (
+                        user_id,
+                        event['video_id'],
+                        event['matched_word'],
+                        event['caption_source'],
+                        event['timing_method'],
+                        event['predicted_start_seconds'],
+                        event['predicted_end_seconds'],
+                        event.get('actual_mute_start_seconds'),
+                        event.get('actual_mute_end_seconds'),
+                        event['playback_speed'],
+                        event['status'],
+                        json.dumps(event.get('playback_context', {}), separators=(',', ':'), sort_keys=True),
+                        event['dedupe_key'],
+                    ),
+                )
+                conn.commit()
+                created = True
+            except sqlite3.IntegrityError as error:
+                if 'dedupe_key' not in str(error).lower():
+                    raise
+                existing = conn.execute(
+                    'SELECT * FROM mute_events WHERE dedupe_key = ?',
+                    (event['dedupe_key'],),
+                ).fetchone()
+                if existing and existing['user_id'] != user_id:
+                    raise PermissionError('event dedupe key belongs to another account')
+                created = False
+
+            row = conn.execute(
+                'SELECT * FROM mute_events WHERE user_id = ? AND dedupe_key = ?',
+                (user_id, event['dedupe_key']),
+            ).fetchone()
+            if not row:
+                raise sqlite3.IntegrityError('event dedupe record is not owned by the authenticated user')
+            return self._mute_event_dict(row), created
+        finally:
+            conn.close()
+
+    def list_mute_events(self, user_id: int, limit: int, offset: int) -> tuple[list[Dict], int]:
+        conn = self.get_connection()
+        try:
+            total = conn.execute(
+                'SELECT COUNT(*) FROM mute_events WHERE user_id = ?',
+                (user_id,),
+            ).fetchone()[0]
+            rows = conn.execute(
+                '''SELECT e.*, COALESCE(r.state, 'active') AS review_state,
+                          r.reason AS review_reason,
+                          r.updated_at AS review_updated_at,
+                          f.feedback_id AS feedback_id,
+                          f.result AS feedback_result,
+                          f.corrected_start_seconds AS feedback_corrected_start_seconds,
+                          f.corrected_end_seconds AS feedback_corrected_end_seconds,
+                          f.feedback_at AS feedback_at
+                   FROM mute_events e
+                   LEFT JOIN mute_feedback f ON f.event_id = e.event_id
+                   LEFT JOIN learning_event_reviews r ON r.event_id = e.event_id
+                   WHERE e.user_id = ?
+                   ORDER BY e.event_id DESC
+                   LIMIT ? OFFSET ?''',
+                (user_id, limit, offset),
+            ).fetchall()
+            return [self._mute_event_dict(row) for row in rows], total
+        finally:
+            conn.close()
+
+    def update_mute_event_reviews(
+        self,
+        user_id: int,
+        event_ids: list[int],
+        state: str,
+        reason: Optional[str] = None,
+    ) -> list[Dict]:
+        """Atomically set review state for account-owned learning events.
+
+        The ownership query runs inside the same write transaction as the
+        upsert. If even one requested event belongs to another account, the
+        transaction rolls back instead of partially changing the batch.
+        """
+        if not event_ids:
+            raise ValueError('event_ids must not be empty')
+        conn = self.get_connection()
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            placeholders = ','.join('?' for _ in event_ids)
+            rows = conn.execute(
+                f'''SELECT event_id FROM mute_events
+                    WHERE user_id = ? AND event_id IN ({placeholders})''',
+                [user_id, *event_ids],
+            ).fetchall()
+            owned_ids = {int(row['event_id']) for row in rows}
+            if owned_ids != set(event_ids):
+                raise PermissionError('one or more learning events are not owned by this account')
+
+            conn.executemany(
+                '''INSERT INTO learning_event_reviews (event_id, user_id, state, reason)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(event_id) DO UPDATE SET
+                       user_id = excluded.user_id,
+                       state = excluded.state,
+                       reason = excluded.reason,
+                       updated_at = CURRENT_TIMESTAMP''',
+                [(event_id, user_id, state, reason) for event_id in event_ids],
+            )
+            updated = conn.execute(
+                f'''SELECT event_id, user_id, state, reason, updated_at
+                    FROM learning_event_reviews
+                    WHERE user_id = ? AND event_id IN ({placeholders})
+                    ORDER BY event_id''',
+                [user_id, *event_ids],
+            ).fetchall()
+            conn.commit()
+            return [dict(row) for row in updated]
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def get_mute_event_for_user(self, user_id: int, event_id: int) -> Optional[Dict]:
+        conn = self.get_connection()
+        try:
+            row = conn.execute(
+                'SELECT * FROM mute_events WHERE event_id = ? AND user_id = ?',
+                (event_id, user_id),
+            ).fetchone()
+            return self._mute_event_dict(row)
+        finally:
+            conn.close()
+
+    def upsert_mute_feedback(self, user_id: int, event_id: int, feedback: Dict) -> Optional[Dict]:
+        conn = self.get_connection()
+        try:
+            owned = conn.execute(
+                'SELECT event_id FROM mute_events WHERE event_id = ? AND user_id = ?',
+                (event_id, user_id),
+            ).fetchone()
+            if not owned:
+                return None
+            conn.execute(
+                '''INSERT INTO mute_feedback (
+                       event_id, result, corrected_start_seconds, corrected_end_seconds
+                   ) VALUES (?, ?, ?, ?)
+                   ON CONFLICT(event_id) DO UPDATE SET
+                       result = excluded.result,
+                       corrected_start_seconds = excluded.corrected_start_seconds,
+                       corrected_end_seconds = excluded.corrected_end_seconds,
+                       feedback_at = CURRENT_TIMESTAMP''',
+                (
+                    event_id,
+                    feedback['result'],
+                    feedback.get('corrected_start_seconds'),
+                    feedback.get('corrected_end_seconds'),
+                ),
+            )
+            conn.commit()
+            row = conn.execute(
+                'SELECT * FROM mute_feedback WHERE event_id = ?',
+                (event_id,),
+            ).fetchone()
+            return self._mute_feedback_dict(row)
+        finally:
+            conn.close()
+
+    def delete_mute_feedback(self, user_id: int, event_id: int) -> bool:
+        conn = self.get_connection()
+        try:
+            cursor = conn.execute(
+                '''DELETE FROM mute_feedback
+                   WHERE event_id = ?
+                     AND EXISTS (
+                         SELECT 1 FROM mute_events
+                         WHERE mute_events.event_id = mute_feedback.event_id
+                           AND mute_events.user_id = ?
+                     )''',
+                (event_id, user_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def get_verified_corrections(
+        self,
+        user_id: int,
+        video_id: str,
+        matched_word: str,
+        start_seconds: Optional[float],
+        proximity_seconds: float,
+        limit: int,
+    ) -> list[Dict]:
+        # Only validated feedback attached to a trusted event can affect a
+        # future mute. User-reported missed words are the one intentional
+        # exception: they carry their own corrected interval and are marked
+        # separately from successful mute examples below.
+        conn = self.get_connection()
+        try:
+            rows = conn.execute(
+                '''SELECT
+                       e.event_id,
+                       e.video_id,
+                       e.matched_word,
+                       e.caption_source,
+                       e.timing_method,
+                       e.predicted_start_seconds,
+                       e.predicted_end_seconds,
+                       e.status,
+                       f.feedback_id,
+                       f.result,
+                       f.corrected_start_seconds,
+                       f.corrected_end_seconds,
+                       f.feedback_at,
+                       COALESCE(r.state, 'active') AS review_state,
+                       r.reason AS review_reason
+                   FROM mute_events e
+                   JOIN mute_feedback f ON f.event_id = e.event_id
+                   LEFT JOIN learning_event_reviews r ON r.event_id = e.event_id
+                   WHERE e.user_id = ?
+                     AND e.video_id = ?
+                     AND e.matched_word = ?
+                     AND (
+                         (
+                             e.status IN ('muted', 'restored')
+                             AND f.result IN ('correct', 'early', 'late')
+                         )
+                         OR (
+                             e.status = 'skipped'
+                             AND e.caption_source = 'user_report'
+                             AND f.result = 'missed'
+                         )
+                     )
+                     AND COALESCE(r.state, 'active') != 'excluded'
+                     AND f.corrected_start_seconds IS NOT NULL
+                     AND f.corrected_end_seconds IS NOT NULL
+                     AND f.corrected_start_seconds >= 0
+                     AND f.corrected_end_seconds > f.corrected_start_seconds
+                     AND (? IS NULL OR ABS(e.predicted_start_seconds - ?) <= ?)
+                   ORDER BY e.predicted_start_seconds ASC, f.feedback_at DESC
+                   LIMIT ?''',
+                (user_id, video_id, matched_word, start_seconds, start_seconds, proximity_seconds, limit),
+            ).fetchall()
+            corrections = []
+            for row in rows:
+                correction = dict(row)
+                correction['successful_mute_example'] = (
+                    correction['status'] in ('muted', 'restored')
+                    and correction['result'] in ('correct', 'early', 'late')
+                )
+                if start_seconds is not None:
+                    correction['distance_seconds'] = abs(
+                        correction['predicted_start_seconds'] - start_seconds
+                    )
+                    correction['applicable'] = correction['distance_seconds'] <= proximity_seconds
+                else:
+                    correction['distance_seconds'] = None
+                    correction['applicable'] = False
+                corrections.append(correction)
+            return corrections
+        finally:
+            conn.close()
 
     def store_user_token(self, user_id: int, token: str, expires_at: datetime) -> None:
         conn = self.get_connection()  # Open connection

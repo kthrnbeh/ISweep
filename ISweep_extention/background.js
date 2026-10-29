@@ -8,6 +8,13 @@ auth, prefs sync, and icon state.
 System flow:
   youtube_captions.js -> chrome.runtime.sendMessage('caption') -> handleCaptionDecision
   handleCaptionDecision -> POST /event -> decision -> content script applies action
+
+Important ownership rules:
+  - This service worker owns backend requests, account validation, and preference
+    synchronization; page scripts cannot write extension credentials directly.
+  - Caption/STT network work is best-effort and must never delay mute restoration.
+  - Selected-word mute timing comes from the content script's shared controller,
+    not from a second mute implementation in this file.
 */
 
 // Storage Keys
@@ -17,13 +24,16 @@ const STORAGE_KEYS = {
   TOKEN: 'isweep_auth_token',
   USER_ID: 'isweepUserId',
   PREFS: 'isweepPreferences',
+  LEARNING_CONSENT_CONFIRMED: 'isweepLearningConsentConfirmed',
   BACKEND_URL: 'isweepBackendUrl',
   CLEAN_CAPTION_SETTINGS: 'isweepCleanCaptionSettings',
   DEV_LOCAL_AUTH: 'devLocalAuthEnabled',
   LOCAL_REFERENCES: 'isweepLocalReferences'
 };
 
-const TOKEN_KEY = 'isweep_auth_token'; // Shared with site_token_bridge and frontend localStorage
+// Keep one canonical key across the website bridge and extension storage so a
+// successful account validation cannot leave two credentials disagreeing.
+const TOKEN_KEY = 'isweep_auth_token';
 
 const LOG_PREFIX = '[ISWEEP][BG]';
 const CAPTION_LOG_PREFIX = '[ISWEEP][CAPTIONS]';
@@ -452,6 +462,9 @@ function shouldSuppressDuplicateCaption(text, source, windowMs = AUDIO_CAPTION_D
 
 // Normalize preferences into a stable shape with blocklist.items always present.
 function normalizePreferences(raw) {
+  // blocklist.items is the canonical contract. Legacy fields are read only
+  // when no canonical list exists, preventing stale data from being merged
+  // into a newer, intentionally smaller selection.
   const prefs = raw && typeof raw === 'object' ? raw : {};
   const categories = prefs.categories && typeof prefs.categories === 'object' ? prefs.categories : {};
   const lang = categories.language && typeof categories.language === 'object' ? categories.language : {};
@@ -487,6 +500,9 @@ function normalizePreferences(raw) {
   return {
     enabled: prefs.enabled !== false,
     sensitivity: typeof prefs.sensitivity === 'number' ? prefs.sensitivity : 0.9,
+    learning: {
+      enabled: prefs?.learning?.enabled === true,
+    },
     categories: {
       language: {
         enabled: lang.enabled !== false,
@@ -1562,7 +1578,10 @@ async function fetchPreferences(token, backendUrl, { persist = true } = {}) {
   const prefs = await res.json();
   const normalized = normalizePreferences(prefs); // Ensure blocklist/items always present
   if (persist) {
-    await chrome.storage.local.set({ [STORAGE_KEYS.PREFS]: normalized });
+    await chrome.storage.local.set({
+      [STORAGE_KEYS.PREFS]: normalized,
+      [STORAGE_KEYS.LEARNING_CONSENT_CONFIRMED]: normalized.learning.enabled === true,
+    });
   }
   const selectedWords = normalized.blocklist.items;
   console.log('[ISWEEP][PREFS] synchronized', {
@@ -1576,6 +1595,220 @@ async function fetchPreferences(token, backendUrl, { persist = true } = {}) {
     status: res.status,
     selectedWordCount: selectedWords.length,
   };
+}
+
+async function updateLearningConsent(enabled) {
+  const token = await getAuthToken();
+  if (!token) return { ok: false, error: 'missing token' };
+  const backendUrl = await getBackendUrl();
+  try {
+    const currentResponse = await fetch(`${backendUrl}/preferences`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!currentResponse.ok) {
+      if (currentResponse.status === 401) {
+        await chrome.storage.local.remove([
+          TOKEN_KEY,
+          STORAGE_KEYS.USER_ID,
+          STORAGE_KEYS.AUTH,
+          STORAGE_KEYS.PREFS,
+          STORAGE_KEYS.LEARNING_CONSENT_CONFIRMED,
+        ]);
+        return { ok: false, error: 'unauthorized' };
+      }
+      return { ok: false, error: `status ${currentResponse.status}` };
+    }
+    const rawPrefs = await currentResponse.json();
+    const nextPrefs = {
+      ...(rawPrefs && typeof rawPrefs === 'object' ? rawPrefs : {}),
+      learning: { ...(rawPrefs?.learning || {}), enabled: enabled === true },
+    };
+    const response = await fetch(`${backendUrl}/preferences`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(nextPrefs),
+    });
+    if (response.status === 401) {
+      await chrome.storage.local.remove([
+        TOKEN_KEY,
+        STORAGE_KEYS.USER_ID,
+        STORAGE_KEYS.AUTH,
+        STORAGE_KEYS.PREFS,
+        STORAGE_KEYS.LEARNING_CONSENT_CONFIRMED,
+      ]);
+      return { ok: false, error: 'unauthorized' };
+    }
+    if (!response.ok) return { ok: false, error: `status ${response.status}` };
+    const saved = normalizePreferences(await response.json());
+    const confirmed = saved.learning.enabled === true;
+    await chrome.storage.local.set({
+      [STORAGE_KEYS.PREFS]: saved,
+      [STORAGE_KEYS.LEARNING_CONSENT_CONFIRMED]: confirmed,
+    });
+    return { ok: true, enabled: confirmed, status: response.status };
+  } catch (_) {
+    return { ok: false, error: 'backend_unavailable' };
+  }
+}
+
+async function handleLearningEvent(event) {
+  const store = await chrome.storage.local.get([
+    TOKEN_KEY,
+    STORAGE_KEYS.PREFS,
+    STORAGE_KEYS.LEARNING_CONSENT_CONFIRMED,
+  ]);
+  if (!store[TOKEN_KEY] || store[STORAGE_KEYS.LEARNING_CONSENT_CONFIRMED] !== true
+    || normalizePreferences(store[STORAGE_KEYS.PREFS] || {}).learning.enabled !== true) {
+    return { ok: false, skipped: true, reason: 'learning_not_confirmed' };
+  }
+  const backendUrl = await getBackendUrl();
+  // Learning uploads are optional telemetry. Keep them outside the playback
+  // critical path so a slow backend cannot delay mute restoration.
+  try {
+    const response = await fetch(`${backendUrl}/learning/mute-events`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${store[TOKEN_KEY]}`,
+      },
+      body: JSON.stringify(event || {}),
+    });
+    if (response.status === 401) {
+      await chrome.storage.local.remove([
+        TOKEN_KEY,
+        STORAGE_KEYS.USER_ID,
+        STORAGE_KEYS.AUTH,
+        STORAGE_KEYS.PREFS,
+        STORAGE_KEYS.LEARNING_CONSENT_CONFIRMED,
+      ]);
+      return { ok: false, skipped: true, reason: 'unauthorized', status: response.status, error: 'unauthorized' };
+    }
+    const body = await response.json().catch(() => null);
+    if (!response.ok) return { ok: false, status: response.status, error: learningApiError(response.status, body) };
+    return {
+      ok: true,
+      status: response.status,
+      created: body?.created === true,
+      event: body?.event && typeof body.event === 'object' ? body.event : undefined,
+    };
+  } catch (_) {
+    return { ok: false, skipped: true, reason: 'backend_unavailable', error: 'backend_unavailable' };
+  }
+}
+
+function learningApiError(status, body) {
+  if (status === 401) return 'unauthorized';
+  if (status === 403) return 'consent_not_confirmed';
+  if (status === 404) return 'learning_api_unavailable';
+  if (status >= 500) return 'backend_error';
+  if (body && typeof body.error === 'string') return 'request_rejected';
+  return 'unexpected_response';
+}
+
+async function handleLearningList() {
+  const token = await getAuthToken();
+  if (!token) return { ok: false, error: 'missing token' };
+  const backendUrl = await getBackendUrl();
+  try {
+    const response = await fetch(`${backendUrl}/learning/mute-events?limit=25&offset=0`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) return { ok: false, status: response.status, error: learningApiError(response.status, body) };
+    if (!body || !Array.isArray(body.events)) return { ok: false, status: response.status, error: 'invalid_response' };
+    return { ok: true, ...body };
+  } catch (_) {
+    return { ok: false, error: 'backend_unavailable' };
+  }
+}
+
+async function handleLearningCorrections(message = {}) {
+  const token = await getAuthToken();
+  if (!token) return { ok: false, error: 'missing token' };
+  const videoId = String(message.videoId || '').trim();
+  const word = String(message.word || '').trim().toLowerCase();
+  if (!videoId || !word) return { ok: false, error: 'invalid correction lookup' };
+  const params = `video_id=${encodeURIComponent(videoId)}&word=${encodeURIComponent(word)}&limit=25`;
+  const startSeconds = Number(message.startSeconds);
+  const query = Number.isFinite(startSeconds)
+    ? `${params}&start_seconds=${encodeURIComponent(String(startSeconds))}`
+    : params;
+  const backendUrl = await getBackendUrl();
+  try {
+    const response = await fetch(`${backendUrl}/learning/corrections?${query}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) return { ok: false, status: response.status, error: learningApiError(response.status, body) };
+    if (!body || !Array.isArray(body.corrections)) return { ok: false, status: response.status, error: 'invalid_response' };
+    return { ok: true, ...body };
+  } catch (_) {
+    return { ok: false, error: 'backend_unavailable' };
+  }
+}
+
+async function notifyLearningCorrectionInvalidation() {
+  try {
+    const tabs = await chrome.tabs.query({});
+    await Promise.all((tabs || []).map((tab) => chrome.tabs.sendMessage(
+      tab.id, { type: 'isweep_learning_corrections_changed' },
+    ).catch(() => null)));
+  } catch (_) {}
+}
+
+async function handleLearningFeedback(message) {
+  const token = await getAuthToken();
+  if (!token) return { ok: false, error: 'missing token' };
+  const eventId = Number(message.eventId);
+  if (!Number.isInteger(eventId) || eventId < 1) return { ok: false, error: 'invalid event id' };
+  const backendUrl = await getBackendUrl();
+  try {
+    const response = await fetch(`${backendUrl}/learning/mute-events/${eventId}/feedback`, {
+      method: message.delete === true ? 'DELETE' : 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      ...(message.delete === true ? {} : { body: JSON.stringify(message.feedback || {}) }),
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) return { ok: false, status: response.status, error: learningApiError(response.status, body) };
+    await notifyLearningCorrectionInvalidation();
+    return { ok: true, status: response.status, ...(body && typeof body === 'object' ? body : {}) };
+  } catch (_) {
+    return { ok: false, error: 'backend_unavailable' };
+  }
+}
+
+async function handleLearningReview(message = {}) {
+  const token = await getAuthToken();
+  if (!token) return { ok: false, error: 'missing token' };
+  const eventIds = Array.isArray(message.eventIds)
+    ? message.eventIds.map((eventId) => Number(eventId))
+    : [];
+  const state = String(message.state || '').trim().toLowerCase();
+  if (!eventIds.length || eventIds.some((eventId) => !Number.isInteger(eventId) || eventId < 1)
+    || !['active', 'archived', 'excluded'].includes(state)) {
+    return { ok: false, error: 'invalid review request' };
+  }
+  const backendUrl = await getBackendUrl();
+  try {
+    const response = await fetch(`${backendUrl}/learning/mute-events/review`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        event_ids: eventIds,
+        state,
+        reason: message.reason == null ? null : String(message.reason).slice(0, 500),
+      }),
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) return { ok: false, status: response.status, error: learningApiError(response.status, body) };
+    await notifyLearningCorrectionInvalidation();
+    return { ok: true, status: response.status, ...(body && typeof body === 'object' ? body : {}) };
+  } catch (_) {
+    return { ok: false, error: 'backend_unavailable' };
+  }
 }
 
 async function fetchAuthenticatedIdentity(token, backendUrl) {
@@ -1711,6 +1944,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       ? handleSiteTokenSync(message.token, message.userId)
       : handleSyncPrefs(message.userId);
     syncTask.then(sendResponse);
+    return true; // async
+  } else if (message.type === 'isweep_set_learning_consent') {
+    updateLearningConsent(message.enabled === true).then(sendResponse);
+    return true; // async
+  } else if (message.type === 'isweep_learning_event') {
+    // Fire-and-forget callers use this path so network work cannot delay playback.
+    handleLearningEvent(message.event).then(sendResponse);
+    return true; // async
+  } else if (message.type === 'isweep_learning_list') {
+    handleLearningList().then(sendResponse);
+    return true; // async
+  } else if (message.type === 'isweep_learning_corrections') {
+    handleLearningCorrections(message).then(sendResponse);
+    return true; // async
+  } else if (message.type === 'isweep_learning_feedback') {
+    handleLearningFeedback(message).then(sendResponse);
+    return true; // async
+  } else if (message.type === 'isweep_learning_review') {
+    handleLearningReview(message).then(sendResponse);
     return true; // async
   } else if (message.type === 'isweep_markers_analyze') {
     handleMarkerAnalyze(message.video_id, message.force_refresh === true).then(sendResponse);
@@ -2992,6 +3244,7 @@ async function handleSiteTokenSync(siteToken, expectedUserId = null) {
       [TOKEN_KEY]: token,
       [STORAGE_KEYS.USER_ID]: authenticatedUserId,
       [STORAGE_KEYS.PREFS]: result.prefs,
+      [STORAGE_KEYS.LEARNING_CONSENT_CONFIRMED]: result.prefs.learning.enabled === true,
     };
     await chrome.storage.local.set(updates);
     console.log(LOG_PREFIX, 'site token sync success', result.status);

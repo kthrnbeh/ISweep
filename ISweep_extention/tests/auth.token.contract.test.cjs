@@ -32,11 +32,12 @@ test('legacy website migration validates preferences before adopting a token', (
   assert.equal(source.includes('clearSession({ markLoggedOut: true })'), true);
 });
 
-test('filter sync guard reads canonical storage without rewriting legacy tokens', () => {
+test('retired filter sync guard cannot install a second save or token handler', () => {
   const source = read('docs/filter_sync_guard.js');
-  assert.equal(source.includes("localStorage.getItem(SHARED_TOKEN_KEY)"), true);
-  assert.equal(source.includes('localStorage.setItem(LEGACY_TOKEN_KEY'), false);
-  assert.equal(source.includes('localStorage.setItem(SHARED_TOKEN_KEY'), false);
+  assert.equal(source.includes('addEventListener'), false);
+  assert.equal(source.includes('/preferences'), false);
+  const filterHtml = read('docs/Filter.html');
+  assert.equal(filterHtml.includes('filter_sync_guard.js'), false);
 });
 
 test('website bridge delegates token validation and forwards a sanitized user id', () => {

@@ -1,7 +1,8 @@
 // ISWEEP COMPONENT: YouTube Caption Listener
-// Listens to on-page caption DOM changes, sends text to the background script,
-// and applies the returned decision (mute/skip/fast-forward). Safety logic keeps
-// mutes aligned to caption changes with a timeout fallback.
+// Listens to on-page caption changes, combines them with timed audio evidence,
+// and applies playback-only decisions. The selected-word path is intentionally
+// conservative: it masks the displayed word and uses one mute owner so another
+// detection source cannot restore audio while an overlapping window is active.
 (function () {
   'use strict';
 
@@ -15,9 +16,11 @@
     CLEAN_CAPTION_SETTINGS: 'isweepCleanCaptionSettings',
     AUDIO_FILTERING_ENABLED: 'audioFilteringEnabled',
     LOCAL_REFERENCES: 'isweepLocalReferences',
+    AUTH_TOKEN: 'isweep_auth_token',
   };
-  // Track caption text and when it started so we can measure how long words are spoken.
-  // Playback-only: ISweep never edits media or captions; it only controls live playback state (mute/unmute/seek/rate).
+  // Track caption text and its video-time observation. A DOM appearance is not
+  // proof of an individual word's onset, so estimated windows remain labeled
+  // separately from reliable word timestamps.
   let lastCaptionText = '';
   let captionStartTime = null; // When the current caption started; used to time how long it was spoken.
   let videoEl = null;
@@ -62,6 +65,9 @@
   let cachedPreferencesReady = typeof chrome === 'undefined' || !chrome.storage?.local;
   let cachedPreferences = null;
   let cachedLocalReferences = {};
+  const learnedCorrectionsByWord = new Map();
+  const learnedCorrectionRequests = new Map();
+  const LEARNED_CORRECTION_MATCH_PROXIMITY_SEC = 1.0;
 
   function normalizePreferences(prefs) {
     const raw = prefs && typeof prefs === 'object' ? prefs : {};
@@ -94,6 +100,9 @@
     const normalized = {
       enabled: raw.enabled !== false,
       sensitivity: typeof raw.sensitivity === 'number' ? raw.sensitivity : 0.9,
+      learning: {
+        enabled: raw?.learning?.enabled === true,
+      },
       categories: {
         language: normalizedLang,
         sexual: categories.sexual || {},
@@ -113,7 +122,9 @@
   let muteEnforceInterval = null;
   let previousRate = null;
   let muteUntilNextCaption = false;
-  let muteLockUntilSec = 0; // Active mute window end (seconds, video time)
+  // The lock uses the player's currentTime rather than wall-clock time. This
+  // keeps pause, seek, and playback-rate changes from restoring audio early.
+  let muteLockUntilSec = 0;
   let hardRestoreTimeout = null; // Final fail-safe unmute
   let extensionContextInvalidated = false;
   let muteControlInProgress = 0;
@@ -122,6 +133,9 @@
   let muteStateVolumeHandler = null;
   let muteStatePlaybackHandlers = null;
   let userChangedMuteDuringWindow = false;
+  let pendingLearningEvents = [];
+  let pageSelectedWordMuteCancel = null;
+  const submittedLearningEventKeys = new Set();
 
   function watchVideoMuteChanges(video) {
     if (!video || typeof video.addEventListener !== 'function') return;
@@ -191,10 +205,12 @@
     if (hardRestoreTimeout) clearTimeout(hardRestoreTimeout);
     if (muteEnforceInterval) clearInterval(muteEnforceInterval);
     if (pageSelectedWordMuteTimer) clearTimeout(pageSelectedWordMuteTimer);
+    pageSelectedWordMuteCancel?.();
     restoreMuteTimeout = null;
     hardRestoreTimeout = null;
     muteEnforceInterval = null;
     pageSelectedWordMuteTimer = null;
+    pageSelectedWordMuteCancel = null;
     if (muteStateVideo && muteStateVolumeHandler && typeof muteStateVideo.removeEventListener === 'function') {
       muteStateVideo.removeEventListener('volumechange', muteStateVolumeHandler);
     }
@@ -377,6 +393,24 @@
 
   function restoreMuteState(reason) {
     const video = findVideo();
+    const actualEnd = Number(video?.currentTime);
+    // A user mute change or video lifecycle transition cancels the example;
+    // it must not be recorded as proof that ISweep timed a successful mute.
+    const outcome = userChangedMuteDuringWindow
+      || ['video_changed', 'video_emptied', 'extension_context_invalidated'].includes(reason)
+      ? 'canceled'
+      : 'restored';
+    if (pendingLearningEvents.length) {
+      const pending = pendingLearningEvents.splice(0);
+      pending.forEach((event) => {
+        submitLearningEvent({
+          ...event,
+          status: outcome,
+          actual_mute_start_seconds: event.actual_mute_start_seconds,
+          actual_mute_end_seconds: Number.isFinite(actualEnd) ? actualEnd : null,
+        });
+      });
+    }
     if (video && previousMuteState !== null && isweepMuteActive
       && lastMuteOwner === 'isweep' && !userChangedMuteDuringWindow) {
       const targetMuted = shouldISweepUnmute(previousMuteState) ? false : true;
@@ -440,6 +474,7 @@
   const PAGE_SELECTED_WORD_MUTE_MIN_SEC = 0.28;
   const PAGE_SELECTED_WORD_MUTE_MAX_SEC = 0.8;
   const PAGE_SELECTED_WORD_MUTE_DEFAULT_WORD_SEC = 0.30;
+  const PAGE_SELECTED_WORD_MUTE_ESTIMATED_POST_MARGIN_SEC = 0.10;
   const PAGE_SELECTED_WORD_MUTE_RETRIGGER_MS = 900;
   // Visible captions do not expose word-level timing. Keep this fallback in
   // one place so it can be tuned or replaced by timed STT/text-track data.
@@ -3890,6 +3925,7 @@
 
       activeVideoId =
         null;
+      clearLearnedCorrections();
 
       preAnalyzedCleanCaptions =
         [];
@@ -3932,6 +3968,8 @@
 
     activeVideoId =
       newVideoId;
+    clearLearnedCorrections();
+    warmLearningCorrections(newVideoId);
 
     preAnalyzedCleanCaptions =
       [];
@@ -4145,7 +4183,68 @@
   function setCachedPreferences(prefs) {
     cachedPreferences = normalizePreferences(prefs);
     cachedPreferencesReady = true;
+    if (!cachedPreferences.learning.enabled) {
+      learnedCorrectionsByWord.clear();
+      learnedCorrectionRequests.clear();
+    } else if (activeVideoId) {
+      warmLearningCorrections(activeVideoId);
+    }
     return cachedPreferences;
+  }
+
+  function isLearningCollectionEnabled() {
+    return cachedPreferences?.learning?.enabled === true;
+  }
+
+  function clearLearnedCorrections() {
+    learnedCorrectionsByWord.clear();
+    learnedCorrectionRequests.clear();
+  }
+
+  function correctionCacheKey(videoId, word) {
+    return `${String(videoId || '').trim()}|${normalizeCaptionWord(word)}`;
+  }
+
+  function warmLearningCorrections(videoId = getCurrentVideoId()) {
+    if (!isLearningCollectionEnabled() || !videoId || typeof chrome === 'undefined'
+      || !chrome.runtime?.sendMessage) return;
+    getFilterWords().words.map(normalizeFilterWord).filter(Boolean).forEach((word) => {
+      const key = correctionCacheKey(videoId, word);
+      if (learnedCorrectionRequests.has(key)) return;
+      learnedCorrectionRequests.set(key, true);
+      void safeRuntimeSendMessage({ type: 'isweep_learning_corrections', videoId, word })
+        .then((response) => {
+          if (response?.ok && Array.isArray(response.corrections)) {
+            learnedCorrectionsByWord.set(key, response.corrections);
+          }
+        })
+        .catch(() => null)
+        .finally(() => learnedCorrectionRequests.delete(key));
+    });
+  }
+
+  function applyLearnedCorrection(match) {
+    if (!match?.timingEstimated || !isLearningCollectionEnabled()) return match;
+    const videoId = getCurrentVideoId();
+    const predictedStart = Number(match.startTime);
+    if (!videoId || !Number.isFinite(predictedStart)) return match;
+    const candidates = learnedCorrectionsByWord.get(correctionCacheKey(videoId, match.word)) || [];
+    const correction = candidates
+      .filter((item) => item?.successful_mute_example === true
+        && Number.isFinite(Number(item.corrected_start_seconds))
+        && Number.isFinite(Number(item.corrected_end_seconds))
+        && Number(item.corrected_end_seconds) > Number(item.corrected_start_seconds)
+        && Math.abs(Number(item.predicted_start_seconds) - predictedStart) <= LEARNED_CORRECTION_MATCH_PROXIMITY_SEC)
+      .sort((left, right) => Math.abs(Number(left.predicted_start_seconds) - predictedStart)
+        - Math.abs(Number(right.predicted_start_seconds) - predictedStart))[0];
+    if (!correction) return match;
+    return {
+      ...match,
+      startTime: Number(correction.corrected_start_seconds),
+      endTime: Number(correction.corrected_end_seconds),
+      timing: 'learned_correction',
+      learnedCorrectionEventId: correction.event_id,
+    };
   }
 
   function setCachedLocalReferences(references) {
@@ -4230,6 +4329,9 @@
   }
 
   function filterCaption(text, options = {}) {
+    // Keep token positions separate from normalized words: matching is
+    // case/punctuation tolerant, while masking must preserve the original
+    // caption's spacing and punctuation for the viewer.
     const value = String(text || '');
     const tokens = [];
     const tokenPattern = /[^\s]+|\s+/g;
@@ -4251,15 +4353,47 @@
     const hasWindow = Number.isFinite(captionStart) && Number.isFinite(captionEnd) && captionEnd > captionStart;
     const startTime = Number.isFinite(captionStart) ? captionStart : null;
     const endTime = hasWindow ? captionEnd : (startTime === null ? null : startTime + CAPTION_WINDOW_FALLBACK_SEC);
-    return Array.from(derived.values()).map((entry) => ({
-      ...entry,
-      word: entry.matchedVariant,
-      start: tokens[entry.index]?.start ?? 0,
-      end: tokens[entry.index]?.end ?? 0,
-      startTime,
-      endTime,
-      timing: options.timing || (hasWindow ? 'caption_window' : 'fallback_caption_window'),
-    }));
+    const timedWords = Array.isArray(options.words)
+      ? options.words
+      : (Array.isArray(options.wordTimestamps) ? options.wordTimestamps : []);
+    // Sentence-level timing is divided by word position only as a bounded
+    // estimate. Real per-word timestamps always win because caption display
+    // time can precede the spoken word by several seconds.
+    const estimatedWordDuration = hasWindow
+      ? estimatePageWordDurationSec(value, captionEnd - captionStart)
+      : PAGE_SELECTED_WORD_MUTE_DEFAULT_WORD_SEC;
+    return Array.from(derived.values()).map((entry) => {
+      const wordStart = Number(timedWords[entry.index]?.start);
+      const wordEnd = Number(timedWords[entry.index]?.end);
+      const hasWordTiming = Number.isFinite(wordStart) && Number.isFinite(wordEnd) && wordEnd > wordStart;
+      const estimatedStart = hasWindow
+        ? startTime + ((captionEnd - captionStart) * entry.index / Math.max(tokens.length, 1))
+        : startTime;
+      const estimatedDuration = estimatePageSelectedWordMuteDurationSec(
+        entry.matchedVariant,
+        estimatedWordDuration,
+      );
+      return {
+        ...entry,
+        word: entry.matchedVariant,
+        start: tokens[entry.index]?.start ?? 0,
+        end: tokens[entry.index]?.end ?? 0,
+        startTime: hasWordTiming ? wordStart : estimatedStart,
+        endTime: hasWordTiming
+          ? wordEnd
+          : (hasWindow
+            ? Math.max(
+              startTime + ((captionEnd - captionStart) * (entry.index + 1) / Math.max(tokens.length, 1)),
+              estimatedStart + estimatedDuration + PAGE_SELECTED_WORD_MUTE_ESTIMATED_POST_MARGIN_SEC,
+            )
+            : endTime),
+        timing: hasWordTiming
+          ? 'word_timestamp'
+          : (hasWindow ? 'estimated_caption_word_position' : (options.timing || 'unreliable_caption_timing')),
+        timingEstimated: !hasWordTiming,
+        estimatedWordDurationSec: hasWordTiming ? null : estimatedDuration,
+      };
+    });
   }
 
   function renderMaskedCaption(caption = {}, matches = []) {
@@ -4281,27 +4415,57 @@
     return rendered + text.slice(cursor);
   }
 
-  function requestMute({ start, end, reason = 'caption_match' } = {}) {
+  function submitLearningEvent(event) {
+    if (!event || !event.dedupe_key || submittedLearningEventKeys.has(event.dedupe_key)) return;
+    submittedLearningEventKeys.add(event.dedupe_key);
+    if (submittedLearningEventKeys.size > 300) {
+      const oldest = submittedLearningEventKeys.values().next().value;
+      submittedLearningEventKeys.delete(oldest);
+    }
+    if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return;
+    void safeRuntimeSendMessage({ type: 'isweep_learning_event', event }).catch(() => null);
+  }
+
+  function buildLearningEventContext(match, caption, video) {
+    if (!isLearningCollectionEnabled()) return null;
+    const videoId = getCurrentVideoId();
+    const predictedStart = Number(match?.startTime);
+    const predictedEnd = Number(match?.endTime);
+    const matchedWord = normalizeCaptionWord(match?.word);
+    if (!videoId || !matchedWord || !Number.isFinite(predictedStart)
+      || !Number.isFinite(predictedEnd) || predictedEnd <= predictedStart) return null;
+    const source = String(caption?.source || 'unknown').slice(0, 64);
+    const timingMethod = match?.timingEstimated ? 'estimated' : 'verified';
+    return {
+      video_id: videoId,
+      matched_word: matchedWord.slice(0, 128),
+      caption_source: source,
+      timing_method: timingMethod,
+      predicted_start_seconds: predictedStart,
+      predicted_end_seconds: predictedEnd,
+      playback_speed: Number.isFinite(Number(video?.playbackRate)) ? Number(video.playbackRate) : 1,
+      playback_context: {
+        paused: Boolean(video?.paused),
+        seeked: Boolean(video?.seeking),
+        speed_changed: Number(video?.playbackRate || 1) !== 1,
+      },
+      dedupe_key: `mute:${videoId}:${matchedWord}:${predictedStart.toFixed(3)}:${predictedEnd.toFixed(3)}:${source}`,
+    };
+  }
+
+  function requestMute({ start, end, reason = 'caption_match', learning = null } = {}) {
     console.log('[ISWEEP][MUTE] request', { start, end, reason });
-    return applyMuteWindow(start, end, reason);
+    return applyMuteWindow(start, end, reason, learning);
   }
 
   function onCaption(caption = {}) {
     const text = String(caption.text || '').replace(/\s+/g, ' ').trim();
     if (!text) return { matches: [], cleanedText: '' };
     const normalizedCaption = { ...caption, text };
-    console.log('[ISWEEP][CAPTION] received', { source: caption.source || 'unknown' });
-    console.log('[ISWEEP][FILTER] checking caption');
     const filterState = getFilterWords();
     const matches = filterCaption(text, normalizedCaption);
     const cleanedText = renderMaskedCaption(normalizedCaption, matches);
     if (!matches.length) {
-      console.log('[ISWEEP][FILTER] no match', {
-        source: caption.source || 'unknown',
-        selectedWordCount: filterState.words.length,
-        filteringEnabled: filterState.enabled,
-        reason: filterState.words.length ? 'word_not_present' : 'no_selected_words',
-      });
       return { matches, cleanedText };
     }
 
@@ -4312,6 +4476,9 @@
       muteMode: cleanCaptionSettings.cleanCaptionWordMuteMode,
     });
     const eventKey = `${caption.source || 'caption'}|${normalizeCaptionText(text)}|${Number(caption.startTime).toFixed(3)}`;
+    // Caption polling repeats the same DOM text. Deduplicate by source, caption
+    // time, word index, and normalized word so repeated polling cannot schedule
+    // duplicate mute windows or learning events.
     const unseenMatches = matches.filter((match) => {
       const key = `${eventKey}|${match.index}|${normalizeCaptionWord(match.word)}`;
       if (processedCaptionEvents.has(key)) return false;
@@ -4324,19 +4491,30 @@
     }
 
     if (isSelectedWordMuteModeEnabled() && unseenMatches.length) {
-      for (const match of unseenMatches) {
+      for (const rawMatch of unseenMatches) {
+        const match = applyLearnedCorrection(rawMatch);
         if (Number.isFinite(match.startTime) && Number.isFinite(match.endTime)) {
-          const muteResult = requestMute({
-            start: match.startTime,
-            end: match.endTime,
-            reason: `caption:${caption.source || 'unknown'}`,
-          });
+          const muteReason = `caption:${caption.source || 'unknown'}`;
+          const learning = buildLearningEventContext(match, caption, findVideo());
+          const muteResult = match.timingEstimated
+            ? schedulePageSelectedWordMute(match.startTime, match.endTime, muteReason, learning)
+            : requestMute({
+              start: match.startTime,
+              end: match.endTime,
+              reason: muteReason,
+              learning,
+            });
           console.log('[ISWEEP][FILTER] mute result', {
             matchedWord: match.word,
             result: muteResult === true ? 'accepted' : 'skipped',
-            reason: muteResult === true ? 'mute_window_requested' : 'mute_window_rejected',
+            reason: muteResult === true
+              ? (match.timingEstimated ? 'estimated_word_window_scheduled' : 'mute_window_requested')
+              : (match.timingEstimated ? 'estimated_word_window_rejected' : 'mute_window_rejected'),
             startTime: match.startTime,
             endTime: match.endTime,
+            timing: match.timing,
+            learnedCorrectionEventId: match.learnedCorrectionEventId || null,
+            timingEstimated: match.timingEstimated,
           });
         }
       }
@@ -4510,20 +4688,35 @@
     hardRestoreTimeout = setTimeout(() => restoreMuteState('hard_timeout'), delayMs + HARD_RESTORE_GRACE_MS + 50);
   }
 
-  function applyMuteWindow(startSec, endSec, reason = 'selected_word') {
+  function applyMuteWindow(startSec, endSec, reason = 'selected_word', learning = null) {
     const video = findVideo();
-    if (!video || !Number.isFinite(Number(endSec))) return false;
+    if (!video || !Number.isFinite(Number(endSec))) {
+      if (learning) submitLearningEvent({ ...learning, status: 'failed' });
+      return false;
+    }
     const nowSec = Number(video.currentTime || 0);
     const start = Math.max(Number(startSec) || nowSec, 0);
     const end = Math.max(Number(endSec), start);
-    if (end <= nowSec) return false;
-
-    if (muteLockUntilSec <= nowSec && shouldSkipMuteBecauseUserMuted(video.muted, isweepMuteActive)) {
-      lastMuteOwner = 'user';
+    if (end <= nowSec) {
+      if (learning) submitLearningEvent({ ...learning, status: 'canceled' });
       return false;
     }
 
+    if (muteLockUntilSec <= nowSec && shouldSkipMuteBecauseUserMuted(video.muted, isweepMuteActive)) {
+      lastMuteOwner = 'user';
+      if (learning) submitLearningEvent({ ...learning, status: 'skipped' });
+      return false;
+    }
+
+    // Extend the existing lock when windows overlap. Restoring here would let
+    // the first detector unmute audio while a second detector still needs it.
     if (muteLockUntilSec > nowSec) {
+      if (learning) {
+        pendingLearningEvents.push({
+          ...learning,
+          actual_mute_start_seconds: muteWindowStartSec,
+        });
+      }
       if (end <= muteLockUntilSec) return true;
       muteLockUntilSec = end;
       rescheduleMuteRestoreTimers(nowSec);
@@ -4531,12 +4724,21 @@
     }
 
     previousMuteState = Boolean(video.muted);
-    if (!setMutedState(true, `start:${reason}`)) return false;
+    if (!setMutedState(true, `start:${reason}`)) {
+      if (learning) submitLearningEvent({ ...learning, status: 'failed' });
+      return false;
+    }
     isweepMuteActive = true;
     userWasMutedBeforeIsweepMute = previousMuteState;
     lastMuteOwner = 'isweep';
     muteWindowStartSec = start;
     muteLockUntilSec = end;
+    if (learning) {
+      pendingLearningEvents.push({
+        ...learning,
+        actual_mute_start_seconds: nowSec,
+      });
+    }
     startMuteEnforcement();
     rescheduleMuteRestoreTimers(nowSec);
     console.log(WORD_MUTE_LOG_PREFIX, 'mute start', {
@@ -4578,26 +4780,49 @@
     );
   }
 
-  function schedulePageSelectedWordMute(startSec, endSec, reason) {
+  function schedulePageSelectedWordMute(startSec, endSec, reason, learning = null) {
     if (pageSelectedWordMuteTimer) clearTimeout(pageSelectedWordMuteTimer);
+    pageSelectedWordMuteCancel?.();
     pageSelectedWordMuteTimer = null;
 
     const video = findVideo();
     if (!video) return false;
+    const targetStart = Number(startSec);
+    const targetEnd = Number(endSec);
+    if (!Number.isFinite(targetStart) || !Number.isFinite(targetEnd) || targetEnd <= targetStart) return false;
+    const scheduledVideo = video;
+    const scheduledVideoId = getCurrentVideoId();
+    let lastObservedPlaybackTime = Number(video.currentTime || 0);
+    const cancelScheduledLearning = () => {
+      if (learning) submitLearningEvent({ ...learning, status: 'canceled' });
+      if (pageSelectedWordMuteCancel === cancelScheduledLearning) pageSelectedWordMuteCancel = null;
+      return false;
+    };
+    pageSelectedWordMuteCancel = cancelScheduledLearning;
+
+    // Estimated caption windows wait for the media playhead. They are not
+    // allowed to mute immediately merely because the caption appeared early.
+    const attempt = () => {
+      pageSelectedWordMuteTimer = null;
+      pageSelectedWordMuteCancel = null;
+      const currentVideo = findVideo();
+      if (!currentVideo || currentVideo !== scheduledVideo || getCurrentVideoId() !== scheduledVideoId) return cancelScheduledLearning();
+      const nowSec = Number(currentVideo.currentTime || 0);
+      if (!Number.isFinite(nowSec) || nowSec >= targetEnd) return cancelScheduledLearning();
+      if (nowSec < lastObservedPlaybackTime - 0.75) return cancelScheduledLearning();
+      lastObservedPlaybackTime = nowSec;
+      if (currentVideo.paused || nowSec < targetStart) {
+        pageSelectedWordMuteCancel = cancelScheduledLearning;
+        pageSelectedWordMuteTimer = setTimeout(attempt, currentVideo.paused ? 250 : Math.min(250, Math.max((targetStart - nowSec) * 1000, 20)));
+        return true;
+      }
+      return requestMute({ start: nowSec, end: targetEnd, reason, learning });
+    };
+
     const nowSec = Number(video.currentTime || 0);
-    const delayMs = Math.max((Number(startSec) - nowSec) * 1000, 0);
-    if (delayMs > 80 && delayMs <= 1500) {
-      pageSelectedWordMuteTimer = setTimeout(() => {
-        pageSelectedWordMuteTimer = null;
-        requestMute({ start: startSec, end: endSec, reason });
-      }, delayMs);
-      return true;
-    }
-    return requestMute({
-      start: nowSec,
-      end: nowSec + Math.max(Number(endSec) - Number(startSec), 0),
-      reason,
-    });
+    if (nowSec >= targetEnd) return cancelScheduledLearning();
+    pageSelectedWordMuteTimer = setTimeout(attempt, Math.max((targetStart - nowSec) * 1000, 0));
+    return true;
   }
 
   function observePageCaption(text, source = 'page_caption_dom') {
@@ -4607,10 +4832,14 @@
     const nowSec = Number(video?.currentTime || 0);
     const captionChanged = normalizeCaptionText(cleanText) !== normalizeCaptionText(lastPageCaptionText);
     if (captionChanged) {
+      // Replacing a caption invalidates a pending estimate. Otherwise a seek or
+      // rapid caption update could fire a stale word from the previous line.
       lastPageCaptionText = cleanText;
       lastPageCaptionVideoTime = nowSec;
       if (pageSelectedWordMuteTimer) clearTimeout(pageSelectedWordMuteTimer);
+      pageSelectedWordMuteCancel?.();
       pageSelectedWordMuteTimer = null;
+      pageSelectedWordMuteCancel = null;
     }
     return onCaption({
       text: cleanText,
@@ -5051,6 +5280,13 @@
         return false;
       }
 
+      if (message?.type === 'isweep_learning_corrections_changed') {
+        clearLearnedCorrections();
+        warmLearningCorrections(activeVideoId);
+        sendResponse({ ok: true });
+        return false;
+      }
+
       return undefined;
     });
   }
@@ -5088,6 +5324,7 @@
               || Array.isArray(incomingPreferences?.categories?.language?.items)
               || Array.isArray(incomingPreferences?.categories?.language?.words)
               || Array.isArray(incomingPreferences?.categories?.language?.customWords)
+              || incomingPreferences?.learning !== undefined
             );
           if (hasCanonicalOrLegacyWordList || !cachedPreferences) {
             setCachedPreferences(incomingPreferences);
@@ -5095,6 +5332,10 @@
           }
           lastPageSelectedWordMuteSignature = '';
           lastPageSelectedWordMuteAtMs = 0;
+        }
+        if (changes[STORAGE_KEYS.AUTH_TOKEN]) {
+          clearLearnedCorrections();
+          if (changes[STORAGE_KEYS.AUTH_TOKEN].newValue) warmLearningCorrections(activeVideoId);
         }
         if (changes[STORAGE_KEYS.CLEAN_CAPTION_SETTINGS]) {
           applyCleanCaptionSettings(
@@ -5127,6 +5368,7 @@
       markerSourcePriority, buildSelectedWordMuteWindows, deriveWordMatches,
       filterCaption, renderMaskedCaption, onCaption, requestMute,
       estimatePageWordDurationSec, estimatePageSelectedWordMuteDurationSec,
+      schedulePageSelectedWordMute,
       isSelectedWordMuteModeEnabled, scheduleSelectedWordMutesFromAudioPayload,
       extractTimedWordsFromAudioPayload, fuseCaptionWithEvidence,
       evaluateReferenceAlignmentCandidate, resolveCaptionAlignment,
@@ -5135,6 +5377,10 @@
       getCaptionStateSnapshot,
       getNormalizedCaptionPosition,
       getProcessedCaptionEventCount: () => processedCaptionEvents.size,
+      clearLearnedCorrections,
+      applyLearnedCorrection,
+      warmLearningCorrections,
+      getLearnedCorrections: () => Array.from(learnedCorrectionsByWord.entries()),
     };
   }
 

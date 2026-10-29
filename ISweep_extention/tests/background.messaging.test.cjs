@@ -276,6 +276,260 @@ test('site token sync does not replace credentials after backend rejection', asy
   assert.deepEqual(Array.from(stored.isweepPreferences.blocklist.items), ['existing-word']);
 });
 
+test('learning consent preserves selected words and requires backend confirmation', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({
+    isweep_auth_token: 'account-token',
+    isweepPreferences: { blocklist: { enabled: true, items: ['hell'] }, learning: { enabled: false } },
+  });
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async (url, options = {}) => {
+    if (String(url).endsWith('/preferences') && options.method === 'PUT') {
+      const body = JSON.parse(options.body);
+      assert.deepEqual(body.blocklist.items, ['hell']);
+      assert.equal(body.learning.enabled, true);
+      return { ok: true, status: 200, json: async () => body };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ blocklist: { enabled: true, items: ['hell'] }, learning: { enabled: false } }),
+    };
+  };
+
+  const result = await bg.__sendRuntimeMessage({ type: 'isweep_set_learning_consent', enabled: true });
+  const stored = bg.__getLocalStore();
+  assert.equal(result.ok, true);
+  assert.equal(result.enabled, true);
+  assert.deepEqual(Array.from(stored.isweepPreferences.blocklist.items), ['hell']);
+  assert.equal(stored.isweepLearningConsentConfirmed, true);
+});
+
+test('learning events never upload without confirmed opt-in', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({
+    isweep_auth_token: 'account-token',
+    isweepPreferences: { blocklist: { items: ['hell'] }, learning: { enabled: true } },
+    isweepLearningConsentConfirmed: false,
+  });
+  let uploads = 0;
+  bg.fetch = async () => {
+    uploads += 1;
+    return { ok: true, status: 201, json: async () => ({}) };
+  };
+
+  const result = await bg.__sendRuntimeMessage({
+    type: 'isweep_learning_event',
+    event: { video_id: 'video-1', matched_word: 'hell', dedupe_key: 'event-1' },
+  });
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, 'learning_not_confirmed');
+  assert.equal(uploads, 0);
+});
+
+test('confirmed learning event upload is non-sensitive and uses the authenticated token', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({
+    isweep_auth_token: 'account-token',
+    isweepPreferences: { blocklist: { items: ['hell'] }, learning: { enabled: true } },
+    isweepLearningConsentConfirmed: true,
+  });
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async (url, options = {}) => {
+    assert.equal(String(url), 'http://127.0.0.1:5000/learning/mute-events');
+    assert.equal(options.headers.Authorization, 'Bearer account-token');
+    const body = JSON.parse(options.body);
+    assert.equal(body.matched_word, 'hell');
+    assert.equal(Object.prototype.hasOwnProperty.call(body, 'caption_text'), false);
+    return { ok: true, status: 201, json: async () => ({ event: { event_id: 1 }, created: true }) };
+  };
+
+  const result = await bg.__sendRuntimeMessage({
+    type: 'isweep_learning_event',
+    event: {
+      video_id: 'video-1',
+      matched_word: 'hell',
+      caption_source: 'page_caption_dom',
+      timing_method: 'estimated',
+      predicted_start_seconds: 10,
+      predicted_end_seconds: 10.4,
+      status: 'restored',
+      dedupe_key: 'event-1',
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.status, 201);
+  assert.equal(result.created, true);
+  assert.equal(result.event.event_id, 1);
+});
+
+test('learning list returns account-scoped events and distinguishes an API failure', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({ isweep_auth_token: 'account-token' });
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ events: [{ event_id: 7, matched_word: 'hell' }], total: 1, limit: 25, offset: 0 }),
+  });
+  const result = await bg.__sendRuntimeMessage({ type: 'isweep_learning_list' });
+  assert.equal(result.ok, true);
+  assert.equal(result.events[0].event_id, 7);
+
+  bg.fetch = async () => ({ ok: false, status: 403, json: async () => ({ error: 'private server text' }) });
+  const failed = await bg.__sendRuntimeMessage({ type: 'isweep_learning_list' });
+  assert.equal(failed.ok, false);
+  assert.equal(failed.status, 403);
+  assert.equal(failed.error, 'consent_not_confirmed');
+});
+
+test('learning list rejects malformed successful API responses', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({ isweep_auth_token: 'account-token' });
+  bg.fetch = async () => ({ ok: true, status: 200, json: async () => ({ event: {} }) });
+  const result = await bg.__sendRuntimeMessage({ type: 'isweep_learning_list' });
+  assert.equal(result.error, 'invalid_response');
+});
+
+test('missed-word flow can save an event id and then its linked feedback', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({
+    isweep_auth_token: 'account-token',
+    isweepPreferences: { blocklist: { items: ['hell'] }, learning: { enabled: true } },
+    isweepLearningConsentConfirmed: true,
+  });
+  const requests = [];
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), options });
+    if (options.method === 'PUT') {
+      return { ok: true, status: 200, json: async () => ({ feedback: { event_id: 9, result: 'missed' } }) };
+    }
+    return { ok: true, status: 201, json: async () => ({ event: { event_id: 9 }, created: true }) };
+  };
+  const event = await bg.__sendRuntimeMessage({
+    type: 'isweep_learning_event',
+    event: { video_id: 'video-1', matched_word: 'hell', dedupe_key: 'missed-event-1' },
+  });
+  assert.equal(event.event.event_id, 9);
+  const feedback = await bg.__sendRuntimeMessage({
+    type: 'isweep_learning_feedback',
+    eventId: event.event.event_id,
+    feedback: { result: 'missed', corrected_start_seconds: 10, corrected_end_seconds: 10.4 },
+  });
+  assert.equal(feedback.ok, true);
+  const feedbackRequest = requests.find((request) => request.options.method === 'PUT');
+  assert.equal(feedbackRequest.options.body.includes('corrected_start_seconds'), true);
+});
+
+test('correction lookup uses the authenticated account and video-word context', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({ isweep_auth_token: 'account-token' });
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async (url, options = {}) => {
+    assert.equal(String(url), 'http://127.0.0.1:5000/learning/corrections?video_id=video-1&word=hell&limit=25');
+    assert.equal(options.headers.Authorization, 'Bearer account-token');
+    return { ok: true, status: 200, json: async () => ({ corrections: [] }) };
+  };
+  const result = await bg.__sendRuntimeMessage({
+    type: 'isweep_learning_corrections', videoId: 'video-1', word: 'Hell',
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.corrections.length, 0);
+});
+
+test('deleting feedback uses the account-owned event id and invalidates correction caches', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({ isweep_auth_token: 'account-token' });
+  const requests = [];
+  const invalidations = [];
+  bg.chrome.tabs.query = async () => [{ id: 17 }];
+  bg.chrome.tabs.sendMessage = async (tabId, message) => {
+    invalidations.push({ tabId, message });
+    return { ok: true };
+  };
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), options });
+    return { ok: true, status: 200, json: async () => ({ deleted: true }) };
+  };
+
+  const result = await bg.__sendRuntimeMessage({
+    type: 'isweep_learning_feedback', eventId: 42, delete: true,
+  });
+  assert.equal(result.ok, true);
+  const deleteRequest = requests.find((request) => request.options.method === 'DELETE');
+  assert.equal(deleteRequest.url, 'http://127.0.0.1:5000/learning/mute-events/42/feedback');
+  assert.equal(deleteRequest.options.method, 'DELETE');
+  assert.equal(invalidations.length, 1);
+  assert.equal(invalidations[0].tabId, 17);
+  assert.equal(invalidations[0].message.type, 'isweep_learning_corrections_changed');
+});
+
+test('feedback deletion reports a missing correction without deleting the mute event', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({ isweep_auth_token: 'account-token' });
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async () => ({ ok: false, status: 404, json: async () => ({ error: 'Feedback not found' }) });
+  const result = await bg.__sendRuntimeMessage({
+    type: 'isweep_learning_feedback', eventId: 42, delete: true,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 404);
+  assert.equal(result.error, 'learning_api_unavailable');
+});
+
+test('review updates use the authenticated batch endpoint and invalidate correction caches', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({ isweep_auth_token: 'account-token' });
+  const requests = [];
+  const invalidations = [];
+  bg.chrome.tabs.query = async () => [{ id: 23 }];
+  bg.chrome.tabs.sendMessage = async (tabId, message) => {
+    invalidations.push({ tabId, message });
+    return { ok: true };
+  };
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), options });
+    return { ok: true, status: 200, json: async () => ({ count: 2, state: 'excluded' }) };
+  };
+
+  const result = await bg.__sendRuntimeMessage({
+    type: 'isweep_learning_review', eventIds: [11, 12], state: 'excluded', reason: 'not useful',
+  });
+  assert.equal(result.ok, true);
+  const reviewRequest = requests.find((request) => request.options.method === 'PUT');
+  assert.equal(reviewRequest.url, 'http://127.0.0.1:5000/learning/mute-events/review');
+  assert.match(reviewRequest.options.body, /"event_ids"\s*:\s*\[11,12\]/);
+  assert.match(reviewRequest.options.body, /"state"\s*:\s*"excluded"/);
+  assert.equal(invalidations.length, 1);
+  assert.equal(invalidations[0].message.type, 'isweep_learning_corrections_changed');
+});
+
+test('learning upload failure is isolated and expired authentication disables future uploads', async () => {
+  const bg = loadBackgroundContext();
+  await bg.chrome.storage.local.set({
+    isweep_auth_token: 'account-token',
+    isweepUserId: 7,
+    isweepAuth: { email: 'hidden@example.test' },
+    isweepPreferences: { blocklist: { items: ['hell'] }, learning: { enabled: true } },
+    isweepLearningConsentConfirmed: true,
+  });
+  bg.getBackendUrl = async () => 'http://127.0.0.1:5000';
+  bg.fetch = async () => ({ ok: false, status: 401, json: async () => ({}) });
+
+  const result = await bg.__sendRuntimeMessage({
+    type: 'isweep_learning_event',
+    event: { video_id: 'video-1', matched_word: 'hell', dedupe_key: 'event-expired' },
+  });
+  const stored = bg.__getLocalStore();
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, 'unauthorized');
+  assert.equal(stored.isweep_auth_token, undefined);
+  assert.equal(stored.isweepLearningConsentConfirmed, undefined);
+});
+
 test('caption runtime status prefers YouTube fallback when active tab reports live masked captions', async () => {
   const bg = loadBackgroundContext();
   bg.fetch = async () => ({ ok: true, status: 200, json: async () => ({ status: 'ok', stt_enabled: true }) });

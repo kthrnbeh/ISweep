@@ -3,6 +3,8 @@ Flask-CORS==4.0.0
 better-profanity==0.7.0
 python-dotenv==1.0.0
 faster-whisper
+# faster-whisper 1.2.1 calls the PyAV metadata_errors option removed in 19.x.
+av==16.1.0
 soundfile
 numpy
 pydub

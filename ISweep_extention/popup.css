@@ -444,6 +444,115 @@ body {
   color: var(--color-text-primary);
 }
 
+.learning-event-row {
+  border: 1px solid var(--color-border);
+  border-radius: var(--border-radius-small);
+  padding: 10px;
+  margin-top: 8px;
+}
+
+.learning-event-primary {
+  background: var(--color-bg-secondary);
+}
+
+.feedback-choice-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.feedback-choice {
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 6px 9px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.feedback-choice:hover,
+.feedback-choice:focus-visible {
+  border-color: var(--color-primary);
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+.feedback-choice[aria-checked="true"] {
+  background: var(--color-primary);
+  color: #fff;
+  border-color: var(--color-primary);
+  font-weight: 700;
+}
+
+.learning-history {
+  margin-top: 10px;
+}
+
+.learning-history > summary,
+.learning-event-row details > summary {
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  padding: 5px 0;
+}
+
+.learning-event-history-row {
+  background: var(--color-bg-primary);
+}
+
+.learning-feedback-editor {
+  margin-top: 8px;
+}
+
+.learning-review-section {
+  margin-top: 12px;
+}
+
+.learning-review-section h5 {
+  margin: 0 0 6px;
+  color: var(--color-text-primary);
+}
+
+.learning-review-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 6px 0;
+  font-size: 12px;
+  padding: 6px 0;
+  background: var(--color-bg-primary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.learning-review-select {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.learning-history-correction {
+  margin-top: 6px;
+}
+
+.learning-history-edit {
+  margin-top: 4px;
+}
+
+.learning-event-attempt {
+  border-top: 1px solid var(--color-border);
+  padding: 5px 0;
+  font-size: 12px;
+}
+
 /* Links */
 .secondary-links {
   text-align: center;

@@ -17,7 +17,9 @@ const authStateKey = 'auth-state'; // Stores safe account display metadata only.
 const backendUrlKey = 'isweep-backend-url'; // Allows overriding the backend URL for local dev.
 const userIdStorageKey = 'isweep-user-id'; // Stores user id returned by backend.
 const preferencesCacheKey = 'isweep-preferences'; // Caches preferences for offline fallback.
-const TOKEN_KEY = 'isweep_auth_token'; // Unified token key shared with extension bridge.
+// This is the only active account credential key. Legacy keys are handled once
+// during migration and removed after the backend validates the replacement.
+const TOKEN_KEY = 'isweep_auth_token';
 const LEGACY_TOKEN_KEYS = ['isweep-token', 'isweepToken'];
 const AUTH_LOGGED_OUT_KEY = 'isweep-auth-logged-out';
 const AUTH_MIGRATION_KEY = 'isweep-auth-token-migrated-v1';
@@ -290,6 +292,9 @@ async function validateToken(token) {
 }
 
 async function migrateLegacySession() {
+  // A local token is not trusted merely because it exists. The migration is
+  // blocked after an intentional logout and only adopts a legacy token when
+  // the existing session metadata gives us a safe account context to validate.
   if (localStorage.getItem(AUTH_LOGGED_OUT_KEY) === '1') {
     clearSession({ markLoggedOut: true });
     return false;
@@ -1589,6 +1594,9 @@ async function persistPreferences(preferences) {
     );
   }
 
+  // LocalStorage is an offline cache, not proof of a server save. Before an
+  // empty canonical list is sent, fetch the current account preferences so a
+  // stale page cannot erase non-empty selections accidentally.
   const outgoingItems = preferences?.blocklist?.items;
   if (Array.isArray(outgoingItems) && outgoingItems.length === 0) {
     const currentResponse = await fetch(
@@ -1652,6 +1660,27 @@ async function persistPreferences(preferences) {
 
   const prefs =
     await res.json();
+
+  // Read the response back from Flask and compare the canonical list. This is
+  // why the UI can distinguish "saved locally" from a confirmed account save.
+  const expectedItems = Array.isArray(preferences?.blocklist?.items)
+    ? preferences.blocklist.items
+        .map((item) => String(item).trim().toLowerCase())
+        .filter(Boolean)
+    : [];
+  const returnedItems = Array.isArray(prefs?.blocklist?.items)
+    ? prefs.blocklist.items
+        .map((item) => String(item).trim().toLowerCase())
+        .filter(Boolean)
+    : null;
+  if (!returnedItems) {
+    throw new Error('Backend response did not include canonical blocklist.items');
+  }
+  const expectedSet = new Set(expectedItems);
+  const returnedSet = new Set(returnedItems);
+  if (expectedSet.size !== returnedSet.size || [...expectedSet].some((item) => !returnedSet.has(item))) {
+    throw new Error('Backend returned a different selected-word list');
+  }
 
   console.log(
     '[ISWEEP][FE] /preferences success',
